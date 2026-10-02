@@ -33,6 +33,7 @@ import { extract as extractWith, openaiEnabled, tokenCost, transcribe, minuteCos
 import { pdfText } from '../sources/menuRead.js';
 import { bankHolidays } from '../sources/bankHolidays.js';
 import * as stripe from '../sources/stripe.js';
+import { cancelSessions, changeDate, CANCEL_REASONS } from '../sources/bookingMoney.js';
 import { linkUrl, mediaRef, ownHost, sendInvites } from './hosting.js';
 import {
   LANES, SEQ, SHAPE_OF, PROMPTS, VENUE_KINDS, PRICE_MODES, REFUND_POLICIES, DIET_TICKS, hostingConfig, holidaySet, sessionsFor, decidesOn,
@@ -179,6 +180,7 @@ async function lanePayload(offer, host, account, { holidays } = {}) {
     dropInGroupPct: offer.drop_in_group_pct, dropInGroupMin: offer.drop_in_group_min, bookAheadGroupPct: offer.book_ahead_group_pct, bookAheadGroupMin: offer.book_ahead_group_min,
     decidesOn: ymd(offer.decides_on), decidesOnDefault: decidesOn({ ...offer, decides_on: null }, hol, cfg),
     refundPolicy: offer.refund_policy, refundWords: offer.refund_policy ? refundWords(offer.refund_policy, cfg) : null,
+    waitlistOn: offer.waitlist_on === true, addressHidden: offer.address_hidden !== false, chosenDates: offer.chosen_dates ?? [],
     ageMin: offer.age_min, ageMax: offer.age_max, asksParents: asksParentsOnWho(offer, cfg), needsChecked: needsChecked(offer, cfg),
     privatePlan: offer.private_plan ?? (pro ? 'pro' : 'event'), privateFeeState: offer.private_fee_state,
     video: {
@@ -189,7 +191,11 @@ async function lanePayload(offer, host, account, { holidays } = {}) {
     },
     invites: invites.map((i) => ({ id: i.id, name: i.name, contact: i.contact, contactKind: i.contact_kind, heads: i.heads, rsvp: i.rsvp, rsvpHeads: i.rsvp_heads ?? null, sentAt: i.sent_at })),
     inviteUrl: linkUrl(offer.link_token), pageUrl: pubUrl(offer.id),
-    sessionRows: sessions.map((s) => ({ id: s.id, n: s.n, onDate: ymd(s.on_date), startsAt: s.starts_at?.slice(0, 5) ?? null, topic: s.topic, state: s.state })),
+    sessionRows: sessions.map((s) => ({
+      id: s.id, n: s.n, onDate: ymd(s.on_date), startsAt: s.starts_at?.slice(0, 5) ?? null, endsAt: s.ends_at?.slice(0, 5) ?? null, topic: s.topic, state: s.state,
+      booked: s.booked_heads ?? 0, decidesAt: s.decides_at ?? null, decided: s.decided_outcome ?? null,
+      changedFrom: s.changed_from ? { date: s.changed_from.onDate ?? null, time: s.changed_from.startsAt ?? null } : null, late: Boolean(s.late),
+    })),
     checklist: items.map((i) => ({ ...i, ...ITEM_WORDS[i.key](sheet) })),
     blockers: sendBlockers(items),
     action: publishAction(offer, items, { isPro: pro }, cfg),
@@ -392,6 +398,11 @@ export function laneBody(b, current) {
   set('dropInGroupPct', whole(b.dropInGroupPct, { min: 1, max: 90 })); set('dropInGroupMin', whole(b.dropInGroupMin, { min: 2, max: 100_000 }));
   set('bookAheadGroupPct', whole(b.bookAheadGroupPct, { min: 1, max: 90 })); set('bookAheadGroupMin', whole(b.bookAheadGroupMin, { min: 2, max: 100_000 }));
   set('decidesOn', date(b.decidesOn)); set('refundPolicy', oneOf(REFUND_POLICIES, b.refundPolicy));
+  // Hosting v4: the waiting list (default off), the address kept back until booked (default on).
+  if (b.waitlistOn !== undefined) p.waitlistOn = b.waitlistOn === true;
+  if (b.addressHidden !== undefined) p.addressHidden = b.addressHidden !== false;
+  // Choose dates: blocks of picked dates, each block its own list; kept as the host left them.
+  if (b.chosenDates !== undefined) p.chosenDates = list(b.chosenDates, 12).map((blk) => [...new Set(list(blk?.dates, 62).map(date).filter(Boolean))].sort()).filter((d) => d.length).map((dates) => ({ dates }));
   set('money', oneOf(['epic', 'direct'], b.money));
   set('visibility', oneOf(['invite', 'public'], b.visibility));
   if (p.visibility) p.whoChosen = true;
@@ -1077,6 +1088,54 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
   } catch (err) {
     res.status(500).json({ error: 'not_recorded' });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Hosting v4: once it is out — change a date, cancel (handover §5)
+// ---------------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** An event that is out: a draft changes its dates in the set-up, not here. */
+async function myOutOffer(id) {
+  const ctx = await myLaneOffer(id);
+  if (ctx.offer.state === 'draft') throw refuse(409, 'still_a_draft', 'Finish setting it up first; a draft’s dates change in the set-up.');
+  return ctx;
+}
+
+/**
+ * POST /host/lanes/offers/:id/change-date {sessionId, toDate, toTime?, scope, preview?}
+ * `preview` answers what would move — old → new, guests booked, whether it is
+ * late — and writes nothing; the sheet shows it before the host confirms.
+ */
+router.post('/host/lanes/offers/:id/change-date', async (req, res, next) => {
+  try {
+    const { offer, host, account } = await myOutOffer(req.params.id);
+    const b = req.body ?? {};
+    if (!UUID_RE.test(String(b.sessionId ?? ''))) throw refuse(400, 'bad_session', 'Pick a session.');
+    const out = await changeDate({
+      offerId: offer.id, hostId: host.id, sessionId: b.sessionId, toDate: b.toDate, toTime: b.toTime ?? null,
+      scope: b.scope ?? 'this', by: account?.id ?? null, dryRun: b.preview === true,
+    });
+    res.json({ ...out, preview: b.preview === true });
+  } catch (err) { next(err); }
+});
+
+/** POST /host/lanes/offers/:id/cancel {sessionIds?, reason, note?} — no sessionIds: the whole event. */
+router.post('/host/lanes/offers/:id/cancel', async (req, res, next) => {
+  try {
+    const { offer, host, account } = await myOutOffer(req.params.id);
+    const b = req.body ?? {};
+    let ids = null;
+    if (b.sessionIds != null) {
+      if (!Array.isArray(b.sessionIds) || !b.sessionIds.length || b.sessionIds.length > 200 || !b.sessionIds.every((x) => UUID_RE.test(String(x)))) throw refuse(400, 'bad_session', 'Pick the sessions to cancel.');
+      ids = [...new Set(b.sessionIds)];
+    }
+    if (!CANCEL_REASONS.includes(b.reason)) throw refuse(400, 'reason_required', 'Choose why first.');
+    if (b.reason === 'other' && !str(b.note, 300)) throw refuse(400, 'reason_required', 'Say what happened.');
+    const out = await cancelSessions({ offerId: offer.id, hostId: host.id, sessionIds: ids, reason: b.reason, note: str(b.note, 300), by: account?.id ?? null });
+    res.json(out);
+  } catch (err) { next(err); }
 });
 
 export default router;

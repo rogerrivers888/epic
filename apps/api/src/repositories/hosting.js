@@ -268,13 +268,15 @@ const OFFER_COLUMNS = {
   privatePlan: 'private_plan', privateFeeState: 'private_fee_state', privateFeeRef: 'private_fee_ref',
   videoMadeBy: 'video_made_by', videoCoverS: 'video_cover_s', videoOnProfile: 'video_on_profile', helloVideoId: 'hello_video_id',
   draftStep: 'draft_step', draftSource: 'draft_source', whoChosen: 'who_chosen',
+  // Hosting v4 (migration 366).
+  waitlistOn: 'waitlist_on', addressHidden: 'address_hidden',
 };
 const OFFER_JSON = {
   photoIds: 'photo_ids', runningOrder: 'running_order', featuredPeople: 'featured_people', skippedDates: 'skipped_dates', weeks: 'weeks',
   availability: 'availability', reviewChecklist: 'review_checklist',
   facts: 'facts', seeded: 'seeded', subDetail: 'sub_detail', checks: 'checks',
   weekdays: 'weekdays', guestQuestions: 'guest_questions', freeHours: 'free_hours', sessionLengths: 'session_lengths',
-  videoPhotoIds: 'video_photo_ids', reviewAi: 'review_ai',
+  videoPhotoIds: 'video_photo_ids', reviewAi: 'review_ai', chosenDates: 'chosen_dates',
 };
 
 export async function updateOffer(id, patch, client) {
@@ -875,7 +877,13 @@ export async function setCohosts(offerId, list, client) {
 }
 
 export async function sessionsOf(offerId) {
-  const { rows } = await query('select * from offer_sessions where offer_id = $1 order by on_date, starts_at nulls first, n nulls last', [offerId]);
+  const { rows } = await query(
+    `select s.*,
+            coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+                       where bs.session_id = s.id and bs.state = 'booked' and b.state in ('pending', 'confirmed')), 0)::int as booked_heads
+       from offer_sessions s where s.offer_id = $1 order by s.on_date, s.starts_at nulls first, s.n nulls last`,
+    [offerId],
+  );
   return rows;
 }
 
@@ -885,8 +893,13 @@ export async function sessionsOf(offerId) {
  */
 export async function replaceSessions(offerId, sessions, client) {
   const run = on(client);
-  const { rows: [held] } = await run('select count(*)::int as n from experience_bookings where session_id in (select id from offer_sessions where offer_id = $1)', [offerId]);
-  if (held.n > 0) return { replaced: false };
+  // Held through either door: the v7 session column, or a v4 booking's sessions (migration 366).
+  const { rows: [held] } = await run(
+    `select (select count(*) from experience_bookings where session_id in (select id from offer_sessions where offer_id = $1))
+          + (select count(*) from booking_sessions where session_id in (select id from offer_sessions where offer_id = $1)) as n`,
+    [offerId],
+  );
+  if (Number(held.n) > 0) return { replaced: false };
   await run('delete from offer_sessions where offer_id = $1', [offerId]);
   for (const s of sessions) {
     await run(

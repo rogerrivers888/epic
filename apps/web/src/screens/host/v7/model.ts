@@ -162,12 +162,17 @@ export type LaneOffer = {
   minCount: number | null; maxCount: number | null;
   dropInPence: number | null; bookAheadPence: number | null; dropInGroupPct: number | null; dropInGroupMin: number | null; bookAheadGroupPct: number | null; bookAheadGroupMin: number | null;
   decidesOn: string | null; decidesOnDefault: string | null; refundPolicy: 'flexible' | 'moderate' | 'strict' | null; refundWords: string | null;
+  // Hosting v4: the waiting list (default off), the address kept back until booked, Choose dates' blocks.
+  waitlistOn: boolean; addressHidden: boolean; chosenDates: { dates: string[] }[];
   ageMin: number | null; ageMax: number | null; asksParents: boolean; needsChecked: boolean;
   privatePlan: 'event' | 'pro'; privateFeeState: 'unpaid' | 'pending' | 'paid' | 'included' | 'not_needed';
   video: { id: string | null; url: string | null; madeBy: 'self' | 'epic' | null; coverS: number | null; onProfile: boolean; photoIds: string[]; helloId: string | null; seconds: number | null; helloSeconds: number | null };
   invites: { id: string; name: string; contact: string | null; contactKind: string | null; heads: number; rsvp: string | null; rsvpHeads?: number | null; sentAt: string | null }[];
   inviteUrl: string; pageUrl: string;
-  sessionRows: { id: string; n: number | null; onDate: string; startsAt: string | null; topic: string | null; state: string }[];
+  sessionRows: {
+    id: string; n: number | null; onDate: string; startsAt: string | null; endsAt?: string | null; topic: string | null; state: string;
+    booked?: number; decidesAt?: string | null; decided?: 'on' | 'called_off' | null; changedFrom?: { date: string | null; time: string | null } | null; late?: boolean;
+  }[];
   checklist: CheckItem[]; blockers: string[]; action: { key: 'verify' | 'review' | 'send' | 'pro' | 'pay'; label: string };
   charges: { kind: 'private' | 'public_free' | 'public_paid'; sharePct: number; words: string; eventPence?: number; proMonthlyPence?: number; isPro?: boolean };
   paid: boolean; throughEpic: boolean;

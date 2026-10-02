@@ -5543,6 +5543,8 @@ export type Availability = { days?: number[]; parts?: ('morning' | 'afternoon' |
 export type Experience = {
   /** Hosting v7: the lane a set-up was made in, and the step it was left on. Null for the old shapes. */
   lane?: 'oneoff' | 'weekly' | 'course' | 'onrequest' | null; draftStep?: string | null;
+  // Hosting v4: "Going ahead?" on an event with a minimum, and the waiting list when the host turned it on.
+  goingAhead?: { min: number; booked: number; decidesOn: string | null; calledOff: boolean } | null; waitlistOn?: boolean | null;
   bookAheadPence?: number | null; childPence?: number | null; refundWords?: string | null; ageMin?: number | null; ageMax?: number | null; multiDay?: boolean; endsOn?: string | null; onlineMode?: 'epic' | 'own' | null; onlineLink?: string | null;
   id: string; hostId: string; shape: OfferShape; state: OfferState; pausedUntil: string | null; visibility: Visibility; money: Money;
   title: string | null; summary: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;

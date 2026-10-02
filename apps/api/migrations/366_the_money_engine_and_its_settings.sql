@@ -160,7 +160,13 @@ alter table hosting_payments
   add column if not exists cause               text,      -- a refund's: 'guest_cancelled' | 'host_cancelled' | 'called_off' | 'date_changed' | 'numbers_settled' | 'declined' | 'lapsed' | 'complaint'
   add column if not exists session_id          uuid references offer_sessions(id) on delete set null,
   add column if not exists payout_id           uuid,
-  add column if not exists stripe_match        text not null default 'pending';
+  add column if not exists stripe_match        text not null default 'pending',
+  -- A refund or release is written here, pending, in the same transaction as
+  -- the cancel or call-off that owes it; a job then asks Stripe with this as
+  -- the idempotency key, so a retry is the same refund and never a second one.
+  add column if not exists idem_key            text;
+create unique index if not exists hosting_payments_idem_idx on hosting_payments (idem_key) where idem_key is not null;
+create index if not exists hosting_payments_pending_idx on hosting_payments (created_at) where state = 'pending' and kind in ('refund', 'release');
 alter table hosting_payments drop constraint if exists hosting_payments_stripe_match_check;
 alter table hosting_payments add constraint hosting_payments_stripe_match_check
   check (stripe_match in ('pending', 'matched', 'mismatch', 'not_checked'));

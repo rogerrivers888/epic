@@ -48,7 +48,7 @@ import * as skills from '../repositories/hostSkills.js';
 import { FACET_CAP, TAG_CAP, categoryForPassion, categoryFrom, credentialDisplay } from '../domain/hostSkills.js';
 import { pdfText } from '../sources/menuRead.js';
 import { extract as extractWith, openaiEnabled, transcribe } from '../sources/openai.js';
-import { refundWords, hostingConfig } from '../domain/lanes.js';
+import { refundWords, hostingConfig, decidesOn as laneDecidesOn } from '../domain/lanes.js';
 
 export const router = Router();
 export const publicRouter = Router();
@@ -140,6 +140,12 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
     bookAheadPence: o.book_ahead_pence ?? null, childPence: o.child_pence ?? null,
     // The lane's own refund terms, in the configured words (Codex, 2 Oct 2026).
     refundWords: o.lane && o.refund_policy ? refundWords(o.refund_policy, hostingConfig()) : null,
+    // Hosting v4: "Going ahead?" — Min · Booked so far · Decides, with the refund policy under it;
+    // the waiting list when the host switched it on (default off).
+    goingAhead: o.lane && o.min_count && o.lane !== 'weekly' && o.lane !== 'onrequest'
+      ? { min: o.min_count, booked: st.heads, decidesOn: ymd(o.decides_on) ?? laneDecidesOn(o, new Map(), hostingConfig()), calledOff: Boolean(o.called_off_at) }
+      : null,
+    waitlistOn: o.lane ? o.waitlist_on === true : null,
     title: o.title, summary: o.summary, description: o.description, whyYou: o.why_you, includes: o.includes, category: o.category,
     // The five fields. `tags` and `facets` are in the host's own order — the
     // first tag is what shows on the card — and a pending one is live on the
@@ -149,7 +155,7 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
     photos: (o.photo_ids ?? []).map(mediaRef), video: mediaRef(o.video_id), doc: mediaRef(o.doc_id),
     facts: o.facts ?? [], endsAt: o.ends_at?.slice(0, 5) ?? null, repeatEvery: o.repeat_every ?? 'weekly', endDate: ymd(o.end_date), themesDiffer: o.themes_differ !== false,
     noticeDays: o.notice_days, subDetail: o.sub_detail ?? {},
-    venue: o.venue, venueArea: o.venue_area, venueLabel: revealed || o.venue === 'out_about' ? o.venue_label : null,
+    venue: o.venue, venueArea: o.venue_area, venueLabel: revealed || o.venue === 'out_about' || (o.lane && o.address_hidden === false) ? o.venue_label : null,
     venueLat: revealed || o.venue === 'out_about' ? o.venue_lat : null, venueLng: revealed || o.venue === 'out_about' ? o.venue_lng : null,
     venueCountry: o.venue_country, venueNotes: o.venue_notes, travelRadiusMin: o.travel_radius_min, travelChargePence: o.travel_charge_pence, onlinePlatform: o.online_platform,
     durationMin: o.duration_min, minCount: o.min_count, expectedCount: o.expected_count, maxCount: o.max_count, partyMax: o.party_max, ageLimit: o.age_limit,

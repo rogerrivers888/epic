@@ -15,7 +15,7 @@ export function blankOffer(lane: HostLane): LaneOffer {
     outcome: null, topics: [], parents: null, whyYou: null, freeHours: {}, sessionLengths: [], noticeHours: 48, perWeekMax: 3,
     priceMode: null, pricePence: null, childPence: null, totalPence: null, per: 'person', minCount: null, maxCount: null,
     dropInPence: null, bookAheadPence: null, dropInGroupPct: null, dropInGroupMin: null, bookAheadGroupPct: null, bookAheadGroupMin: null,
-    decidesOn: null, decidesOnDefault: null, refundPolicy: null, refundWords: null, ageMin: 18, ageMax: null, asksParents: false, needsChecked: false,
+    decidesOn: null, decidesOnDefault: null, refundPolicy: null, refundWords: null, waitlistOn: false, addressHidden: true, chosenDates: [], ageMin: 18, ageMax: null, asksParents: false, needsChecked: false,
     privatePlan: 'event', privateFeeState: 'unpaid',
     video: { id: null, url: null, madeBy: null, coverS: null, onProfile: true, photoIds: [], helloId: null, seconds: null, helloSeconds: null },
     invites: [], inviteUrl: '', pageUrl: '', sessionRows: [], checklist: [], blockers: [], action: { key: 'send', label: '' },

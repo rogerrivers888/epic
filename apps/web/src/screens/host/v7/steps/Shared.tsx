@@ -208,6 +208,12 @@ export function RefundPolicy({ offer, update, config }: Pick<StepProps, 'offer' 
   );
 }
 
+/** The waiting list: off unless the host turns it on (hosting v4, E8). Only once there is a most. */
+export function WaitingList({ offer, update }: Pick<StepProps, 'offer' | 'update'>) {
+  if (!offer.maxCount) return null;
+  return <ToggleRow title="Waiting list" sub="When it’s full, people can queue for a place" on={offer.waitlistOn} onFlip={() => update({ waitlistOn: !offer.waitlistOn })} />;
+}
+
 /** Who collects it, on a private paid event (SH-P4): Epic, or the host directly. Public and paid is always Epic. */
 function WhoCollects({ offer, update }: Pick<StepProps, 'offer' | 'update'>) {
   if (offer.visibility === 'public') return null;
@@ -283,6 +289,7 @@ export function PriceStep(props: StepProps) {
         <DecidesBy {...props} />
         {paidExtras}
       </Option>
+      <WaitingList {...props} />
     </>
   );
 }

@@ -13,7 +13,7 @@ import { Icon } from '../../../../components/Icon';
 import { CREAM, DEEP_GREEN, HAIRLINE, INACTIVE, INK, INK_MUTED, LIME, LIME_TINT } from '../../../../theme';
 import { AddLink, Count, DateBox, Field, Kicker, Labelled, LengthBox, MinMax, MonthGrid, Option, TimeBox, ToggleRow, Switch, pointer, tx, hx, v } from '../kit';
 import { DAY_LONG, DAY_PLURAL, WEEKDAY_LETTERS, courseRun, dateShort, dayWords, dowOf, gbp, lengthWords, monFirstToDow, dowToMonFirst, pence, poundsText, todayIso, weeklyRun } from '../model';
-import { RefundPolicy } from './Shared';
+import { RefundPolicy, WaitingList } from './Shared';
 import type { StepProps } from '../Setup';
 
 const noOutline = { outlineStyle: 'none' } as object;
@@ -148,6 +148,7 @@ export function WeeklyPriceStep(props: StepProps) {
       </View>
       {offer.minCount ? <Text style={tx(12.5, '400', DEEP_GREEN)}>Each session decides a day before · under {offer.minCount} and that session is called off</Text> : null}
       {offer.dropInPence || offer.bookAheadPence ? <RefundPolicy {...props} /> : null}
+      <WaitingList {...props} />
     </>
   );
 }

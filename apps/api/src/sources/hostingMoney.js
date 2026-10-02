@@ -20,6 +20,7 @@ import * as settings from '../repositories/hostingSettings.js';
 import * as notifications from '../repositories/notifications.js';
 import * as stripe from './stripe.js';
 import { payoutDecision } from '../domain/money.js';
+import { decideDue, warnUnderMinimum, processRefunds } from './bookingMoney.js';
 
 const HELD_WORDS = {
   complaint: 'A guest raised a problem with this session. The payout waits until it is sorted.',
@@ -127,8 +128,14 @@ export async function reconcile({ days = 3, read = stripe.retrieveRef, status = 
   return saved;
 }
 
-/** One tick of the hosting money loop: payouts every time, the reconciliation once a day. */
+/**
+ * One tick of the hosting money loop: decides-by, refunds owed, payouts every
+ * time; the reconciliation once a day; then queued e-mail.
+ */
 export async function moneyTick({ now = new Date() } = {}) {
+  await warnUnderMinimum({ now });
+  await decideDue({ now });
+  await processRefunds();
   await schedulePayouts({ now });
   const released = await releasePayouts({ now });
   const last = await ledger.lastReconciliation().catch(() => null);

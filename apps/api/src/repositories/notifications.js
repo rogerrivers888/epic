@@ -41,6 +41,7 @@ export const KINDS = Object.freeze({
   payout_held: { audience: 'host', email: true },
   new_review: { audience: 'host', email: false },
   new_tip: { audience: 'host', email: false },
+  event_called_off: { audience: 'host', email: true },
 });
 
 /**

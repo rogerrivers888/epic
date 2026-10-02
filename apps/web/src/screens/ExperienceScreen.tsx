@@ -243,12 +243,14 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
             {offer.priceMode === 'by_numbers' ? <Text style={type.small}>Depends on numbers: never more than {money(offer.price.ceilingPence)} each.</Text> : null}
             {needsLine(offer) ? <Text style={[type.small, { color: colors.ink, fontWeight: '600' }]}>{needsLine(offer)}</Text> : null}
             <Text style={type.small}>
-              {offer.money === 'direct' ? `Paid to ${host.name.split(' ')[0]} directly, however you normally would. ` : (offer.lane && (offer.priceMode === 'free' || !offer.refundWords) ? '' : `${offer.refundWords ?? REFUND_WORDS[offer.refundRule]}.`)}{offer.minCount ? ` Under ${offer.minCount} and it is called off — everybody is told and nothing is taken.` : ''}
+              {offer.money === 'direct' ? `Paid to ${host.name.split(' ')[0]} directly, however you normally would. ` : (offer.lane && (offer.priceMode === 'free' || !offer.refundWords) ? '' : `${offer.refundWords ?? REFUND_WORDS[offer.refundRule]}.`)}{offer.minCount && !offer.goingAhead ? ` Under ${offer.minCount} and it is called off — everybody is told and nothing is taken.` : ''}
             </Text>
             {offer.lane && (offer.ageMin != null || offer.ageMax != null)
               ? <Text style={type.small}>{offer.ageMin != null && offer.ageMin >= 18 && offer.ageMax == null ? 'Adults only (18+).' : offer.ageMin != null && offer.ageMax != null ? `Ages ${offer.ageMin} to ${offer.ageMax}.` : offer.ageMin != null ? `Ages ${offer.ageMin} and up.` : `Up to age ${offer.ageMax}.`}</Text>
               : offer.ageLimit ? <Text style={type.small}>Over {offer.ageLimit}s only. We ask for the age of everyone in the party when you book.</Text> : null}
           </View>
+
+          {offer.goingAhead ? <GoingAhead g={offer.goingAhead} refundWords={offer.priceMode === 'free' ? null : offer.refundWords ?? null} /> : null}
 
           {booked.length ? (
             <Press onPress={() => navigate(paths.booking(booked[0].id))} accessibilityRole="button" style={styles.mineRow}>
@@ -300,6 +302,34 @@ async function share(o: Experience) {
 // ---------------------------------------------------------------------------
 // the middle, by shape
 // ---------------------------------------------------------------------------
+
+const shortDay = (ymd: string) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+/** "Going ahead?" (hosting v4): Min · Booked so far · Decides, with the refund policy folded under it. */
+function GoingAhead({ g, refundWords }: { g: NonNullable<Experience['goingAhead']>; refundWords: string | null }) {
+  const [open, setOpen] = useState(false);
+  const cells: [string, string][] = [['Min', String(g.min)], ['Booked so far', String(g.booked)], ['Decides', g.decidesOn ? shortDay(g.decidesOn) : '—']];
+  return (
+    <View style={styles.goingAhead}>
+      <Text style={[type.small, { fontWeight: '800', color: colors.ink }]}>{g.calledOff ? 'Called off' : g.booked >= g.min ? 'Going ahead' : 'Going ahead?'}</Text>
+      <View style={{ flexDirection: 'row', gap: 2 }}>
+        {cells.map(([k, v], i) => (
+          <View key={k} style={[styles.goingCell, { flex: i === 2 ? 1.5 : 1 }]}>
+            <Text style={styles.goingKicker}>{k}</Text>
+            <Text style={[type.title, { fontSize: 20 }]} numberOfLines={1}>{v}</Text>
+          </View>
+        ))}
+      </View>
+      {refundWords ? (
+        <Press onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: TARGET }}>
+          <Text style={[type.small, { flex: 1, color: colors.ink, fontWeight: '600' }]}>If you cancel</Text>
+          <Icon name={open ? 'collapse' : 'expand'} size={16} color={colors.ink} />
+        </Press>
+      ) : null}
+      {open && refundWords ? <Text style={type.small}>{refundWords}. If it’s called off, everybody gets a full refund.</Text> : null}
+    </View>
+  );
+}
 
 function OneOffBody({ offer }: { offer: Experience }) {
   return (
@@ -801,6 +831,9 @@ const styles = StyleSheet.create({
   dayBox: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface },
   dayBoxOn: { backgroundColor: colors.selected },
   timeBox: { minWidth: 72, height: 40, alignItems: 'center', justifyContent: 'center', borderWidth: BORDER, borderColor: colors.line, backgroundColor: colors.surface, paddingHorizontal: 10 },
+  goingAhead: { gap: 8, paddingVertical: spacing.sm },
+  goingCell: { backgroundColor: colors.warm, paddingVertical: 10, paddingHorizontal: 12, gap: 2 },
+  goingKicker: { fontSize: 11, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', color: colors.inkMuted },
   priceBlock: { marginTop: spacing.lg, gap: 6, borderTopWidth: BORDER, borderTopColor: colors.line, paddingTop: spacing.md },
   mineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md, padding: spacing.md, backgroundColor: colors.surfaceMuted },
   link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.accent },
