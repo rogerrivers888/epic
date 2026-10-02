@@ -166,6 +166,15 @@ const noteOutcome = (ref, outcome, source = null) =>
   query('insert into name_checks (venue_ref, outcome, source) values ($1, $2, $3)', [ref, outcome, source])
     .catch((err) => console.error(`epic-api: name-check — could not count ${outcome} for ${ref}: ${String(err?.message ?? err).slice(0, 120)}`));
 
+/** A set-aside place matched again: the suspicion says what it went to, and the week counts it. */
+async function afterRematch(suspect, m) {
+  await query(
+    `update owned_point_suspects set rematched_source = $4, rematched_ref = $5
+      where venue_ref = $1 and source = $2 and source_ref = $3`,
+    [suspect.venue_ref, suspect.source, suspect.source_ref, m.source, m.sourceRef]);
+  await noteOutcome(suspect.venue_ref, 'rematched', m.source);
+}
+
 let draining = false;
 
 /**
@@ -200,8 +209,15 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
       try {
         const row = owned.get(x.ref);
         if (!row) {
-          const m = await matchOnLiveName(x.ref, x.name, x);
-          if (m.matched) { out.firstSight += 1; await noteOutcome(x.ref, 'first-sight', m.source); }
+          // A place whose match was set aside and still waits for its re-match
+          // — the re-match failed, or found nothing then — is a re-match, not
+          // a first sight (Codex, 2 Oct 2026).
+          const { rows: [awaiting] } = await query(
+            `select venue_ref, source, source_ref from owned_point_suspects
+              where venue_ref = $1 and rematched_source is null order by created_at desc limit 1`, [x.ref]);
+          const m = await matchOnLiveName(x.ref, x.name, x, awaiting ? 'rematch' : 'first sight');
+          if (m.matched && awaiting) { out.rematched += 1; await afterRematch(awaiting, m); }
+          else if (m.matched) { out.firstSight += 1; await noteOutcome(x.ref, 'first-sight', m.source); }
           continue;
         }
         if (!NAMED_SOURCES.includes(row.source)) { out.cantSpeak += 1; continue; }
@@ -220,14 +236,7 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
           if (!a.setAside) { out.cantSpeak += 1; continue; }
           out.doubted += 1;
           const m = await matchOnLiveName(x.ref, x.name, x, 'rematch');
-          if (m.matched) {
-            out.rematched += 1;
-            await noteOutcome(x.ref, 'rematched', m.source);
-            await query(
-              `update owned_point_suspects set rematched_source = $4, rematched_ref = $5
-                where venue_ref = $1 and source = $2 and source_ref = $3`,
-              [row.venue_ref, row.source, row.source_ref, m.source, m.sourceRef]);
-          }
+          if (m.matched) { out.rematched += 1; await afterRematch(row, m); }
         } else {
           out.cantSpeak += 1;
         }

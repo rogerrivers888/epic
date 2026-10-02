@@ -111,6 +111,27 @@ test('a stored copy whose own source the trigger derives still loses the doubted
   assert.deepEqual(r, { lat: null, lng: null, point_from: null });
 });
 
+test('a set-aside still waiting for its re-match is counted as a re-match when it comes, not a first sight', async () => {
+  nc.forgetChecks(); live.clearLiveNames();
+  const ref = `google:${randomUUID()}`;
+  const P = { lat: LAT - 0.009, lng: LNG + 0.004 };
+  const oldId = await fsaPlace('The Shieling Tearoom', P.lat, P.lng);
+  await recordOwnedPoint({ ref, ...P, source: 'fsa', sourceRef: oldId, method: 'name+distance' });
+  // Doubted, and nothing yet that the live name is.
+  live.noteLiveName(ref, 'Marram Surf Hire', P);
+  let out = await nc.drain();
+  assert.deepEqual([out.doubted, out.rematched], [1, 0]);
+  // Later the open register has it, and the place goes past again.
+  const newId = await fsaPlace('Marram Surf Hire', P.lat + 0.0002, P.lng);
+  nc.forgetChecks();
+  live.noteLiveName(ref, 'Marram Surf Hire', P);
+  out = await nc.drain();
+  assert.deepEqual([out.rematched, out.firstSight], [1, 0]);
+  const { rows: [s] } = await query('select rematched_source, rematched_ref from owned_point_suspects where venue_ref = $1', [ref]);
+  assert.deepEqual(s, { rematched_source: 'fsa', rematched_ref: newId });
+  assert.match((await query('select method from owned_points where venue_ref = $1', [ref])).rows[0].method, /^rematch:/);
+});
+
 test('a doubted place is re-matched on its live name, in memory', async () => {
   nc.forgetChecks(); live.clearLiveNames();
   const ref = `google:${randomUUID()}`;
