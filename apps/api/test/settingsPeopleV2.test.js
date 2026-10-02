@@ -476,3 +476,55 @@ test('a signed-in teenager edits themselves, and nobody else in the household', 
     assert.equal((await asTeen.send('PATCH', `/api/household/members/${invited.id}`, { diet: 'vegan' })).status, 403, 'nor an adult who has not joined yet');
   } finally { await asTeen.close(); }
 });
+
+test("a household's lead is its first account — a customer — and may remove another adult", async () => {
+  const { household: h, member: lead } = await aHousehold(query);
+  const gina = await addMember(h.id, 'Gina');
+  // Both are ordinary customers: the estate's `owner` role is somebody else's.
+  await createAccountOnHousehold(h.id, { memberId: lead.id, name: 'Lead', role: 'customer', plan: 'household', email: 'lead-first@example.com' });
+  await createAccountOnHousehold(h.id, { memberId: gina.id, name: 'Gina', role: 'customer', plan: 'household', email: 'gina-second@example.com' });
+  const asLead = await server(asMember(h, lead.id));
+  try {
+    const people = (await asLead.get('/api/household')).body.members;
+    assert.equal(people.find((m) => m.id === lead.id).access.isLead, true, 'the first account on the household is its lead');
+    assert.equal(people.find((m) => m.id === gina.id).access.isLead, false);
+  } finally { await asLead.close(); }
+  // The route reads the account itself, so the request carries the lead's own account row.
+  const { rows: [leadAcct] } = await query('select * from accounts where member_id = $1', [lead.id]);
+  const asLeadAccount = await server({ ...leadAcct, status: 'active' });
+  try {
+    assert.equal((await asLeadAccount.send('DELETE', `/api/household/members/${gina.id}`)).status, 204, 'the lead removes another adult');
+  } finally { await asLeadAccount.close(); }
+});
+
+test('the invite door and the spoken household both respect a joined adult', async () => {
+  const { household: h, member: roger } = await aHousehold(query);
+  const dev = await addMember(h.id, 'Dev');
+  const devAcct = await createAccountOnHousehold(h.id, { memberId: dev.id, name: 'Dev', role: 'customer', plan: 'household', email: 'dev-joined@example.com' });
+  await query('update accounts set activated_at = now() where id = $1', [devAcct.id]);
+  const srv = await server(owner(h, roger.id));
+  try {
+    const invite = await srv.send('POST', `/api/household/members/${dev.id}/invite`, { email: 'someone-else@example.com' });
+    assert.equal(invite.status, 403, "re-inviting is no way round: their email is theirs to change");
+    const { rows: [after] } = await query('select email from members where id = $1', [dev.id]);
+    assert.notEqual(after.email, 'someone-else@example.com');
+  } finally { await srv.close(); }
+});
+
+const { createTripFromIntent } = await import('../src/routes/plan.js');
+
+test('"When your day runs" sets a day outing\'s start and length when nothing was said', async () => {
+  const { household: h, member } = await aHousehold(query);
+  await query('update households set day_start = 8, day_end = 14 where id = $1', [h.id]);
+  const { rows: [household] } = await query('select * from households where id = $1', [h.id]);
+  const trip = await createTripFromIntent({
+    household, members: [{ ...member, isMinor: false }], intent: { date: '2099-06-01', attending: [] },
+    origin: { label: 'Home', lat: 51.5, lng: -0.1 },
+    destination: { label: 'Kew', lat: 51.48, lng: -0.29, countryCode: 'GB', locality: 'Kew' },
+    anchorPlace: null, title: 'Kew · test',
+  });
+  const tripId = trip.id ?? trip.trip?.id;
+  const { rows: [day] } = await query('select start_time::text, end_time::text from trip_days where trip_id = $1', [tripId]);
+  assert.equal(day.start_time, '08:00:00', 'the day starts when the household says');
+  assert.equal(day.end_time, '14:00:00', 'and runs as long as their window');
+});

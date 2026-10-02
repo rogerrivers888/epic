@@ -249,6 +249,10 @@ function MyAccountTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
   const [speak, setSpeak] = useState(getSpeakPref());
   const [showWords, setShowWords] = useState(getVoiceConfirmPref());
   const me = data.members.find((m) => m.id === data.me) ?? data.members[0];
+  // The household's lead (its first account) pays and may delete it; the
+  // estate owner is a different thing and keeps only "Providers and usage"
+  // (Codex, 2 Oct 2026). The shared passcode is the founding household's lead.
+  const isLead = isOwner || Boolean(data.members.find((m) => m.id === data.me)?.access?.isLead);
   const [ratingsOpen, setRatingsOpen] = useQueryState('ratings', false, asFlag);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -272,10 +276,10 @@ function MyAccountTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
       <Appearance value={pref === 'system' ? 'match' : pref} onChange={(v) => setPref(v === 'match' ? 'system' : v)} />
 
       <SectionHead>Account</SectionHead>
-      {isOwner ? <ValueRow label="Plan and billing" value={account?.plan === 'solo' ? 'Solo' : 'Household'} onPress={() => showToast('Plan and billing is coming soon')} /> : null}
+      {isLead ? <ValueRow label="Plan and billing" value={account?.plan === 'solo' ? 'Solo' : 'Household'} onPress={() => showToast('Plan and billing is coming soon')} /> : null}
       <ValueRow label="Signed-in devices" value={devices == null ? undefined : String(devices)} onPress={() => navigate(paths.settings('devices'))} />
       <ValueRow label="Sign out" onPress={async () => { await api.signOut(); if (Platform.OS === 'web' && typeof location !== 'undefined') location.reload(); }} />
-      {isOwner
+      {isLead
         ? <DangerRow label="Delete household" onPress={() => setConfirmDelete(true)} />
         : <DangerRow label="Leave household" onPress={() => setConfirmLeave(true)} />}
 

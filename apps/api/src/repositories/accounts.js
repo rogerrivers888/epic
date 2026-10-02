@@ -132,6 +132,21 @@ export async function accountByMember(memberId) {
  * household. Nothing hangs on being the lead except what the screen says, since
  * a household member is a full peer (migration 056).
  */
+/**
+ * The household's lead: the account it was set up on. An ordinary household's
+ * accounts are all `customer`; the founding household's is the estate's one
+ * `owner`. The same order `callBoundFor` uses, so the lead who sets the spend
+ * ceiling is the lead who may remove adults and delete the household.
+ */
+export async function householdLead(householdId) {
+  if (!householdId) return null;
+  const { rows } = await query(
+    `select ${COLUMNS} from accounts where household_id = $1 order by (role = 'owner') desc, created_at, id limit 1`,
+    [householdId],
+  );
+  return rows[0] ?? null;
+}
+
 export async function accountsForHousehold(householdId) {
   const { rows } = await query(
     `select ${COLUMNS} from accounts where household_id = $1 order by (role = 'owner') desc, created_at`,

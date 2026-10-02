@@ -20,7 +20,7 @@ import { isValidTimezone } from '../domain/time.js';
 import { currentAccount } from '../context.js';
 import {
   accountByEmail, accountByMember, accountByMobile, accountsForHousehold, createAccountOnHousehold,
-  createSignInLink, deleteAccount, lastLinkFor, markLinkSent, normaliseEmail, ownerAccount,
+  createSignInLink, deleteAccount, householdLead, lastLinkFor, markLinkSent, normaliseEmail, ownerAccount,
   revokeAccountSessions, updateAccount,
 } from '../repositories/accounts.js';
 import { householdInvitationEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
@@ -114,9 +114,14 @@ export async function currentMember() {
 }
 
 /** The owner pays and may do everything; the shared passcode is the owner. */
-export function callerIsOwner() {
+export async function callerIsLead() {
+  // The household's lead, not the estate's admin role: an ordinary household's
+  // creator is a `customer`, so `role === 'owner'` left every real lead unable
+  // to remove an adult (Codex, 2 Oct 2026). The shared passcode is the owner.
   const account = currentAccount();
-  return !account || account.role === 'owner';
+  if (!account || account.role === 'owner') return true;
+  const lead = await householdLead(account.household_id);
+  return Boolean(lead && lead.id === account.id);
 }
 
 /**
@@ -526,7 +531,7 @@ router.delete('/members/:id', async (req, res, next) => {
     // signed-in 13–17-year-old is not allowed to remove anyone (Codex).
     const callerAge = me ? ageFrom(me.birth_date, me.birth_year) : null;
     const callerIsAdult = callerAge != null ? callerAge >= 18 : (me ? !me.is_minor : true);
-    if (!callerIsOwner() && (!targetIsChild || !callerIsAdult)) {
+    if (!(await callerIsLead()) && (!targetIsChild || !callerIsAdult)) {
       return res.status(403).json({ error: 'not_allowed_to_remove', message: callerIsAdult ? 'Only the household owner can remove another adult.' : 'Only an adult can remove someone from the household.' });
     }
     // A joined adult is signed out of every device before their account goes
@@ -580,7 +585,7 @@ const deliveryWord = { email: 'e-mail', sms: 'text' };
  * Never a token and never a link — those exist for as long as it takes to send
  * one and are returned only in the answer to the request that asked for it.
  */
-function accessView(member, account, lastLink) {
+function accessView(member, account, lastLink, leadId = null) {
   const reachable = { email: member.email ?? null, mobile: member.mobile ?? null };
   if (!account) {
     return {
@@ -607,7 +612,7 @@ function accessView(member, account, lastLink) {
     activatedAt: account.activated_at,
     lastSeenAt: account.last_seen_at,
     signInCount: account.sign_in_count,
-    isLead: account.role === 'owner',
+    isLead: account.role === 'owner' || (leadId != null && account.id === leadId),
     lastInvite: lastLink ? {
       at: lastLink.created_at, expiresAt: lastLink.expires_at, usedAt: lastLink.used_at,
       channel: lastLink.channel, delivery: lastLink.delivery, error: lastLink.delivery_error,
@@ -622,9 +627,10 @@ async function accessForMembers(members) {
   const byMember = new Map(accounts.filter((a) => a.member_id).map((a) => [a.member_id, a]));
   const links = await Promise.all([...byMember.values()].map((a) => lastLinkFor(a.id)));
   const linkByAccount = new Map([...byMember.values()].map((a, i) => [a.id, links[i]]));
+  const leadId = (await householdLead(members[0]?.household_id ?? null).catch(() => null))?.id ?? null;
   return new Map(members.map((m) => {
     const account = byMember.get(m.id) ?? null;
-    return [m.id, accessView(m, account, account ? linkByAccount.get(account.id) : null)];
+    return [m.id, accessView(m, account, account ? linkByAccount.get(account.id) : null, leadId)];
   }));
 }
 
@@ -698,6 +704,9 @@ router.post('/members/:id/invite', async (req, res, next) => {
     const household = await currentHousehold();
     const member = await households.memberById(req.params.id);
     if (!member || member.household_id !== household.id) return res.status(404).json({ error: 'member_not_found', message: 'No such person in this household.' });
+    // Inviting writes the person's email and mobile onto their profile, so it
+    // is a profile edit and takes the same guard (Codex, 2 Oct 2026).
+    await assertMayEditPerson(member);
     if (member.is_minor) {
       return res.status(400).json({
         error: 'member_is_minor',
@@ -761,7 +770,7 @@ router.post('/members/:id/invite', async (req, res, next) => {
       account, member, household, channels, returning: account.sign_in_count > 0,
     });
     const link = await lastLinkFor(account.id);
-    res.status(201).json({ member: { id: member.id, name: member.name }, access: accessView({ ...member, email, mobile }, account, link), invitation });
+    res.status(201).json({ member: { id: member.id, name: member.name }, access: accessView({ ...member, email, mobile }, account, link, (await householdLead(household.id))?.id ?? null), invitation });
   } catch (err) { next(err); }
 });
 
@@ -782,7 +791,8 @@ router.delete('/members/:id/invite', async (req, res, next) => {
     if (!member || member.household_id !== household.id) return res.status(404).json({ error: 'member_not_found', message: 'No such person in this household.' });
     const account = await accountByMember(member.id);
     if (!account) return res.status(404).json({ error: 'no_account', message: `${member.name} has no sign-in to remove.` });
-    if (account.role === 'owner') {
+    const lead = await householdLead(household.id);
+    if (account.role === 'owner' || (lead && lead.id === account.id)) {
       return res.status(400).json({ error: 'is_lead', message: 'That is the account this household was set up on. It cannot remove its own way in.' });
     }
     await revokeAccountSessions(account.id);

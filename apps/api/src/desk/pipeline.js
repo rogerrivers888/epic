@@ -662,15 +662,20 @@ export function questionText({ question, label }, place) {
   return /[^s]s$/.test(l) ? `Were there ${l} at ${where}?` : `Was there a ${l} at ${where}?`;
 }
 
-/** What a household is, for "only facts that matter to it": access needs said, and everyone's age. */
+/**
+ * What a household is, for "only facts that matter to it": whether anybody in
+ * it has an access need, and everyone's age. Access needs are each person's
+ * now (`members.access`, migration 326), not the retired household-wide
+ * toggle — read from the toggle, adding a step-free need never raised an
+ * access question, and clearing every need never stopped them (Codex, 2 Oct 2026).
+ */
 async function householdFor(householdId) {
-  const [{ rows: [h] }, { rows: members }] = await Promise.all([
-    query('select access_needs from households where id = $1', [householdId]),
-    query('select birth_year, birth_date, is_minor from members where household_id = $1', [householdId]),
-  ]);
+  const { rows: members } = await query(
+    'select birth_year, birth_date, is_minor, access from members where household_id = $1', [householdId]);
   const year = new Date().getFullYear();
   const ages = members.map((m) => (m.birth_date ? year - new Date(m.birth_date).getFullYear() : m.birth_year ? year - m.birth_year : m.is_minor ? 8 : 35));
-  return { access: Boolean(h?.access_needs), ages };
+  const access = members.some((m) => Array.isArray(m.access) && m.access.length > 0);
+  return { access, ages };
 }
 
 /**

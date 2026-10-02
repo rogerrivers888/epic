@@ -457,8 +457,13 @@ export async function createTripFromIntent({ household, members, intent, origin,
   const tz = household.timezone || DEFAULT_TZ;
   const dateStr = intent.date && /^\d{4}-\d{2}-\d{2}$/.test(intent.date) ? intent.date : wallClock(new Date(), tz).dateStr;
   const at = (hhmm) => wallToUtc(dateStr, hhmm, tz);
+  // The household's "When your day runs" (migration 329) sets an outing's
+  // default start and length when nothing was said; it reached only overnight
+  // stays before (Codex, 2 Oct 2026).
+  const windowStart = household.day_start ?? 10;
+  const windowMinutes = Math.max(60, ((household.day_end ?? 18) - windowStart) * 60);
   // A day out is at most a long day: "a whole day" cannot wrap the clock round to nothing.
-  const duration = Math.min(Math.max(60, intent.duration_minutes ?? 600), 720);
+  const duration = Math.min(Math.max(60, intent.duration_minutes ?? windowMinutes), 720);
   let depart;
   let returnAt;
   const anchor = intent.anchor;
@@ -476,7 +481,7 @@ export async function createTripFromIntent({ household, members, intent, origin,
     depart = at(intent.depart_time);
     returnAt = new Date(depart.getTime() + duration * 60_000);
   } else {
-    depart = intent.date ? at('10:00') : roundUpToQuarter(new Date());
+    depart = intent.date ? at(hourToTime(windowStart)) : roundUpToQuarter(new Date());
     returnAt = new Date(depart.getTime() + duration * 60_000);
   }
   const wc = (d) => wallClock(d, tz).hhmm;

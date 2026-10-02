@@ -768,6 +768,12 @@ router.post('/household/who/apply', async (req, res, next) => {
       const isChild = p.role === 'child' || (age != null && age < 18);
       const relationship = p.relationship && ['partner', 'child', 'parent', 'friend', 'other', 'self'].includes(p.relationship) ? p.relationship : isChild ? 'child' : p.isSpeaker ? 'self' : null;
       if (p.existingId) {
+        // The joined-adult rule holds on this door too: somebody who has
+        // joined is changed by nobody but themselves, so they are skipped and
+        // said so, never quietly rewritten (Codex, 2 Oct 2026).
+        const target = await households.memberById(p.existingId);
+        if (!target || target.household_id !== household.id) continue;
+        if (!(await canEditPerson(target))) { written.push({ id: target.id, name: target.name, updated: false, skipped: 'joined_adult_read_only' }); continue; }
         const m = await households.updateMember(p.existingId, { name: p.name, birthYear: age != null ? year - age : null, relationship }, household.id);
         if (m) written.push({ id: m.id, name: m.name, updated: true });
       } else {
