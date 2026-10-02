@@ -145,3 +145,18 @@ test('two presses never pay twice; one picture on two places is judged for each;
   assert.equal(second.why, 'already_running', 'a second press while one runs is refused');
   await first.done;
 });
+
+test('the quote counts every unscored picture; an Openverse thumbnail keeps its own size beside the original\'s', async () => {
+  const n = await fit.unscoredCount();
+  assert.equal(n, (await fit.unscored({ limit: 1_000_000 })).length, 'the full count, not a page');
+  const ref = `google:dims-${randomUUID()}`;
+  const id = await picture(ref, { width: 600 });
+  await query('update image_assets set original_width = 4000, original_height = 3000 where id = $1', [id]);
+  await fit.scorePicture({ venueRef: ref, imageId: id }, {
+    parseStructured: async (args) => { args.meta.costUsd = 0; return all('yes'); },
+    pictureOf: undefined,
+  }).catch(() => null);
+  const { rows: [img] } = await query('select width, original_width from image_assets where id = $1', [id]);
+  assert.equal(img.width, 600, 'the stored bytes are the thumbnail');
+  assert.equal(img.original_width, 4000);
+});

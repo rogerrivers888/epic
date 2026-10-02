@@ -31,7 +31,7 @@ import { healthOf } from '../sources/meter.js';
 import { stampReviewImage } from '../sources/photoLinks.js';
 import { enrichmentList, enrichmentSummary, enrichmentOf, rerun, backfill, backfillCandidates, isEnrichAccount, TARGET_PENCE, PURPOSE as ENRICH_PURPOSE } from '../sources/savedEnrich.js';
 import { venuePicturesOf } from '../sources/venueImages.js';
-import { unscored, scoreAll, PENCE_PER_PICTURE, CHECKS } from '../sources/photoFitness.js';
+import { unscoredCount, scoreAll, PENCE_PER_PICTURE, CHECKS } from '../sources/photoFitness.js';
 import { USD_TO_GBP, PRICE_PER_UNIT_USD } from '../domain/providerPrices.js';
 
 export const savedPlacesRouter = express.Router();
@@ -199,7 +199,9 @@ const REVIEWED = `(pr.venue_ref is not null and not exists (
 // A place's best machine verdict over its pictures (sources/photoFitness.js).
 // Only pictures the place still holds: a verdict on one since removed from the
 // venue's page, or unlinked, says nothing about the place now (Codex, 2 Oct 2026).
-const HELD_FITNESS = `(f.image_id is not null and exists (select 1 from image_links l where l.image_id = f.image_id and l.subject_type = 'place' and l.subject_id = f.venue_ref))
+const HELD_FITNESS = `(f.image_id is not null and exists (select 1 from image_links l join image_assets i on i.id = l.image_id
+                                                              where l.image_id = f.image_id and l.subject_type = 'place' and l.subject_id = f.venue_ref
+                                                                and i.moderation <> 'rejected'))
                       or (f.image_id is null and exists (select 1 from venue_site_images v where v.venue_ref = f.venue_ref and v.image_url = f.image_url))`;
 const MACHINE = `(select f.verdict from photo_fitness f where f.venue_ref = r.venue_ref and (${HELD_FITNESS})
                    order by case f.verdict when 'fit' then 0 when 'borderline' then 1 else 2 end limit 1)`;
@@ -387,8 +389,8 @@ photoReviewRouter.get('/board', requires('view_library'), async (_req, res, next
 /** The machine look, priced before the click: every picture not yet looked at. */
 photoReviewRouter.get('/score/quote', requires('view_library'), async (_req, res, next) => {
   try {
-    const todo = await unscored({ limit: 5000 });
-    res.json({ pictures: todo.length, pence: Math.ceil(todo.length * PENCE_PER_PICTURE), perPicturePence: PENCE_PER_PICTURE, checks: CHECKS });
+    const n = await unscoredCount();
+    res.json({ pictures: n, pence: Math.ceil(n * PENCE_PER_PICTURE), perPicturePence: PENCE_PER_PICTURE, checks: CHECKS });
   } catch (err) { next(err); }
 });
 

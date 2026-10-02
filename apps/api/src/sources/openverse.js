@@ -136,14 +136,17 @@ export async function picturesFor({ venueRef, name, locality = null }, { keep = 
       title: r.title,
       tags: [name, locality, 'openverse', r.provider].filter(Boolean),
       mime: pic.mime,
-      // The original's size, not the thumbnail's: "at least 1200 px on the long
-      // edge" is asked of the photograph, and only Openverse knows it.
-      width: r.width ?? pic.width ?? null,
-      height: r.height ?? pic.height ?? null,
+      // What the stored bytes are: the thumbnail (Codex, 2 Oct 2026). The
+      // original's size goes beside it, for the 1200 px check.
+      width: pic.width ?? null,
+      height: pic.height ?? null,
       bytes: pic.bytes,
       sha256: crypto.createHash('sha256').update(pic.body).digest('hex'),
       moderation: 'pending',
     }, [{ width: 500, actualWidth: pic.width ?? null, actualHeight: pic.height ?? null, mime: pic.mime, bytes: pic.bytes, body: pic.body }]);
+    if (r.width || r.height) {
+      await query('update image_assets set original_width = $2, original_height = $3 where id = $1', [image.id, r.width ?? null, r.height ?? null]);
+    }
     await lib.linkImage(image.id, { subjectType: 'place', subjectId: venueRef, role: 'gallery', position: 10 + stored.length });
     // Two passes can find the same picture at once, each before the other has
     // linked it. A picture's moderation is one for every place it is linked

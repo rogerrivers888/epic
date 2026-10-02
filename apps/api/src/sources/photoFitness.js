@@ -17,7 +17,7 @@
 // a thumbnail.
 
 import { z } from 'zod';
-import { query } from '../db.js';
+import { query, lockPool } from '../db.js';
 import { parseStructured } from '../claude.js';
 import * as lib from '../repositories/library.js';
 import { fetchPublicPicture } from './safeFetch.js';
@@ -90,7 +90,11 @@ async function pictureOf({ imageId, imageUrl }) {
     const img = await lib.imageById(imageId);
     const variant = await lib.variantFor(imageId, 960);
     if (!img || !variant?.body) return null;
-    return { body: variant.body, mime: variant.mime ?? 'image/jpeg', longEdge: Math.max(Number(img.width) || 0, Number(img.height) || 0) || null };
+    // The photograph's own size where the source told us it (Openverse keeps
+    // only a thumbnail), else the stored picture's.
+    const w = Number(img.original_width) || Number(img.width) || 0;
+    const h = Number(img.original_height) || Number(img.height) || 0;
+    return { body: variant.body, mime: variant.mime ?? 'image/jpeg', longEdge: Math.max(w, h) || null };
   }
   // A venue's picture address came off somebody else's page: fetched only from
   // a public address, pinned, every redirect re-checked (sources/safeFetch.js).
@@ -172,6 +176,17 @@ export async function unscored({ venueRef = null, limit = 1000 } = {}) {
   return rows;
 }
 
+/** How many pictures are waiting for a look, uncapped. */
+export async function unscoredCount() {
+  const { rows: [r] } = await query(
+    `select (select count(*) from image_links l join image_assets i on i.id = l.image_id
+              where l.subject_type = 'place' and i.moderation <> 'rejected'
+                and not exists (select 1 from photo_fitness f where f.image_id = i.id and f.venue_ref = l.subject_id))
+          + (select count(*) from venue_site_images v
+              where not exists (select 1 from photo_fitness f where f.image_id is null and f.venue_ref = v.venue_ref and f.image_url = v.image_url)) as n`);
+  return Number(r.n);
+}
+
 /**
  * Look at every unscored picture of one place, one after another. Never
  * throws: a picture that fails is left unscored for the next look.
@@ -184,6 +199,23 @@ let line = Promise.resolve();
 const inLine = (fn) => { const run = line.then(fn, fn); line = run.catch(() => null); return run; };
 let bulkRunning = false;
 export const scoringBusy = () => bulkRunning;
+
+/**
+ * Hold a picture for the length of its look, across every API process, so two
+ * of them never pay for it twice (Codex, 2 Oct 2026). A session-level advisory
+ * lock on its own connection from the bounded lock pool; null when another
+ * process holds it, or no connection is free — either way, not now.
+ */
+async function withPictureLock(p, fn) {
+  const key = `photo_fitness:${p.venue_ref}:${p.image_id ?? p.image_url}`;
+  const c = await lockPool.connect().catch(() => null);
+  if (!c) return null;
+  try {
+    const { rows: [{ ok }] } = await c.query('select pg_try_advisory_lock(hashtext($1)) as ok', [key]);
+    if (!ok) return null;
+    try { return await fn(); } finally { await c.query('select pg_advisory_unlock(hashtext($1))', [key]).catch(() => null); }
+  } finally { c.release(); }
+}
 
 async function stillUnscored(p) {
   const { rows } = p.image_id
@@ -201,9 +233,11 @@ async function scorePlaceNow(venueRef, { householdId = null } = {}, deps = {}) {
   let scored = 0; let failed = 0;
   for (const p of todo) {
     try {
-      if (!(await stillUnscored(p))) continue;
-      const out = await scorePicture({ venueRef, imageId: p.image_id, imageUrl: p.image_url, name: p.name, category: p.category, householdId }, deps);
-      if (!out.skipped) scored += 1;
+      const out = await withPictureLock(p, async () => {
+        if (!(await stillUnscored(p))) return null;
+        return scorePicture({ venueRef, imageId: p.image_id, imageUrl: p.image_url, name: p.name, category: p.category, householdId }, deps);
+      });
+      if (out && !out.skipped) scored += 1;
     } catch { failed += 1; }
   }
   return { scored, failed, looked: todo.length };
@@ -216,19 +250,32 @@ async function scorePlaceNow(venueRef, { householdId = null } = {}, deps = {}) {
 export async function scoreAll({ householdId, expectPictures }, deps = {}) {
   // A second press while one run is going is refused, not queued behind it.
   if (bulkRunning) return { started: false, why: 'already_running' };
-  const todo = await unscored({ limit: 5000 });
-  if (Number(expectPictures) !== todo.length) return { started: false, why: 'quote_changed', pictures: todo.length };
+  // Every unscored picture, counted in full — never a page of them (Codex,
+  // 2 Oct 2026) — and worked through in batches until the quoted number is done.
+  const total = await unscoredCount();
+  if (Number(expectPictures) !== total) return { started: false, why: 'quote_changed', pictures: total };
   bulkRunning = true;
   const done = inLine(async () => {
-    for (const p of todo) {
-      try {
-        if (!(await stillUnscored(p))) continue;
-        await scorePicture({ venueRef: p.venue_ref, imageId: p.image_id, imageUrl: p.image_url, name: p.name, category: p.category, householdId }, deps);
-      } catch { /* left for the next look */ }
+    let left = total;
+    const failed = new Set();
+    while (left > 0) {
+      const batch = (await unscored({ limit: 500 + failed.size })).filter((p) => !failed.has(`${p.venue_ref}|${p.image_id ?? p.image_url}`)).slice(0, 500);
+      if (!batch.length) break;
+      for (const p of batch) {
+        if (left <= 0) break;
+        left -= 1;
+        try {
+          const out = await withPictureLock(p, async () => {
+            if (!(await stillUnscored(p))) return null;
+            return scorePicture({ venueRef: p.venue_ref, imageId: p.image_id, imageUrl: p.image_url, name: p.name, category: p.category, householdId }, deps);
+          });
+          if (!out || out.skipped) failed.add(`${p.venue_ref}|${p.image_id ?? p.image_url}`);
+        } catch { failed.add(`${p.venue_ref}|${p.image_id ?? p.image_url}`); }
+      }
     }
   }).finally(() => { bulkRunning = false; });
   done.catch(() => null);
-  return { started: true, pictures: todo.length, done };
+  return { started: true, pictures: total, done };
 }
 
 const RANK = { fit: 0, borderline: 1, not_fit: 2 };

@@ -25,3 +25,10 @@ create table if not exists photo_fitness (
 create unique index if not exists photo_fitness_image_idx on photo_fitness (venue_ref, image_id) where image_id is not null;
 create unique index if not exists photo_fitness_url_idx on photo_fitness (venue_ref, image_url) where image_id is null;
 create index if not exists photo_fitness_place_idx on photo_fitness (venue_ref);
+
+-- The original's size, beside the stored copy's. A picture from Openverse is
+-- stored as its thumbnail, so `width`/`height` are the thumbnail's (what the
+-- bytes are); "at least 1200 px on the long edge" is asked of the photograph,
+-- and only the source knows that.
+alter table image_assets add column if not exists original_width integer;
+alter table image_assets add column if not exists original_height integer;
