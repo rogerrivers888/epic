@@ -4023,6 +4023,32 @@ router.post('/owned-points/purge', requires('manage_library'), async (req, res, 
   } catch (err) { next(err); }
 });
 
+/**
+ * Stored provider names (owner, 1–2 Oct 2026: "no stored provider names
+ * anywhere"; "file the purge as an Approval card … for me to click").
+ *
+ * GET says what every store still holds that the purge would clear, by store,
+ * and the purges so far — it changes nothing, and is what the card quotes.
+ * POST clears them all in one transaction and logs the counts (never a name);
+ * it is run through the approval the owner clicks (G11), with the card's
+ * quoted total as `expect` so the log shows what was promised beside what ran.
+ */
+router.get('/stored-names', requires('view_library'), async (_req, res, next) => {
+  try {
+    const namePurge = await import('../sources/namePurge.js');
+    res.json({ ...(await namePurge.quote()), history: await namePurge.history(5) });
+  } catch (err) { next(err); }
+});
+
+router.post('/stored-names/purge', requires('manage_library'), async (req, res, next) => {
+  try {
+    const namePurge = await import('../sources/namePurge.js');
+    const expected = Number.isSafeInteger(Number(req.body?.expect)) ? Number(req.body.expect) : null;
+    const out = await namePurge.run({ by: actor(req).actorLabel, expected });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
 router.post('/owned-points/match', requires('manage_library'), async (req, res, next) => {
   try {
     const kind = req.body?.kind === 'weekly' ? 'weekly' : 'backfill';

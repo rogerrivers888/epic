@@ -118,3 +118,39 @@ test('a chat topic about a provider\'s stop keeps no label of theirs', async () 
      values ('trip', $1, 'stop', $2, 'Google Stop Name', 'everyone', 'When do we leave?', 'open') returning tag_label`, [trip.id, g]);
   assert.equal(t.tag_label, null);
 });
+
+test('the purge clears every stored provider name it quoted, logs the counts and never a name, and leaves our own words alone', async () => {
+  const purge = await import('../src/sources/namePurge.js');
+  const hh = await household();
+  const g = `google:${randomUUID()}`;
+  const open = `fixtures:${randomUUID()}`;
+  const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date)
+    values ($1, 'T', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning id`, [hh])).rows[0];
+  // The past, as it stands on production: written before the trigger, so it
+  // is seeded with the trigger off.
+  const off = ['household_places', 'visits', 'place_menus', 'chat_topics'];
+  for (const t of off) await query(`alter table ${t} disable trigger no_rented_name`);
+  try {
+    await query(`insert into household_places (household_id, venue_ref, label, nickname) values ($1, $2, 'Legacy Google Name', 'Ours'), ($1, $3, 'The Tree House', null)`, [hh, g, open]);
+    await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, $2, 'Legacy Google Visit', '2026-09-01')`, [hh, g]);
+    await query(`insert into place_menus (venue_ref, venue_label, source_url, source_kind) values ($1, 'Legacy Google Menu', 'https://example.org/m', 'html')`, [g]);
+    await query(`insert into chat_topics (context_type, context_id, tag_kind, tag_ref, tag_label, audience, title, state)
+                 values ('trip', $1, 'stop', $2, 'Legacy Google Stop', 'everyone', 'A', 'open'),
+                        ('trip', $1, 'day', $3, 'Sat 4 · Legacy Google Stop', 'everyone', 'B', 'open')`, [trip.id, g, randomUUID()]);
+  } finally {
+    for (const t of off) await query(`alter table ${t} enable trigger no_rented_name`);
+  }
+  const before = await purge.quote();
+  assert.ok(before.byStore['household_places.label'] >= 1 && before.byStore['visits.venue_label'] >= 1
+    && before.byStore['place_menus.venue_label'] >= 1 && before.byStore['chat_topics.tag_label'] >= 2, JSON.stringify(before));
+  const out = await purge.run({ by: 'test', expected: before.total });
+  assert.equal(out.cleared, before.total, 'exactly what was quoted');
+  assert.equal((await purge.quote()).total, 0, 'nothing left behind');
+  const hp = Object.fromEntries((await query('select venue_ref, label, nickname from household_places where household_id = $1', [hh])).rows.map((r) => [r.venue_ref, r]));
+  assert.deepEqual([hp[g].label, hp[g].nickname, hp[open].label], [g, 'Ours', 'The Tree House']);
+  assert.equal((await query('select venue_label from visits where household_id = $1', [hh])).rows[0].venue_label, g);
+  const [log] = await purge.history(1);
+  assert.equal(log.cleared, before.total);
+  assert.equal(log.expected, before.total);
+  assert.doesNotMatch(JSON.stringify(log), /Legacy Google/, 'counts only, never a name');
+});
