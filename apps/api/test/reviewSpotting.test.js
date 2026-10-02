@@ -1072,6 +1072,33 @@ test('a drawer that ignored another wording of the fact still holds back its sha
   assert.equal((await query("select count(*)::int n from questions where attribute_key = 'mud-room' and set_key = 'c30-ai-set'")).rows[0].n, 0, 'no question over the ignore');
 });
 
+test('moving the ignoring drawer to another set re-asks the set it left', async () => {
+  // Codex, 2 Oct 2026: a direct move lifts the old set's veto just as detach does.
+  const subA = 'c30-move-a'; const subB = 'c30-move-b';
+  const a = 'google:ChIJ_c30_move_a'; const b = 'google:ChIJ_c30_move_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 move A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 move B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query("insert into question_sets (key, name) values ('c30-move-set', 'C30 move set'), ('c30-move-away', 'C30 move away') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-move-set'), ($2, 'c30-move-set') on conflict (subcategory_key) do update set set_key = excluded.set_key", [subA, subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await query("delete from attribute_aliases where norm = 'gift kiosk'").catch(() => {});
+  await query("delete from place_attributes where key = 'gift-kiosk'").catch(() => {});
+
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A gift kiosk.' } });
+  const { rows: [candA] } = await query("select id from harvest_candidates where norm = 'gift kiosk' and subcategory = $1", [subA]);
+  await sets.ignoreCandidate(candA.id, { actor: 'tester' });
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A gift kiosk.' } });
+  const res = await sets.approveFeature('gift kiosk', { actor: 'tester' });
+  assert.equal(res.blocked.length, 1, 'held back by A on the shared set');
+
+  await sets.attach('c30-move-away', subA); // A moves off the shared set
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-move-set' and active", [res.attributeKey])).rows[0].n, 1, 'B’s set is asked once A has left it');
+});
+
 test('restoring an older per-drawer ignore leaves a later word-level Ignore standing', async () => {
   // Codex, 2 Oct 2026: restore lifts only the tombstone its own ignore wrote.
   const subA = 'c30-tomb-scope-a'; const subB = 'c30-tomb-scope-b';

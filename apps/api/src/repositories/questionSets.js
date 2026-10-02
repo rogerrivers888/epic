@@ -101,7 +101,10 @@ export async function attach(setKey, subcategoryKey) {
        returning *`,
       [subcategoryKey, setKey],
     );
-    await askWaiting(client, subcategoryKey, setKey);
+    // Every owed drawer, not only this one: moving a drawer off a set may lift the
+    // ignore that held that set back from a fact its other drawers are owed, as
+    // detach does (Codex, 2 Oct 2026). This drawer is among them.
+    await reconcileWaiting(client);
     return rows[0];
   });
 }
