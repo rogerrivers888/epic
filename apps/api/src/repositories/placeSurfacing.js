@@ -490,6 +490,15 @@ export async function surfacingReport({ examples = 10 } = {}) {
  * the rule does not narrow, which must be 0 for the other Culture drawers to be
  * unchanged. Uncapped: absence is claimed from a count, not from a capped list.
  */
+/** One place's determinations as a comparable string: every row its members go by. */
+async function placeStateStamp(q, members) {
+  const { rows } = await q(
+    `select coalesce(string_agg(s.venue_ref || ':' || s.surfaced || ':' || s.applied || ':' || coalesce(s.check_id::text, '') || ':' || coalesce(s.checked_at::text, ''), ',' order by s.venue_ref), '') as st
+       from place_surfacing s where s.venue_ref = any($1::text[])
+          or s.venue_ref in (select m.venue_ref from place_surfacing_members m where m.member_ref = any($1::text[]))`, [members]);
+  return rows[0].st;
+}
+
 export async function gateProof({ names = [], checkId = null } = {}) {
   const he = await heritageLoad();
   // The live side first: each named place, every alias cluster of that name on its
@@ -510,6 +519,11 @@ export async function gateProof({ names = [], checkId = null } = {}) {
     const { rootOf, membersOf } = await aliasClosure(seeds);
     for (const root of new Set(seeds.map((r) => rootOf.get(r) ?? r))) {
       const members = [...new Set(membersOf.get(root) ?? [root])];
+      // The place's determinations as the live trace starts; re-read in the stored
+      // snapshot below, so a reconsideration landing in between makes the two
+      // halves disagree out loud rather than silently (Codex). Writes are atomic,
+      // and every rewrite stamps checked_at, so equal state means one moment.
+      const stateBefore = await placeStateStamp(query, members);
       const [signals, filings, elsewhere] = await Promise.all([
         gatherSignals(members, { heritageLoad: he.load }),
         query(`select f.venue_ref as ref, array_agg(distinct f.sub) as subs from (${FILED_SQL}) f
@@ -528,7 +542,7 @@ export async function gateProof({ names = [], checkId = null } = {}) {
       });
       const narrowedOnly = trace.some((t) => t.filedIn.some((k) => NARROWED.includes(k)))
         && !members.some((m) => elsewhere.has(m));
-      places.push({ name: raw, cluster: root, records: members.length, members,
+      places.push({ name: raw, cluster: root, records: members.length, members, stateBefore,
         liveHeld: narrowedOnly && !trace.some((t) => t.verdict === 'kept'), trace });
     }
   }
@@ -551,6 +565,7 @@ export async function gateProof({ names = [], checkId = null } = {}) {
       return { readCheck: null, why: running ? 'a narrowing check is running now' : checkId ? 'that check did not complete' : 'no completed narrowing check to read' };
     }
     const heldBy = new Map();
+    const moved = new Set();
     for (const [i, p] of places.entries()) {
       if (!p.members) continue;
       // Held is the place's state now, under whichever determination holds it —
@@ -561,17 +576,19 @@ export async function gateProof({ names = [], checkId = null } = {}) {
            join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
           where m.member_ref = any($1::text[])`, [p.members]);
       heldBy.set(i, rows);
+      if ((await placeStateStamp((t, a) => c.query(t, a), p.members)) !== p.stateBefore) moved.add(i);
     }
     const { rows: snap } = await c.query(
       `select distinct m.member_ref as ref from place_surfacing_members m
          join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
         where s.check_id = $1`, [done.id]);
-    return { readCheck: done.id, heldBy, snap: snap.map((r) => r.ref) };
+    return { readCheck: done.id, heldBy, moved, snap: snap.map((r) => r.ref) };
   });
 
-  const out = places.map(({ members, ...p }, i) => {
+  const out = places.map(({ members, stateBefore, ...p }, i) => {
     if (!members) return p;
     if (!stored.readCheck) return { ...p, held: null, why: stored.why, heldBy: [] };
+    if (stored.moved.has(i)) return { ...p, held: null, liveHeld: null, why: 'this place was re-judged while the proof was reading — ask again', heldBy: [] };
     const by = stored.heldBy.get(i) ?? [];
     return {
       ...p, held: by.length > 0, heldBy: by.map((r) => r.venue_ref),
