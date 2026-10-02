@@ -52,10 +52,11 @@ const startOf = (s, o) => localInstant(ymd(s.on_date), hm(s.starts_at) ?? '00:00
 const endOf = (s, o) => localInstant(ymd(s.ends_on ?? s.on_date), hm(s.ends_at) ?? hm(s.starts_at) ?? '23:59', tzOf(o));
 
 /** The signed-in household's host, or a 404 in plain words. */
-async function me() {
+async function me({ hostOptional = false } = {}) {
   const household = await currentHousehold();
   const host = await repo.hostByHousehold(household.id);
-  if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
+  // A co-host need not host anything of their own (Codex, 2 Oct 2026).
+  if (!host && !hostOptional) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
   return { household, host, account: currentAccount() };
 }
 
@@ -83,7 +84,7 @@ async function helpingWith(accountId) {
   const { rows } = await query(
     `select o.*, c.sees_guests, c.can_message, c.can_see_money, c.role as cohost_role, h.name as owner_name
        from offer_cohosts c join host_offers o on o.id = c.offer_id join hosts h on h.id = o.host_id
-      where c.account_id = $1 and o.state <> 'draft'`,
+      where c.account_id = $1 and c.accepted_at is not null and o.state <> 'draft'`,
     [accountId],
   );
   return rows;
@@ -429,9 +430,9 @@ function eventRow(o, now, { cohost = false } = {}) {
 
 router.get('/host/desk/events', async (_req, res, next) => {
   try {
-    const { host, account } = await me();
+    const { host, account } = await me({ hostOptional: true });
     const now = new Date();
-    const own = (await offersWithSessions(host.id)).map((o) => eventRow(o, now));
+    const own = host ? (await offersWithSessions(host.id)).map((o) => eventRow(o, now)) : [];
     const helping = [];
     for (const h of await helpingWith(account?.id)) {
       const [withS] = await offersWithSessionsOf([h.id]);
@@ -460,11 +461,12 @@ async function offersWithSessionsOf(ids) {
 /** The event, if it is the host's own or one they co-host; with what they may see. */
 async function eventFor(id) {
   if (!UUID.test(String(id))) throw refuse(404, 'offer_not_found', 'That is not one of your events.');
-  const { host, account, household } = await me();
+  const { host, account, household } = await me({ hostOptional: true });
   const [o] = await offersWithSessionsOf([id]);
   if (!o || !o.lane) throw refuse(404, 'offer_not_found', 'That is not one of your events.');
-  if (o.host_id === host.id) return { host, account, household, offer: o, view: cohostView(null) };
-  const { rows: [c] } = account ? await query('select * from offer_cohosts where offer_id = $1 and account_id = $2', [id, account.id]) : { rows: [] };
+  if (host && o.host_id === host.id) return { host, account, household, offer: o, view: cohostView(null) };
+  // A co-host sees the event only once they have accepted (Codex, 2 Oct 2026).
+  const { rows: [c] } = account ? await query('select * from offer_cohosts where offer_id = $1 and account_id = $2 and accepted_at is not null', [id, account.id]) : { rows: [] };
   if (!c || o.state === 'draft') throw refuse(404, 'offer_not_found', 'That is not one of your events.');
   const { rows: [owner] } = await query('select name from hosts where id = $1', [o.host_id]);
   return { host, account, household, offer: o, view: { ...cohostView(c), ownerName: owner?.name ?? null } };
@@ -1136,6 +1138,30 @@ router.delete('/host/desk/quick-replies/:id', async (req, res, next) => {
     const { rowCount } = await query('delete from host_quick_replies where id = $1 and host_id = $2', [req.params.id, host.id]);
     if (!rowCount) throw refuse(404, 'not_found', 'That reply is not yours.');
     res.json({ deleted: true });
+  } catch (err) { next(err); }
+});
+
+/** Co-host invitations waiting for this account, and accepting one (Codex, 2 Oct 2026: nothing is shown before acceptance). */
+router.get('/host/desk/cohost-invites', async (_req, res, next) => {
+  try {
+    const { account } = await me({ hostOptional: true });
+    if (!account) return res.json({ invites: [] });
+    const { rows } = await query(
+      `select c.id, c.offer_id, o.title, h.name as host, c.sees_guests, c.can_message, c.can_see_money
+         from offer_cohosts c join host_offers o on o.id = c.offer_id join hosts h on h.id = o.host_id
+        where c.account_id = $1 and c.accepted_at is null and o.state <> 'ended'`, [account.id],
+    );
+    res.json({ invites: rows.map((r) => ({ id: r.id, offerId: r.offer_id, title: r.title, host: r.host, guests: r.sees_guests, messages: r.can_message, money: r.can_see_money })) });
+  } catch (err) { next(err); }
+});
+
+router.post('/host/desk/cohost-invites/:id/accept', async (req, res, next) => {
+  try {
+    const { account } = await me({ hostOptional: true });
+    if (!account || !UUID.test(String(req.params.id))) throw refuse(404, 'not_found', 'That invitation isn’t yours.');
+    const { rows: [r] } = await query(`update offer_cohosts set accepted_at = now() where id = $1 and account_id = $2 and accepted_at is null returning offer_id`, [req.params.id, account.id]);
+    if (!r) throw refuse(404, 'not_found', 'That invitation isn’t yours.');
+    res.json({ accepted: true, offerId: r.offer_id });
   } catch (err) { next(err); }
 });
 

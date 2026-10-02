@@ -65,15 +65,15 @@ export function Ending({ offerId }: { offerId: string }) {
   const sent = offer.invites.filter((i) => i.sentAt).length;
   const invited = offer.invites.length;
 
-  const big = pub ? (offer.state === 'in_review' ? 'Sent for review.' : 'It’s live.') : 'Invites are out.';
+  const big = pub ? (offer.state === 'in_review' ? 'Sent for review.' : offer.state === 'approved' ? 'Approved.' : 'It’s live.') : 'Invites are out.';
   const sub = pub
     // Guest booking for the four lanes is its own brief; until it lands the page is up but not bookable.
-    ? (offer.state === 'in_review' ? `Back to you within ${cfg.reviewHours} hours` : 'Booking opens soon')
+    ? (offer.state === 'in_review' ? `Back to you within ${cfg.reviewHours} hours` : offer.state === 'approved' ? 'Live once Checked is done' : 'Booking opens soon')
     : sent === 1 ? '1 text or email on its way' : sent > 1 ? `${sent} texts and emails on their way`
       : invited ? `${invited} invited · share the link to reach them` : 'Share the invite link to ask people';
   const fee = home.isPro || offer.privateFeeState === 'included' ? 'Included in Pro'
     : offer.privateFeeState === 'paid' ? `${gbp(cfg.privateEventPence)} paid` : null;
-  const meta = pub ? `${look.tag} · public · ${offer.state === 'in_review' ? 'in review' : 'live'}` : [look.tag, 'private', fee].filter(Boolean).join(' · ');
+  const meta = pub ? `${look.tag} · public · ${offer.state === 'in_review' ? 'in review' : offer.state === 'approved' ? 'waiting on Checked' : 'live'}` : [look.tag, 'private', fee].filter(Boolean).join(' · ');
   const stillToDo = pub ? offer.checklist.filter((i) => (i.key === 'checked' || i.key === 'tax') && !i.done) : [];
   const thumb = mediaUrl(offer.photos?.[0]?.url ?? null);
 

@@ -54,7 +54,13 @@ export async function notify({ householdId = null, accountId = null, kind, title
   if (!k) throw new Error(`unknown notification kind: ${kind}`);
   if (!householdId && !accountId) throw new Error('a notification needs a household or an account');
   if (link != null && !/^\/[A-Za-z0-9/_?=&.%:-]*$/.test(link)) throw new Error('a notification link is an app path');
-  const wantsEmail = (email ?? k.email) && prefs?.[kind] !== false;
+  // A host's own switches (E13) decide their e-mail, wherever the notification came from (Codex, 2 Oct 2026).
+  let p = prefs;
+  if (p == null && k.audience === 'host' && householdId) {
+    const { rows: [h] } = await query('select notification_prefs from hosts where household_id = $1', [householdId]);
+    p = h?.notification_prefs ?? null;
+  }
+  const wantsEmail = (email ?? k.email) && p?.[kind] !== false;
   const { rows: [row] } = await query(
     `insert into notifications (household_id, account_id, audience, kind, title, body, link, dedupe_key, email_state)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)

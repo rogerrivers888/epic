@@ -2813,6 +2813,8 @@ export const api = {
   laneCancel: (id: string, body: { sessionIds?: string[] | null; reason: 'illness' | 'weather' | 'venue' | 'numbers' | 'other'; note?: string | null }) =>
     post<{ cancelled: number; refunds: number; late: boolean }>(`/api/host/lanes/offers/${id}/cancel`, body),
   desk: () => request<DeskHome>('/api/host/desk'),
+  deskCohostInvites: () => request<{ invites: { id: string; offerId: string; title: string | null; host: string; guests: boolean; messages: boolean; money: boolean }[] }>('/api/host/desk/cohost-invites'),
+  deskAcceptCohost: (id: string) => post<{ accepted: true; offerId: string }>(`/api/host/desk/cohost-invites/${encodeURIComponent(id)}/accept`, {}),
   deskTodo: () => request<DeskTodo>('/api/host/desk/todo'),
   deskAtRisk: () => request<AtRisk>('/api/host/desk/at-risk'),
   deskEvents: () => request<DeskEvents>('/api/host/desk/events'),
@@ -5533,7 +5535,8 @@ export type TrustLevel = 'verified' | 'checked' | 'trusted';
 /** Epic's fee on a booking or period: rate, the reason it carries, the label the UI prints, and the split (SX14/SX18). */
 export type HostFeeLine = { rate: number; reason: string; label: string; feePence: number; netPence: number };
 export type OfferShape = 'oneoff' | 'series' | 'anytime';
-export type OfferState = 'draft' | 'in_review' | 'live' | 'paused' | 'ended';
+// 'approved': passed review, live once Checked is done (hosting v4 §3.5).
+export type OfferState = 'draft' | 'in_review' | 'approved' | 'live' | 'paused' | 'ended';
 export type OfferVenue = 'their_place' | 'your_place' | 'out_about' | 'online';
 export type PriceMode = 'free' | 'same_each' | 'by_numbers';
 export type RefundRule = '24h' | '7d' | 'none';

@@ -52,7 +52,7 @@ export const VISIBILITY_CHIP = { invite: 'Invite-only', link: 'Unlisted', public
 export const MONEY_LABEL = { free: 'Free', direct: 'They pay you directly', epic: 'Epic collects, pays you out' } as const;
 export const SHAPE_LABEL: Record<OfferShape, string> = { oneoff: 'One-off', series: 'Series', anytime: 'Anytime' };
 export const SHAPE_ICON: Record<OfferShape, IconName> = { oneoff: 'oneoff', series: 'series', anytime: 'anytime' };
-export const STATE_LABEL: Record<OfferState, string> = { draft: 'Draft', in_review: 'In review', live: 'Live', paused: 'Paused', ended: 'Ended' };
+export const STATE_LABEL: Record<OfferState, string> = { draft: 'Draft', in_review: 'In review', approved: 'Approved · waiting on Checked', live: 'Live', paused: 'Paused', ended: 'Ended' };
 export const VENUE_LABEL: Record<OfferVenue, string> = { their_place: 'Their place', your_place: 'Your place', out_about: 'Out and about', online: 'Online' };
 export const VENUE_ICON: Record<OfferVenue, IconName> = { their_place: 'theirPlace', your_place: 'yourPlace', out_about: 'outAbout', online: 'online' };
 // "Epic Trusted" is retired (hosting v4 handover §3.1): a host who held it shows as Checked, which it included.

@@ -213,7 +213,9 @@ test('lowering the minimum: only down, and never on Depends on numbers', async (
 
 test('a co-host sees only what the host allowed, and nobody else sees the event at all', async () => {
   const owner = await aHost();
-  const helper = await aHost();
+  // A co-host who hosts nothing of their own (Codex, 2 Oct 2026).
+  const { household: hh, member: hm } = await aHousehold(query);
+  const helper = { account: await anAccount(hh.id, hm.id, { name: 'Lena Ford' }) };
   const stranger = await aHost();
   const walk = await anOffer(owner.host);
   const s = await aSession(walk, 3);
@@ -222,6 +224,10 @@ test('a co-host sees only what the host allowed, and nobody else sees the event 
   const h = await server(helper.account);
   const x = await server(stranger.account);
   try {
+    assert.equal((await h.get(`/api/host/desk/events/${walk.id}`)).status, 404, 'nothing before they accept');
+    const invites = await h.get('/api/host/desk/cohost-invites');
+    assert.equal(invites.body.invites.length, 1);
+    assert.equal((await h.send('POST', `/api/host/desk/cohost-invites/${invites.body.invites[0].id}/accept`)).status, 200);
     const r = await h.get(`/api/host/desk/events/${walk.id}`);
     assert.equal(r.status, 200);
     assert.deepEqual([r.body.view.guests, r.body.view.money, r.body.view.dates, r.body.view.owner], [true, false, false, false]);
@@ -342,4 +348,13 @@ test('the rules underneath: To do groups, standing, response time, moves back', 
   assert.equal(domain.responseMinutes([10, 20]), null, 'two replies is not enough to say');
   assert.equal(domain.responseWords(domain.responseMinutes([60, 100, 200])), '1 h 40 min');
   assert.deepEqual(domain.movesBack([{ pct: 20 }, { pct: 15, ratedEvents: 5, avgAtLeast: 4.5 }], 15).words, 'Average under 4.5 · back to 20%');
+});
+
+test('a host’s switched-off notification sends no e-mail, wherever it comes from (Codex)', async () => {
+  const { household, host } = await aHost();
+  await query(`update hosts set notification_prefs = '{"new_booking": false}' where id = $1`, [host.id]);
+  const notifications = await import('../src/repositories/notifications.js');
+  const off = await notifications.notify({ householdId: household.id, kind: 'new_booking', title: 'x', dedupeKey: `nb:${host.id}` });
+  const on = await notifications.notify({ householdId: household.id, kind: 'payout_sent', title: 'y', dedupeKey: `ps:${host.id}` });
+  assert.deepEqual([off.email_state, on.email_state], ['none', 'queued'], 'still written; only the e-mail follows the switch');
 });

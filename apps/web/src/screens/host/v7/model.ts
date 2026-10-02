@@ -144,7 +144,7 @@ export type Cohost = { id?: string; name: string; role: 'cohost' | 'helper'; acc
 export type CheckItem = { key: 'email' | 'phone' | 'profile' | 'verified' | 'video' | 'checked' | 'payouts' | 'tax' | 'review'; blocks: 'send' | 'live' | 'payout' | null; done: boolean; optional?: boolean; info?: boolean; pending?: boolean; submitted?: boolean; t: string; s: string };
 
 export type LaneOffer = {
-  id: string; lane: HostLane; state: 'draft' | 'in_review' | 'live' | 'paused' | 'ended'; visibility: 'invite' | 'public' | null; money: 'free' | 'direct' | 'epic';
+  id: string; lane: HostLane; state: 'draft' | 'in_review' | 'approved' | 'live' | 'paused' | 'ended'; visibility: 'invite' | 'public' | null; money: 'free' | 'direct' | 'epic';
   draftStep: string | null; draftSource: string | null; steps: StepKey[]; missing: StepKey[];
   whatCategory: string | null; whatLabel: string | null; title: string | null; line: string | null; lineSuggested: boolean;
   photos: { id: string; url: string }[];

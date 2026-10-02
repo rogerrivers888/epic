@@ -31,11 +31,28 @@ type Desk = Extract<DeskHome, { home: 'desk' }>;
 export function HostDesk({ fallbackCount = 0 }: { fallbackCount?: number }) {
   const [home, setHome] = useState<DeskHome | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { api.desk().then(setHome).catch((e) => setError(e.message)); }, []);
-  if (error && !home) return <HostLanes yours={fallbackCount} />;
+  const [invites, setInvites] = useState<Awaited<ReturnType<typeof api.deskCohostInvites>>['invites']>([]);
+  useEffect(() => { api.desk().then(setHome).catch((e) => setError(e.message)); api.deskCohostInvites().then((r) => setInvites(r.invites)).catch(() => null); }, []);
+  const strip = invites.length ? <CohostInvites invites={invites} onDone={(id) => setInvites((l) => l.filter((x) => x.id !== id))} /> : null;
+  if (error && !home) return <View style={{ flex: 1 }}>{strip}<HostLanes yours={fallbackCount} /></View>;
   if (!home) return <Loading />;
-  if (home.home === '4e') return <HostLanes yours={0} />;
-  return <DeskHomeView d={home} />;
+  if (home.home === '4e') return <View style={{ flex: 1 }}>{strip}<HostLanes yours={0} /></View>;
+  return <View style={{ flex: 1 }}>{strip}<DeskHomeView d={home} /></View>;
+}
+
+/** Asked to co-host: nothing of the event is shown until they accept (Codex, 2 Oct 2026). */
+function CohostInvites({ invites, onDone }: { invites: { id: string; offerId: string; title: string | null; host: string }[]; onDone: (id: string) => void }) {
+  const { navigate } = useRouter();
+  return (
+    <View style={{ backgroundColor: LIME, paddingHorizontal: 20, paddingVertical: 10, gap: 6 }}>
+      {invites.map((i) => (
+        <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Text style={[tx(14, '700'), { flex: 1 }]} numberOfLines={1}>Co-host {i.title ?? 'an event'} · {i.host}</Text>
+          <Btn label="Accept" onPress={() => { api.deskAcceptCohost(i.id).then((r) => { onDone(i.id); navigate(paths.hostEvent(r.offerId)); }).catch(() => null); }} />
+        </View>
+      ))}
+    </View>
+  );
 }
 
 function DeskHomeView({ d }: { d: Desk }) {
