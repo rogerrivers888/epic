@@ -317,3 +317,10 @@ test('a provider\'s name in a plan\'s words is kept as its reference and named a
   assert.equal(read.state.transcript[1].text, 'I have put The Owned Aquarium first.');
   assert.equal(read.state.options[0].title, 'A morning at The Owned Aquarium');
 });
+
+test('only a whole name is kept as its reference: a place called "Spa" leaves "Spanish" alone', async () => {
+  const { tokeniseJson } = await import('../src/sources/displayNames.js');
+  const id = randomUUID();
+  const out = await tokeniseJson({ pool: [{ source: 'google', sourcePlaceId: id, name: 'Spa' }], transcript: [{ role: 'assistant', text: 'Spanish food, then the Spa.' }] });
+  assert.equal(out.transcript[0].text, `Spanish food, then the ⟦google:${id}⟧.`);
+});

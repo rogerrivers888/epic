@@ -307,9 +307,11 @@ export async function tokeniseJson(doc) {
     if (ref && !byName.has(p.name)) byName.set(p.name, ref);
   }
   if (!byName.size) return copy;
-  // Longest first, so "The Crown Inn" is not half-replaced by "The Crown".
+  // Longest first, so "The Crown Inn" is not half-replaced by "The Crown"; and
+  // whole names only, so a place called "Spa" leaves "Spanish" alone (Codex,
+  // 2 Oct 2026).
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
-  const re = new RegExp(names.map(escapeRe).join('|'), 'g');
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${names.map(escapeRe).join('|')})(?![\\p{L}\\p{N}])`, 'gu');
   const swap = (text) => text.replace(re, (m) => `⟦${byName.get(m)}⟧`);
   const own = (key, node) => key === 'intent' || (node && node.role === 'user');
   const walk = (node) => {

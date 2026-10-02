@@ -66,8 +66,9 @@ async function guestPayload(trip, guest) {
     chat.guestsOf(trip.id), travel.legsOf(trip.id), householdOf(trip.household_id),
   ]);
   // Named by what we own (the household's own nickname included), else a
-  // neutral word: a guest holds no account Google may be asked on.
-  await resolveInto([{ rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id });
+  // neutral word — never a live Google name: a guest's page is kept on their
+  // device whole (offline/policy.ts, /api/join/:token) (Codex, 2 Oct 2026).
+  await resolveInto([{ rows: stops, refKey: 'venue_ref', nameKey: 'venue_name' }], { purpose: 'trip.displayName', householdId: trip.household_id, live: false });
   const byDay = new Map();
   for (const s of stops) {
     const list = byDay.get(s.day_id) ?? [];
