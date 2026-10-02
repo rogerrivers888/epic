@@ -1377,9 +1377,10 @@ export async function applyPendingCountryBackfill(q = query) {
  * A missing country, from the place's own address (owner, 2 Oct 2026: "Italy and
  * the Vatican, UAE for Dubai, from their owned addresses").
  *
- * Fills a null country only — a stamp is never overridden from text. Reads every
- * owned address the place holds (the composed record's and each kept source's fact),
- * and settles only where they name one country by name (`domain/countryFromAddress.js`):
+ * Fills a null country only — a stamp is never overridden from text. Reads only the
+ * reverse geocoder's address (the one owned format that always ends with the
+ * country; a venue page's or the open map's ends with a town, which may be called
+ * Lebanon — Codex), and settles only where it names a country (`domain/countryFromAddress.js`):
  * a city, a region or a code is never evidence, so a placeholder like 00000 decides
  * nothing, and two addresses naming two countries leave it unknown. Settled rows are
  * requeued so settle files them under their country. Returns, per place, what settled
@@ -1399,18 +1400,16 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
   return { settled, unsettled };
 }
 
-/** Places with no country, each with every owned address it holds. Read-only. */
+/** Places with no country, each with its reverse-geocoded address(es). Read-only. */
 export async function nullCountryAddresses(refs = null, q = query) {
   const { rows } = await q(`
-    select pi.venue_ref,
-           array_remove(array_agg(distinct f.value #>> '{}') || array[max(r.address)], null) as addresses
+    select pi.venue_ref, array_agg(f.value #>> '{}') as addresses
       from place_index pi
-      left join place_records r on r.venue_ref = pi.venue_ref
-      left join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address' and f.expires_at is null
+      join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address'
+                        and f.source = 'nominatim' and f.expires_at is null
      where pi.country_code is null
        ${refs ? 'and pi.venue_ref = any($1)' : ''}
-     group by pi.venue_ref
-    having count(f.venue_ref) > 0 or max(r.address) is not null`, refs ? [refs] : []);
+     group by pi.venue_ref`, refs ? [refs] : []);
   return rows;
 }
 

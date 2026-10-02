@@ -2,8 +2,8 @@
  * A place's country from its own address (owner, 2 Oct 2026: "Italy and the
  * Vatican, UAE for Dubai, from their owned addresses").
  *
- * Only a COUNTRY NAME is evidence, and only where an address formatter puts one:
- * the last component, with nothing after it. "…, Rome, Lazio, 00153, Italy" is Italy;
+ * Only a COUNTRY NAME is evidence, and only from the one owned address that always
+ * carries one: the reverse geocoder's (Nominatim, ODbL). "…, Rome, Lazio, 00153, Italy" is Italy;
  * "…, Vatican City" is the Vatican (VA — its own country, never Italy);
  * "Iris Bay Tower, Business Bay, Dubai, Dubai, 00000" names no country at all,
  * because Dubai is a city and 00000 is not a postcode. Nothing is inferred from a
@@ -68,20 +68,24 @@ const NAMES = (() => {
 const isCode = (part) => /\d/.test(part) && !/[a-z]{4,}/i.test(part.replace(/\d/g, ''));
 
 /**
- * The country one address names, or null. Only when the country is the address's
- * LAST component, with nothing after it — not even a code. An address formatter
- * ends with the country; an address that ends with a postcode or a ZIP has a town
- * in front of it, and a town can be called Lebanon, Italy or Peru ("123 Main St,
- * Lebanon, 37087" is Tennessee — Codex). No list of such towns can be complete,
- * so the rule is the position, not a list. A trailing placeholder (00000) makes
- * the address name no country at all.
+ * The country a NOMINATIM-formatted address names, or null.
+ *
+ * Only that formatter is read (`sources/geocode.js` formatAddress): it writes
+ * [street, area, town, state, postcode, country] and always ends with the country —
+ * except that it drops a part that repeats an earlier one, and the country repeats
+ * the town exactly for a city-state, so the Vatican reads "…, Vatican City, 00120".
+ * So in this format the last component that is not a code is the country (or the
+ * city-state's own name). Other sources' addresses end with a town, and a town can
+ * be called Lebanon, Mexico or Peru (Codex), so they are never read.
  */
 export function countryNamedIn(address) {
   if (!address) return null;
   const parts = String(address).split(',').map((p) => p.trim()).filter(Boolean);
-  const last = parts[parts.length - 1];
-  if (!last || isCode(last)) return null;
-  return NAMES.get(fold(last)) ?? null;
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    if (isCode(parts[i])) continue;           // a postcode, a placeholder — never evidence
+    return NAMES.get(fold(parts[i])) ?? null;  // the formatter's last name: the country
+  }
+  return null;
 }
 
 /**

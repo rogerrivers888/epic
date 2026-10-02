@@ -90,7 +90,11 @@ export async function areaKeyCheck() {
   const { rows: [{ n: nonGbTotal }] } = await query(
     `select count(*)::int as n from place_index where country_code is not null and upper(country_code) <> 'GB'`);
   const nonGbPlaces = await n(`
-      select pi.venue_ref, upper(pi.country_code) as country, r.name, r.address, r.postcode
+      select pi.venue_ref, upper(pi.country_code) as country, r.name, r.postcode,
+             -- The reverse-geocoded address a country is read from (Codex: show the
+             -- evidence actually used, not the composed record's address).
+             (select f.value #>> '{}' from place_facts f where f.venue_ref = pi.venue_ref
+                and f.field = 'address' and f.source = 'nominatim' and f.expires_at is null) as geocoded_address
         from place_index pi left join place_records r on r.venue_ref = pi.venue_ref
        where pi.country_code is not null and upper(pi.country_code) <> 'GB'
        order by 2, r.name nulls last, pi.venue_ref limit 500`);
@@ -100,6 +104,18 @@ export async function areaKeyCheck() {
     const v = countryFromAddresses(r.addresses ?? []);
     return { venue_ref: r.venue_ref, addresses: r.addresses, country: v.code, reason: v.reason ?? null };
   });
+  // A place with no country and no reverse-geocoded address never reaches the pass;
+  // it is named here with that as its reason, so "not settled" always says why.
+  const noGeocode = await n(`
+      select pi.venue_ref, r.name, r.address from place_index pi
+        left join place_records r on r.venue_ref = pi.venue_ref
+       where pi.country_code is null and (r.address is not null or r.postcode is not null)
+         and not exists (select 1 from place_facts f where f.venue_ref = pi.venue_ref and f.field = 'address'
+                          and f.source = 'nominatim' and f.expires_at is null)
+       order by pi.venue_ref`);
+  for (const r of noGeocode) {
+    addressVerdicts.push({ venue_ref: r.venue_ref, addresses: [], country: null, reason: 'no reverse-geocoded address held', name: r.name, address: r.address });
+  }
   // Postcodes that are not postcodes — 00000 and its kind — across the whole corpus,
   // so a placeholder is seen for what it is wherever it sits.
   const placeholderPostcodes = await n(`
