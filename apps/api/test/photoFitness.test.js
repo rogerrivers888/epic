@@ -160,3 +160,21 @@ test('the quote counts every unscored picture; an Openverse thumbnail keeps its 
   assert.equal(img.width, 600, 'the stored bytes are the thumbnail');
   assert.equal(img.original_width, 4000);
 });
+
+test('every picture of a place is looked at, past the first dozen; an Openverse thumbnail with no original size is a don\'t-know on size', async () => {
+  const ref = `google:many-${randomUUID()}`;
+  for (let i = 0; i < 15; i += 1) await picture(ref);
+  let calls = 0;
+  const out = await fit.scorePlace(ref, {}, {
+    pictureOf: async () => ({ body: Buffer.from([0xff, 0xd8, 0xff]), mime: 'image/jpeg', longEdge: 1600 }),
+    parseStructured: async (args) => { calls += 1; args.meta.costUsd = 0; return all('yes'); },
+  });
+  assert.equal(out.scored, 15);
+  assert.equal(calls, 15);
+
+  const ref2 = `google:legacy-${randomUUID()}`;
+  const id = await picture(ref2, { width: 600 });
+  await query(`insert into image_variants (image_id, width, mime, bytes, body) values ($1, 500, 'image/jpeg', 3, $2)`, [id, Buffer.from([0xff, 0xd8, 0xff])]);
+  const row = await fit.scorePicture({ venueRef: ref2, imageId: id }, { parseStructured: async (args) => { args.meta.costUsd = 0; return all('yes'); } });
+  assert.equal(row.checks.find((c) => c.key === 'sharp_lit_size').answer, 'unknown', 'not failed on a thumbnail\'s size');
+});

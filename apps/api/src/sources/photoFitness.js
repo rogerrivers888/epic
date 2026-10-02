@@ -92,6 +92,12 @@ async function pictureOf({ imageId, imageUrl }) {
     if (!img || !variant?.body) return null;
     // The photograph's own size where the source told us it (Openverse keeps
     // only a thumbnail), else the stored picture's.
+    // An Openverse picture with no original size on record holds only its
+    // thumbnail: its size is not the photograph's, so the size half of the
+    // check is "don't know" rather than a failure (Codex, 2 Oct 2026).
+    if (img.source === 'openverse' && !img.original_width && !img.original_height) {
+      return { body: variant.body, mime: variant.mime ?? 'image/jpeg', longEdge: null };
+    }
     const w = Number(img.original_width) || Number(img.width) || 0;
     const h = Number(img.original_height) || Number(img.height) || 0;
     return { body: variant.body, mime: variant.mime ?? 'image/jpeg', longEdge: Math.max(w, h) || null };
@@ -229,18 +235,26 @@ export function scorePlace(venueRef, opts = {}, deps = {}) {
 }
 
 async function scorePlaceNow(venueRef, { householdId = null } = {}, deps = {}) {
-  const todo = await unscored({ venueRef, limit: 12 });
-  let scored = 0; let failed = 0;
+  // Every unscored picture of the place, a batch at a time until none are left
+  // (Codex, 2 Oct 2026); one that cannot be looked at is passed over, not retried.
+  let scored = 0; let failed = 0; let looked = 0;
+  const passed = new Set();
+  const keyOf = (p) => `${p.image_id ?? p.image_url}`;
+  for (;;) {
+    const todo = (await unscored({ venueRef, limit: 12 + passed.size })).filter((p) => !passed.has(keyOf(p))).slice(0, 12);
+    if (!todo.length) break;
   for (const p of todo) {
+    looked += 1;
     try {
       const out = await withPictureLock(p, async () => {
         if (!(await stillUnscored(p))) return null;
         return scorePicture({ venueRef, imageId: p.image_id, imageUrl: p.image_url, name: p.name, category: p.category, householdId }, deps);
       });
-      if (out && !out.skipped) scored += 1;
-    } catch { failed += 1; }
+      if (out && !out.skipped) scored += 1; else passed.add(keyOf(p));
+    } catch { failed += 1; passed.add(keyOf(p)); }
   }
-  return { scored, failed, looked: todo.length };
+  }
+  return { scored, failed, looked };
 }
 
 /**
