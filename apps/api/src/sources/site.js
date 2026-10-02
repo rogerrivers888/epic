@@ -251,6 +251,17 @@ const TAIL_WORDS = new Set([...LEAD_WORDS,
   'for', 'year', 'round', 'every', 'day', 'days', 'of', 'open', 'daily', 'ages', 'welcome', 'charge', 'no',
 ]);
 
+// A block element ends a sentence for the free-entry scan: "Plan your visit" in the
+// heading above <p>Admission is free.</p> is not part of the claim, and with the
+// lead held to an allowlist, a heading bleeding into it rejected every ordinary free
+// page (Codex). Only the free scan reads this — price extraction keeps `flatten`, so
+// "Adults</td><td>£12" is not split.
+const BLOCK_END = /<\/?(?:p|h[1-6]|li|ul|ol|div|section|article|header|footer|nav|aside|main|table|tr|td|th|dt|dd|blockquote|figcaption|br|hr)\b[^>]*>/gi;
+const flattenBlocks = (html) => flatten(String(html)
+  .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+  .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+  .replace(BLOCK_END, ' . '));
+
 const flatten = (html) => String(html)
   .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
   .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
@@ -351,6 +362,7 @@ export function admissionFrom(html, node = {}) {
   }
 
   if (found.free === null && !found.adult) {
+    const flat = flattenBlocks(html); // sentence-bounded by blocks too; see BLOCK_END
     for (const m of flat.matchAll(FREE)) {
       // A qualifier on either side disqualifies the claim: "free admission all year"
       // is universal, but "Members enjoy free admission" and "free entry for children"

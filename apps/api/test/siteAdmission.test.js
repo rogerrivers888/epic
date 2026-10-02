@@ -135,3 +135,13 @@ test('a price range from nought is a paid place, not a free one', () => {
   assert.notEqual(a?.free, true, 'the cheapest ticket of a range is not free entry');
   assert.equal(admissionFrom('<p></p>', { offers: [{ price: 0, name: 'Adult' }] })?.free === true, false, 'an adult-only nought is not everyone');
 });
+
+test('a heading or a menu above the claim is its own sentence', () => {
+  // With the lead an allowlist, a heading bleeding into the claim rejected every
+  // ordinary free page (Codex): block elements end a sentence for this scan.
+  assert.equal(free('<h2>Plan your visit</h2><p>Admission is free.</p>'), true);
+  assert.equal(free('<nav><a>Home</a><a>Shop</a></nav><div>Free entry, all year round.</div>'), true);
+  assert.equal(free('<p>Admission is <a href="/x">free</a>.</p>'), true, 'an inline link does not split the claim');
+  // A qualifier in the claim's own block still bars it.
+  assert.equal(free('<h2>Plan your visit</h2><p>Members receive free admission.</p>'), false);
+});
