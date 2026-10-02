@@ -205,7 +205,9 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
     'insert into review_spotting_tallies (venue_ref, raised, filtered, tombstoned, queued) values ($1, $2, $3, $4, $5)',
     [venueRef, raisedAll.size, filtered, tombstoned, queued]);
   if (!features.size) {
-    if (raisedAll.size) await tally((t, p) => (client ? client.query(t, p) : query(t, p)));
+    // Every pass is a row, a pass that raised nothing included — the tally counts
+    // passes and places, and an empty one is still a place read (Codex, 2 Oct 2026).
+    await tally((t, p) => (client ? client.query(t, p) : query(t, p)));
     return empty(filtered);
   }
 

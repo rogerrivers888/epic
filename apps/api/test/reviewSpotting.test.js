@@ -680,6 +680,9 @@ test('each spotting pass is tallied as counts only: raised, filtered, queued', a
   // An opinions-only pass is tallied too — that is most of what the filter is for.
   await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'Friendly staff. Delicious.' } });
   assert.equal((await query('select count(*)::int n from review_spotting_tallies where venue_ref = $1 and queued = 0 and filtered > 0', [ref])).rows[0].n, 1, 'an all-opinion pass is counted');
+  // A pass that raised nothing at all is still a place read, so it is a row too.
+  await spotFromDetail({ venueRef: ref, detail: { reviews: [] } });
+  assert.equal((await query('select count(*)::int n from review_spotting_tallies where venue_ref = $1 and raised = 0', [ref])).rows[0].n, 1, 'an empty pass is counted');
   const all = await spottingTally();
   assert.ok(all.spots >= 2 && all.filtered >= t.filtered, 'the tally sums the passes');
   // No text anywhere in the table.
@@ -827,11 +830,13 @@ test('a drawer owed a fact that is asked everywhere by the time a set arrives is
   await query("insert into question_sets (key, name) values ('c30-pendglobal-set', 'C30 pendglobal set') on conflict do nothing");
   await query("insert into place_attributes (key, label, kind) values ('pg-everywhere', 'Asked everywhere', 'yesno') on conflict (key) do update set active = true");
   await query("delete from questions where attribute_key = 'pg-everywhere'");
-  await query("insert into questions (attribute_key, scope, active) values ('pg-everywhere', 'global', true)");
+  // Switched off: the attach must switch it back on, or the fact is asked nowhere.
+  await query("insert into questions (attribute_key, scope, active) values ('pg-everywhere', 'global', false)");
   await query("insert into feature_pending_asks (attribute_key, subcategory_key) values ('pg-everywhere', $1) on conflict do nothing", [sub]);
 
   await sets.attach('c30-pendglobal-set', sub);
   assert.equal((await query("select count(*)::int n from questions where attribute_key = 'pg-everywhere' and scope = 'set'")).rows[0].n, 0, 'no set question beside the global one');
+  assert.equal((await query("select active from questions where attribute_key = 'pg-everywhere' and scope = 'global'")).rows[0].active, true, 'the switched-off global is asked again');
   assert.equal((await query("select count(*)::int n from feature_pending_asks where attribute_key = 'pg-everywhere'")).rows[0].n, 0, 'the obligation is met and cleared');
 });
 

@@ -115,15 +115,18 @@ export async function attach(setKey, subcategoryKey) {
 async function askWaiting(client, subcategoryKey, setKey) {
   const { rows: waiting } = await client.query(
     `select w.attribute_key, a.active,
-            exists (select 1 from questions g where g.attribute_key = w.attribute_key and g.scope = 'global') as asked_everywhere
+            (select g.id from questions g where g.attribute_key = w.attribute_key and g.scope = 'global' limit 1) as global_id
        from feature_pending_asks w join place_attributes a on a.key = w.attribute_key
       where w.subcategory_key = $1`, [subcategoryKey]);
   for (const w of waiting) {
-    // Asked everywhere already, or retired since: nothing to add here, so the
-    // obligation is met. Anything else is asked now; a failure is NOT swallowed —
-    // it takes the attachment back with it rather than forgetting the fact
-    // (Codex, 2 Oct 2026).
-    if (w.active && !w.asked_everywhere) {
+    // Asked everywhere: no set question beside it — but a global that has been
+    // switched off is switched back on, or the fact would be asked nowhere (Codex,
+    // 2 Oct 2026). Retired since: nothing to ask. Anything else is asked now, and a
+    // failure is NOT swallowed — it takes the attachment back with it rather than
+    // forgetting the fact.
+    if (w.active && w.global_id) {
+      await client.query('update questions set active = true, updated_at = now() where id = $1 and not active', [w.global_id]);
+    } else if (w.active) {
       const q = await addQuestion({ attributeKey: w.attribute_key, setKey, scope: 'set' }, client);
       if (q && q.active === false) await client.query('update questions set active = true, updated_at = now() where id = $1', [q.id]);
     }
