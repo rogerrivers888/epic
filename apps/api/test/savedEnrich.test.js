@@ -562,3 +562,23 @@ test('a picture on the page from somebody else\'s host is not the venue\'s; its 
     'https://images.squarespace-cdn.com/content/v1/x/front.jpg', 'https://media.venue.example/dining.jpg',
   ]);
 });
+
+test('a photograph-only place is not researched; an Openverse picture stored but never linked is linked on the next pass', async () => {
+  const hh = await household();
+  const out = await enrich.requestEnrichment({ venueRef: `photo:${randomUUID()}`, account: { email: 'roger@epic.day' }, householdId: hh });
+  assert.deepEqual([out.started, out.why], [false, 'not_a_venue']);
+
+  const id = `orphan-${randomUUID()}`;
+  await query(`insert into image_assets (source, source_ref, licence, may_store, moderation) values ('openverse', $1, 'CC BY 2.0', true, 'pending')`, [`openverse:${id}`]);
+  const ref = `google:orphan-${randomUUID()}`;
+  const body = { results: [{ id, title: 'Orphan', thumbnail: 'https://x/o', license: 'by', license_version: '2.0' }] };
+  let downloaded = 0;
+  const got = await picturesFor({ venueRef: ref, name: 'Orphan' }, {
+    fetchImpl: async () => ({ ok: true, json: async () => body }),
+    fetchPictureImpl: async () => { downloaded += 1; return null; },
+  });
+  assert.equal(got.stored.length, 1);
+  assert.equal(downloaded, 0, 'linked from what is held, not fetched again');
+  const { rows } = await query(`select count(*)::int as n from image_links where subject_type = 'place' and subject_id = $1`, [ref]);
+  assert.equal(rows[0].n, 1);
+});

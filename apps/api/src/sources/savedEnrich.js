@@ -121,6 +121,9 @@ async function setState(venueRef, state, extra = {}) {
  */
 export async function requestEnrichment({ venueRef, account, householdId, sessionId = null, rerun = false, seedName = null }) {
   if (!venueRef || !householdId) return { started: false, why: 'no_place' };
+  // A place made from the household's own photograph has no venue behind it
+  // to research — the backfill leaves it out, and so does a save (Codex, 2 Oct 2026).
+  if (!String(venueRef).includes(':') || String(venueRef).startsWith('photo:')) return { started: false, why: 'not_a_venue' };
   if (!rerun && !isEnrichAccount(account)) return { started: false, why: 'not_enrolled' };
   // A re-run is of a place already researched, and nothing else: never a way
   // to start the paid pass on an arbitrary reference (Codex, 2 Oct 2026).

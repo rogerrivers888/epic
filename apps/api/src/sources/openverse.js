@@ -103,12 +103,21 @@ export async function picturesFor({ venueRef, name, locality = null }, { keep = 
     // second place by name would carry an approval across untested — "The
     // Crown" is half the pubs in England (Codex, 2 Oct 2026). Left alone.
     const { rows: held } = await query(
-      `select i.id, i.moderation, exists (select 1 from image_links l where l.image_id = i.id and l.subject_type = 'place' and l.subject_id = $2) as here
-         from image_assets i where i.source = 'openverse' and i.source_ref = $1`, [`openverse:${r.id}`, venueRef]);
-    // Held already, for any place and in any state: left exactly as it is —
+      `select i.id, i.moderation, exists (select 1 from image_links l where l.image_id = i.id and l.subject_type = 'place') as linked
+         from image_assets i where i.source = 'openverse' and i.source_ref = $1`, [`openverse:${r.id}`]);
+    // Held already and linked to a place, in any state: left exactly as it is —
     // its moderation, its link and its role (an approved card picture stays the
     // card picture) — and not counted as found again (Codex, 2 Oct 2026).
-    if (held.length) continue;
+    if (held.length && held[0].linked) continue;
+    // Held but linked to nothing — a pass stopped between storing it and
+    // linking it. Still waiting for a look, it is linked here rather than lost
+    // for good; anything already decided is left alone (Codex, 2 Oct 2026).
+    if (held.length) {
+      if (held[0].moderation !== 'pending') continue;
+      await lib.linkImage(held[0].id, { subjectType: 'place', subjectId: venueRef, role: 'gallery', position: 10 + stored.length });
+      stored.push({ imageId: held[0].id, licence: r.licence, creator: r.creator, landing: r.landing });
+      continue;
+    }
     // Openverse's own thumbnail: a few hundred pixels, which is what a card
     // draws, and a polite size to take from somebody else's server.
     const pic = await fetchPictureImpl(r.thumbnail ?? r.url);
