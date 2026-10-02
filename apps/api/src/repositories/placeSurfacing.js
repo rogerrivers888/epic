@@ -483,25 +483,8 @@ export async function surfacingReport({ examples = 10 } = {}) {
  */
 export async function gateProof({ names = [], checkId = null } = {}) {
   const he = await heritageLoad();
-  // One completed check, named or the latest, read the same way everywhere.
-  // "Held" means held back under that check now — pending or applied: the rows
-  // still carrying its id and not surfaced, which is what apply acts on — so a
-  // row since reconsidered or re-judged is honestly not held by it. A check running now
-  // rewrites those rows as it goes, so while one runs the stored side cannot speak
-  // (Codex: never a mixed snapshot as a proof); a crashed run older than the six
-  // hours `runningCheck` honours does not count as running.
-  const LIVE_RUN = `state = 'running' and started_at > now() - interval '6 hours'`;
-  const { rows: [{ latest: startedBefore } = {}] } = await query(`select md5(
-       (select coalesce(string_agg(id::text || ':' || state, ',' order by id), '') from surfacing_checks) || '|' ||
-       (select coalesce(string_agg(venue_ref || ':' || surfaced || ':' || applied || ':' || coalesce(check_id::text, ''), ',' order by venue_ref), '') from place_surfacing) || '|' ||
-       (select coalesce(string_agg(venue_ref || '>' || member_ref, ',' order by venue_ref, member_ref), '') from place_surfacing_members)
-     ) as latest`);
-  const { rows: [running] } = await query(`select id from surfacing_checks where ${LIVE_RUN} limit 1`);
-  const { rows: [done] } = await query(
-    `select id from surfacing_checks where state = 'done' ${checkId ? 'and id = $1' : ''}
-      order by finished_at desc nulls last limit 1`, checkId ? [checkId] : []);
-  const readCheck = !running && done ? done.id : null;
-  const cantRead = running ? 'a narrowing check is running now' : checkId ? 'that check did not complete' : 'no completed narrowing check to read';
+  // The live side first: each named place, every alias cluster of that name on its
+  // own (two places can share a name — Codex), with what we hold and the bar's verdict.
   const places = [];
   for (const raw of names.map((n) => String(n).trim()).filter(Boolean).slice(0, 40)) {
     const { rows } = await query(
@@ -510,17 +493,8 @@ export async function gateProof({ names = [], checkId = null } = {}) {
     const seeds = rows.map((r) => r.ref);
     if (!seeds.length) { places.push({ name: raw, records: 0, held: null, why: 'no record of that name is held' }); continue; }
     const { rootOf, membersOf } = await aliasClosure(seeds);
-    // Two places can share a name ("St Mary's Church"): each alias cluster is its
-    // own place, judged on its own (Codex).
-    const roots = [...new Set(seeds.map((r) => rootOf.get(r) ?? r))];
-    for (const root of roots) {
+    for (const root of new Set(seeds.map((r) => rootOf.get(r) ?? r))) {
       const members = [...new Set(membersOf.get(root) ?? [root])];
-      const { rows: heldRows } = readCheck ? await query(
-        `select distinct s.venue_ref from place_surfacing_members m
-           join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
-          where m.member_ref = any($1::text[]) and s.check_id = $2`, [members, readCheck]) : { rows: [] };
-      // The live trace, so a place can be followed before any check has run: which
-      // drawers each copy is filed in, what we hold about it, and the bar's verdict.
       const [signals, filings, elsewhere] = await Promise.all([
         gatherSignals(members, { heritageLoad: he.load }),
         query(`select f.venue_ref as ref, array_agg(distinct f.sub) as subs from (${FILED_SQL}) f
@@ -539,35 +513,50 @@ export async function gateProof({ names = [], checkId = null } = {}) {
       });
       const narrowedOnly = trace.some((t) => t.filedIn.some((k) => NARROWED.includes(k)))
         && !members.some((m) => elsewhere.has(m));
-      places.push({
-        name: raw, cluster: root, records: members.length,
-        held: readCheck ? heldRows.length > 0 : null,
-        ...(readCheck ? {} : { why: cantRead }),
-        heldBy: heldRows.map((r) => r.venue_ref),
-        liveHeld: narrowedOnly && !trace.some((t) => t.verdict === 'kept'),
-        trace,
-      });
+      places.push({ name: raw, cluster: root, records: members.length, members,
+        liveHeld: narrowedOnly && !trace.some((t) => t.verdict === 'kept'), trace });
     }
   }
-  if (!readCheck) return { checkId: null, why: cantRead, places, snapshotRecords: null, filedElsewhere: null, leakedExamples: [] };
-  const { rows: snap } = await query(
-    `select distinct m.member_ref as ref from place_surfacing_members m
-       join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
-      where s.check_id = $1`, [readCheck]);
-  const leaked = await filedElsewhere(snap.map((r) => r.ref));
-  // A check that started while this was reading may have rewritten rows between
-  // the reads above: then none of the stored side can speak. Compared on every
-  // check's id and state, not a timestamp, which need not rise in commit order — and
-  // on every determination and snapshot member, which `reconsider()` rewrites with no
-  // check row changing (Codex).
-  const { rows: [{ latest: startedAfter } = {}] } = await query(`select md5(
-       (select coalesce(string_agg(id::text || ':' || state, ',' order by id), '') from surfacing_checks) || '|' ||
-       (select coalesce(string_agg(venue_ref || ':' || surfaced || ':' || applied || ':' || coalesce(check_id::text, ''), ',' order by venue_ref), '') from place_surfacing) || '|' ||
-       (select coalesce(string_agg(venue_ref || '>' || member_ref, ',' order by venue_ref, member_ref), '') from place_surfacing_members)
-     ) as latest`);
-  if (String(startedAfter ?? '') !== String(startedBefore ?? '')) {
-    const why = 'a narrowing check started while the proof was reading';
-    return { checkId: null, why, places: places.map((p) => ({ ...p, held: null, heldBy: [], why })), snapshotRecords: null, filedElsewhere: null, leakedExamples: [] };
-  }
-  return { checkId: readCheck, places, snapshotRecords: snap.length, filedElsewhere: leaked.size, leakedExamples: [...leaked].slice(0, 10) };
+
+  // The stored side, read in ONE repeatable-read snapshot so a check or a
+  // reconsideration writing meanwhile can never be half-seen (Codex). "Held" is
+  // held back under one completed check now — the rows still carrying its id and
+  // not surfaced, which is what apply acts on. A check running now rewrites those
+  // rows as it goes, so while one runs the stored side cannot speak; a crashed run
+  // older than the six hours `runningCheck` honours does not count.
+  const stored = await withTransaction(async (c) => {
+    await c.query('set transaction isolation level repeatable read, read only');
+    const { rows: [running] } = await c.query(
+      `select id from surfacing_checks where state = 'running' and started_at > now() - interval '6 hours' limit 1`);
+    const { rows: [done] } = await c.query(
+      `select id from surfacing_checks where state = 'done' ${checkId ? 'and id = $1' : ''}
+        order by finished_at desc nulls last limit 1`, checkId ? [checkId] : []);
+    if (running || !done) {
+      return { readCheck: null, why: running ? 'a narrowing check is running now' : checkId ? 'that check did not complete' : 'no completed narrowing check to read' };
+    }
+    const heldBy = new Map();
+    for (const [i, p] of places.entries()) {
+      if (!p.members) continue;
+      const { rows } = await c.query(
+        `select distinct s.venue_ref from place_surfacing_members m
+           join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
+          where m.member_ref = any($1::text[]) and s.check_id = $2`, [p.members, done.id]);
+      heldBy.set(i, rows.map((r) => r.venue_ref));
+    }
+    const { rows: snap } = await c.query(
+      `select distinct m.member_ref as ref from place_surfacing_members m
+         join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
+        where s.check_id = $1`, [done.id]);
+    return { readCheck: done.id, heldBy, snap: snap.map((r) => r.ref) };
+  });
+
+  const out = places.map(({ members, ...p }, i) => {
+    if (!members) return p;
+    if (!stored.readCheck) return { ...p, held: null, why: stored.why, heldBy: [] };
+    const by = stored.heldBy.get(i) ?? [];
+    return { ...p, held: by.length > 0, heldBy: by };
+  });
+  if (!stored.readCheck) return { checkId: null, why: stored.why, places: out, snapshotRecords: null, filedElsewhere: null, leakedExamples: [] };
+  const leaked = await filedElsewhere(stored.snap);
+  return { checkId: stored.readCheck, places: out, snapshotRecords: stored.snap.length, filedElsewhere: leaked.size, leakedExamples: [...leaked].slice(0, 10) };
 }
