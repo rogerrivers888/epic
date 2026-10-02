@@ -92,8 +92,25 @@ export const passcodeMatches = (given) => authConfigured() && sameSecret(given, 
 export async function openSession(label, accountId = null, kind = 'agent', authMethod = 'passcode') {
   const token = crypto.randomBytes(32).toString('base64url');
   const session = await insertSession(token, label, accountId, kind, authMethod);
+  if (recordingMints && session?.id) mintedHere.add(session.id);
   return { token, session };
 }
+
+/**
+ * The sessions this process has opened — kept only while the launch gate cannot
+ * read its cutoff (siteGate.js `failClosedUntilCutoff`), and cleared the moment
+ * it can. In that window the gate honours exactly these: a session this process
+ * minted is after the clean slate by construction (migrations run before the API
+ * starts), and knowing it needs no clock — comparing this host's time with the
+ * database's `created_at` would let skew blind a fresh sign-in (Codex, 2 Oct 2026).
+ */
+const mintedHere = new Set();
+let recordingMints = false;
+export function recordMintsSinceBoot(on) {
+  recordingMints = Boolean(on);
+  if (!recordingMints) mintedHere.clear();
+}
+export const mintedSinceBoot = (id) => Boolean(id) && mintedHere.has(id);
 
 /**
  * Whether a new session is somebody's device or an agent (migration 264).

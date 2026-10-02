@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 import { testDatabase } from './helpers/db.js';
 
 const { pool } = await testDatabase();
-const { siteGateOn, basicAuthOk, siteGate, sessionBlockedByGate, setCleanSlateEpoch } = await import('../src/siteGate.js');
+const { siteGateOn, basicAuthOk, siteGate, sessionBlockedByGate, setCleanSlateEpoch, failClosedUntilCutoff } = await import('../src/siteGate.js');
 const { insertSession, revokeSession } = await import('../src/repositories/sessions.js');
 const { stampPhoto } = await import('../src/sources/photoLinks.js');
 
@@ -291,23 +291,24 @@ test('health, the Postmark webhook, and a CORS preflight answer without a creden
   });
 });
 
-test('a boot-time cutoff still honours a session minted after it — a fresh sign-in is never blind', async () => {
-  // server.js falls back to the moment the process started when it cannot read
-  // the real cutoff. A future fallback refused every session, so a passcode
-  // sign-in succeeded and every read after it was 401 coming_soon (2 Oct 2026).
+test('while the cutoff is unknown, a session this process minted passes and an older one waits — no clocks compared', async () => {
+  // server.js calls failClosedUntilCutoff when it cannot read the real cutoff. It
+  // used to set a cutoff a year ahead, so a passcode sign-in succeeded and every
+  // read after it was 401 coming_soon (2 Oct 2026).
+  const { openSession } = await import('../src/auth.js');
   await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: null, GATE_USER: null, GATE_PASSWORD: null }, async () => {
-    const before = aToken();
-    await insertSession(before, 'minted before boot');
-    await new Promise((r) => setTimeout(r, 20));
-    setCleanSlateEpoch(new Date());
-    await new Promise((r) => setTimeout(r, 20));
-    const after = aToken();
-    await insertSession(after, 'minted after boot — a fresh agent sign-in');
+    const older = aToken();
+    await insertSession(older, 'opened before this process could date anything');
+    failClosedUntilCutoff();
     try {
-      const fresh = await run(mockReq({ path: '/api/admin/narrowing/preview', headers: { authorization: bearer(after) } }));
-      assert.equal(fresh.nexted, true, 'a session minted after boot passes, with no gate password set');
-      const stale = await run(mockReq({ path: '/api/admin/narrowing/preview', headers: { authorization: bearer(before) } }));
-      assert.equal(stale.nexted, false, 'one minted before boot waits for the real cutoff');
+      const { token: fresh } = await openSession('a fresh agent sign-in');
+      const read = (t) => run(mockReq({ path: '/api/admin/narrowing/preview', headers: { authorization: bearer(t) } }));
+      assert.equal((await read(fresh)).nexted, true, 'the fresh sign-in reads at once, with no gate password set');
+      const stale = await read(older);
+      assert.equal(stale.nexted, false, 'an older session waits for the real cutoff');
+      assert.equal(stale.res.statusCode, 401);
+      setCleanSlateEpoch(new Date(Date.now() - 3_600_000));
+      assert.equal((await read(older)).nexted, true, 'once the cutoff loads, the older session is judged by it');
     } finally { setCleanSlateEpoch(null); }
   });
 });

@@ -33,7 +33,7 @@
  */
 
 import crypto from 'node:crypto';
-import { liveSessionFor, signedMediaOk } from './auth.js';
+import { liveSessionFor, mintedSinceBoot, recordMintsSinceBoot, signedMediaOk } from './auth.js';
 
 const GATE_OFF = new Set(['off', 'false', '0', 'no']);
 
@@ -51,9 +51,26 @@ const GATE_OFF = new Set(['off', 'false', '0', 'no']);
  * is a credentialled sign-in, not public access.)
  */
 let cleanSlateMs = null;
+let cutoffUnknown = false;
 export function setCleanSlateEpoch(date) {
   const t = date ? new Date(date).getTime() : NaN;
   cleanSlateMs = Number.isFinite(t) ? t : null;
+  cutoffUnknown = false;
+  recordMintsSinceBoot(false);
+}
+
+/**
+ * The cutoff could not be read at boot (server.js). Fail closed on what cannot
+ * be dated, but never on a session this process minted itself: those are after
+ * the clean slate by construction, so a fresh sign-in is honoured at once and an
+ * agent that signs in is never handed a token the gate then refuses (owner, 2 Oct
+ * 2026: "any request carrying a valid Epic session … passes the gate"). Every
+ * older session waits for the real cutoff, which the retry restores
+ * (setCleanSlateEpoch ends this state).
+ */
+export function failClosedUntilCutoff() {
+  cutoffUnknown = true;
+  recordMintsSinceBoot(true);
 }
 const gateSince = () => {
   const env = process.env.EPIC_GATE_SINCE ? Date.parse(process.env.EPIC_GATE_SINCE) : NaN;
@@ -61,6 +78,9 @@ const gateSince = () => {
   return cleanSlateMs;
 };
 const predatesGate = (session) => {
+  // The owner's explicit override always wins; otherwise, while the automatic
+  // cutoff is unknown, only this process's own sessions are known to be after it.
+  if (!process.env.EPIC_GATE_SINCE && cutoffUnknown) return !mintedSinceBoot(session?.id);
   const since = gateSince();
   if (since == null || !session?.created_at) return false;
   const made = new Date(session.created_at).getTime();

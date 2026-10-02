@@ -87,7 +87,7 @@ import { sweepOldFailures } from './repositories/signInFailures.js';
 import { refresh as refreshReach } from './repositories/reach.js';
 import { buildIfEmpty, checkBars, seedBars, settleNew } from './repositories/placeIndex.js';
 import { health } from './health.js';
-import { siteGate, siteGateOn, setCleanSlateEpoch } from './siteGate.js';
+import { failClosedUntilCutoff, siteGate, siteGateOn, setCleanSlateEpoch } from './siteGate.js';
 import { cleanSlateAppliedAt } from './repositories/sessions.js';
 import { noteInvariantRun } from './repositories/settings.js';
 import * as censusRun from './sources/censusRun.js';
@@ -104,8 +104,6 @@ import { onGoogleStatus, onResearched } from './sources/closedCheck.js';
 import { onResearched as onResurfaced } from './repositories/placeSurfacing.js';
 import * as ownResearch from './sources/own.js';
 
-/** When this process started — the launch gate's fail-closed cutoff if its real one cannot be read (below). */
-const BOOTED_AT = new Date();
 
 const app = express();
 
@@ -740,20 +738,19 @@ await loadSourceSettings();
 // closed on what cannot be dated — and keep retrying until the read succeeds
 // (Codex, 1 Oct 2026).
 //
-// "Closed" is the moment this process started, not a date in the future. A
-// future cutoff refused every session including one minted a second ago, so a
-// passcode sign-in succeeded (the door is exempt) and handed back a token the
-// gate then refused on every read — agents signed in and saw only 401
+// "Closed" means: honour the sessions this process mints, refuse every older one
+// until the real cutoff loads (siteGate.js `failClosedUntilCutoff`). It used to be
+// a date a year ahead, which refused every session including one minted a second
+// ago — a passcode sign-in succeeded (the door is exempt) and handed back a token
+// the gate refused on every read, so agents signed in and saw only 401
 // coming_soon (owner, 2 Oct 2026: "any request carrying a valid Epic session …
-// passes the gate"). Migrations run before this process starts, so a session
-// minted after boot is after the clean slate by construction and is honoured;
-// one minted earlier waits for the real cutoff, which the retry restores.
+// passes the gate").
 const loadLaunchCutoff = async () => {
   try { setCleanSlateEpoch(await cleanSlateAppliedAt()); return true; }
   catch (err) { console.warn(`epic-api: launch-gate cutoff load failed: ${err.message}`); return false; }
 };
 if (!(await loadLaunchCutoff()) && siteGateOn()) {
-  setCleanSlateEpoch(BOOTED_AT);
+  failClosedUntilCutoff();
   const retry = setInterval(async () => { if (await loadLaunchCutoff()) clearInterval(retry); }, 60_000);
   retry.unref?.();
 }
