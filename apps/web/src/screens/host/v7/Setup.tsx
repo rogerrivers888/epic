@@ -90,7 +90,8 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
     const mine = ++version.current;
     const run = api.saveLaneOffer(offer.id, body).then((r) => {
       // Only the newest save's answer is drawn; an older one would undo keys typed since.
-      if (mine === version.current && !Object.keys(pending.current).length) setOffer(r.offer);
+      // The server's draft, keeping what only the screen knows (an age range still being typed).
+      if (mine === version.current && !Object.keys(pending.current).length) setOffer((prev) => ({ ...r.offer, ageRangePending: (prev as { ageRangePending?: boolean } | null)?.ageRangePending } as LaneOffer));
       setError(null);
       return r.offer;
     }).catch((e) => {
@@ -106,7 +107,10 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
 
   const update = useCallback((patch: LanePatch) => {
     setOffer((o) => (o ? { ...o, ...(patch as Partial<LaneOffer>) } : o));
-    pending.current = { ...pending.current, ...patch };
+    // Screen-only keys never go to the server.
+    const { ageRangePending: _local, ...saved } = patch as LanePatch & { ageRangePending?: boolean };
+    if (!Object.keys(saved).length) return;
+    pending.current = { ...pending.current, ...saved };
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { void flush(); }, 700);
   }, [flush]);

@@ -192,7 +192,7 @@ function UpcomingTab({ home, money, open, navigate }: { home: HostHome; money: H
         <>
           <Section title="Drafts" />
           {drafts.map((o) => (
-            <Press key={o.id} onPress={() => navigate(paths.hostSetup(o.id, o.draftStep && o.draftStep !== 'publish' ? o.draftStep : null))} accessibilityRole="button" style={styles.dateRow}>
+            <Press key={o.id} onPress={() => navigate(o.draftStep === 'publish' ? paths.hostPublish(o.id) : paths.hostSetup(o.id, o.draftStep))} accessibilityRole="button" style={styles.dateRow}>
               <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
                 <Text style={[t.body, { fontWeight: '600' }]} numberOfLines={1}>{o.title ?? 'Untitled'}</Text>
                 <Text style={t.small}>{LANE_TAG[o.lane!]} · carry on</Text>

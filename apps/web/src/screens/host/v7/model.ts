@@ -165,7 +165,7 @@ export type LaneOffer = {
   ageMin: number | null; ageMax: number | null; asksParents: boolean; needsChecked: boolean;
   privatePlan: 'event' | 'pro'; privateFeeState: 'unpaid' | 'pending' | 'paid' | 'included' | 'not_needed';
   video: { id: string | null; url: string | null; madeBy: 'self' | 'epic' | null; coverS: number | null; onProfile: boolean; photoIds: string[]; helloId: string | null; seconds: number | null; helloSeconds: number | null };
-  invites: { id: string; name: string; contact: string | null; contactKind: string | null; heads: number; rsvp: string | null; sentAt: string | null }[];
+  invites: { id: string; name: string; contact: string | null; contactKind: string | null; heads: number; rsvp: string | null; rsvpHeads?: number | null; sentAt: string | null }[];
   inviteUrl: string; pageUrl: string;
   sessionRows: { id: string; n: number | null; onDate: string; startsAt: string | null; topic: string | null; state: string }[];
   checklist: CheckItem[]; blockers: string[]; action: { key: 'verify' | 'review' | 'send' | 'pro' | 'pay'; label: string };

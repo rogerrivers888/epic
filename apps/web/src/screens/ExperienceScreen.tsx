@@ -281,7 +281,8 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
 
 const headline = (o: Experience) => {
   const dur = durationWords(o.durationMin);
-  if (o.shape === 'oneoff') return [o.startsOn ? dayShort(o.startsOn) : null, o.startsAt, dur, venueWords(o)].filter(Boolean).join(' · ');
+  // Over several days: the first and the last (hosting v7; Codex, 2 Oct 2026).
+  if (o.shape === 'oneoff') return [o.startsOn ? (o.multiDay && o.endsOn ? `${dayShort(o.startsOn)} – ${dayShort(o.endsOn)}` : dayShort(o.startsOn)) : null, o.startsAt, o.multiDay ? null : dur, venueWords(o)].filter(Boolean).join(' · ');
   if (o.shape === 'series') return [o.firstDate ? `From ${dateOnly(o.firstDate)}` : null, o.startsAt, o.sessions ? `${o.sessions} weeks` : null, venueWords(o)].filter(Boolean).join(' · ');
   return ['Book a slot', dur, venueWords(o)].filter(Boolean).join(' · ');
 };

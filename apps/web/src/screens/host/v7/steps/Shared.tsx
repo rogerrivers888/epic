@@ -306,8 +306,10 @@ export function WhoStep(props: StepProps & { reload: () => Promise<void> }) {
   const setAges = (f: string, t: string) => {
     const a = f.trim() ? Math.min(120, Math.max(0, Number(f.replace(/\D/g, '')))) : null;
     const b = t.trim() ? Math.min(120, Math.max(0, Number(t.replace(/\D/g, '')))) : null;
-    if (a != null && b != null && a > b) return;
-    update({ ageMin: a, ageMax: b, ...(b == null || b >= config.adultAge ? (offer.lane === 'course' ? {} : { parents: null }) : {}) });
+    // An empty or backwards range is not an answer: it stays open, and Next waits (Codex, 2 Oct 2026).
+    if (a == null && b == null) { update({ ageRangePending: true } as never); return; }
+    if (a != null && b != null && a > b) { showToast('The youngest age is above the oldest.'); update({ ageRangePending: true } as never); return; }
+    update({ ageMin: a, ageMax: b, ageRangePending: false, ...(b == null || b >= config.adultAge ? (offer.lane === 'course' ? {} : { parents: null }) : {}) } as never);
   };
   return (
     <>
@@ -320,9 +322,10 @@ export function WhoStep(props: StepProps & { reload: () => Promise<void> }) {
           <Press key={k} onPress={() => {
             setWho(k);
             const clearParents = offer.lane === 'course' ? {} : { parents: null };
-            if (k === 'adults') { setFrom(''); setTo(''); update({ ageMin: config.adultAge, ageMax: null, ...clearParents }); }
-            if (k === 'anyone') { setFrom(''); setTo(''); update({ ageMin: null, ageMax: null, ...clearParents }); }
-            if (k === 'range') { setFrom(''); setTo(''); update({ ageMin: null, ageMax: null }); }
+            if (k === 'adults') { setFrom(''); setTo(''); update({ ageMin: config.adultAge, ageMax: null, ageRangePending: false, ...clearParents } as never); }
+            if (k === 'anyone') { setFrom(''); setTo(''); update({ ageMin: null, ageMax: null, ageRangePending: false, ...clearParents } as never); }
+            // The last real answer stays saved until a range is typed.
+            if (k === 'range') { setFrom(''); setTo(''); update({ ageRangePending: true } as never); }
           }}
             accessibilityRole="radio" accessibilityState={{ selected: who === k }}
             style={[{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: who === k ? LIME : INACTIVE }, pointer]}>
@@ -361,7 +364,7 @@ function PrivateWho({ offer, reload }: { offer: LaneOffer; reload: () => Promise
   const [adding, setAdding] = useState(false);
   useEffect(() => { api.hostContacts().then((r) => setContacts(r.contacts)).catch(() => setContacts([])); }, []);
   const invitedHeads = offer.invites.reduce((n, i) => n + (i.heads ?? 1), 0);
-  const accepted = offer.invites.filter((i) => i.rsvp === 'yes').length;
+  const accepted = offer.invites.filter((i) => i.rsvp === 'yes').reduce((n, i) => n + (i.rsvpHeads ?? i.heads ?? 1), 0);
   const byContact = useMemo(() => new Map(offer.invites.map((i) => [i.contact ?? `name:${i.name}`, i])), [offer.invites]);
   const flip = async (c: HostContact) => {
     if (!offer.id) return;

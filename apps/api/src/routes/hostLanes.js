@@ -177,7 +177,7 @@ async function lanePayload(offer, host, account, { holidays } = {}) {
       seconds: offer.video_id ? (await repo.mediaMeta(offer.video_id))?.duration_s ?? null : null,
       helloSeconds: offer.hello_video_id ? (await repo.mediaMeta(offer.hello_video_id))?.duration_s ?? null : null,
     },
-    invites: invites.map((i) => ({ id: i.id, name: i.name, contact: i.contact, contactKind: i.contact_kind, heads: i.heads, rsvp: i.rsvp, sentAt: i.sent_at })),
+    invites: invites.map((i) => ({ id: i.id, name: i.name, contact: i.contact, contactKind: i.contact_kind, heads: i.heads, rsvp: i.rsvp, rsvpHeads: i.rsvp_heads ?? null, sentAt: i.sent_at })),
     inviteUrl: linkUrl(offer.link_token), pageUrl: pubUrl(offer.id),
     sessionRows: sessions.map((s) => ({ id: s.id, n: s.n, onDate: ymd(s.on_date), startsAt: s.starts_at?.slice(0, 5) ?? null, topic: s.topic, state: s.state })),
     checklist: items.map((i) => ({ ...i, ...ITEM_WORDS[i.key](sheet) })),

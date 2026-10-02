@@ -26,6 +26,6 @@ export function blankOffer(lane: HostLane): LaneOffer {
 export function canGoOn(o: LaneOffer, step: StepKey, adultAge = 18): boolean {
   if (step === 'what') return Boolean(o.whatLabel && o.title?.trim());
   if (step === 'run') return Boolean(o.firstDate);
-  if (step === 'who') return Boolean(o.visibility) && (!asksParentsOnWho(o, adultAge) || Boolean(o.parents));
+  if (step === 'who') return Boolean(o.visibility) && !(o as { ageRangePending?: boolean }).ageRangePending && (!asksParentsOnWho(o, adultAge) || Boolean(o.parents));
   return true;
 }

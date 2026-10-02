@@ -5467,7 +5467,7 @@ export type Availability = { days?: number[]; parts?: ('morning' | 'afternoon' |
 export type Experience = {
   /** Hosting v7: the lane a set-up was made in, and the step it was left on. Null for the old shapes. */
   lane?: 'oneoff' | 'weekly' | 'course' | 'onrequest' | null; draftStep?: string | null;
-  bookAheadPence?: number | null; childPence?: number | null; refundWords?: string | null; ageMin?: number | null; ageMax?: number | null;
+  bookAheadPence?: number | null; childPence?: number | null; refundWords?: string | null; ageMin?: number | null; ageMax?: number | null; multiDay?: boolean; endsOn?: string | null;
   id: string; hostId: string; shape: OfferShape; state: OfferState; pausedUntil: string | null; visibility: Visibility; money: Money;
   title: string | null; summary: string | null; description: string | null; whyYou: string | null; includes: string | null; category: string | null;
   photos: string[]; video: string | null; doc: string | null;
