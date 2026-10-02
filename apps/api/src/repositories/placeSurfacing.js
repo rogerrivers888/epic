@@ -526,11 +526,13 @@ export async function gateProof({ names = [], checkId = null } = {}) {
       const stateBefore = await placeStateStamp(query, members);
       const [signals, filings, elsewhere] = await Promise.all([
         gatherSignals(members, { heritageLoad: he.load }),
-        query(`select f.venue_ref as ref, array_agg(distinct f.sub) as subs from (${FILED_SQL}) f
-                where f.venue_ref = any($1::text[]) group by f.venue_ref`, [members]),
+        query(`select f.venue_ref as ref, array_agg(distinct f.sub) as subs,
+                      coalesce(array_agg(distinct f.sub) filter (where f.is_primary), '{}') as primary_subs
+                 from (${FILED_SQL}) f where f.venue_ref = any($1::text[]) group by f.venue_ref`, [members]),
         filedElsewhere(members),
       ]);
       const filedIn = new Map(filings.rows.map((r) => [r.ref, r.subs]));
+      const primaryIn = new Map(filings.rows.map((r) => [r.ref, r.primary_subs]));
       const trace = members.map((ref) => {
         const sg = signals.get(ref) ?? { ref, heritageAvailable: false, heritage: null };
         const v = notable(sg);
@@ -540,7 +542,9 @@ export async function gateProof({ names = [], checkId = null } = {}) {
           verdict: v.status, why: v.reason,
         };
       });
-      const narrowedOnly = trace.some((t) => t.filedIn.some((k) => NARROWED.includes(k)))
+      // A candidate is PRIMARY-filed in a narrowed drawer, as clusterCandidates()
+      // requires; a secondary filing there never holds a place back (Codex).
+      const narrowedOnly = members.some((m) => (primaryIn.get(m) ?? []).some((k) => NARROWED.includes(k)))
         && !members.some((m) => elsewhere.has(m));
       places.push({ name: raw, cluster: root, records: members.length, members, stateBefore,
         liveHeld: narrowedOnly && !trace.some((t) => t.verdict === 'kept'), trace });
