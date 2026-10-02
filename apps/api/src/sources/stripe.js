@@ -162,7 +162,8 @@ export function expireCheckout(id, { householdId } = {}) {
 }
 
 /** Paid: a payment session marked paid, or a subscription session complete. */
-export const checkoutPaid = (s) => s?.payment_status === 'paid' || (s?.mode === 'subscription' && s?.status === 'complete');
+// Only money actually taken counts: a subscription can complete Checkout with a delayed payment still unpaid (Codex, 2 Oct 2026).
+export const checkoutPaid = (s) => s?.payment_status === 'paid';
 
 // ---------------------------------------------------------------------------
 // webhooks

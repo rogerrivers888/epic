@@ -735,6 +735,13 @@ router.post('/host/lanes/verify', async (req, res, next) => {
     const host = await ensureHost(household, account);
     if (host.identity_state === 'verified') return res.json({ url: null, verified: true });
     const back = `${appUrl()}/host/offers/${encodeURIComponent(str(req.body?.offerId, 40) ?? '')}/publish?back=verified`;
+    // One open check at a time: a second tap carries on with the first session rather than
+    // orphaning it, so finishing either one counts (Codex, 2 Oct 2026).
+    if (host.identity_session_id && host.identity_state === 'pending') {
+      const open = await stripe.retrieveIdentity(host.identity_session_id, { householdId: household.id }).catch(() => null);
+      if (open?.status === 'verified') { await repo.updateHost(host.id, { identityState: 'verified', identityVerifiedAt: new Date() }); return res.json({ url: null, verified: true }); }
+      if (open?.status === 'requires_input' && open.url) return res.json({ url: open.url });
+    }
     const s = await stripe.identitySession({ returnUrl: back, hostId: host.id, householdId: household.id });
     await repo.updateHost(host.id, { identitySessionId: s.id, identityState: 'pending', stripeMode: 'test' });
     res.json({ url: s.url });
@@ -972,7 +979,7 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
     } else if (event.type === 'customer.subscription.deleted' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
       // Pro cancelled or lapsed: it stops counting for hosting from now.
       await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and state = 'succeeded'", [obj.metadata.epic_household_id]);
-    } else if (event.type === 'checkout.session.completed' && obj.id && stripe.checkoutPaid(obj)) {
+    } else if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && obj.id && stripe.checkoutPaid(obj)) {
       const kind = obj.metadata?.epic_kind === 'pro' ? 'pro' : 'private_fee';
       const pay = await repo.paymentByRef(obj.id, kind);
       if (pay && pay.state !== 'succeeded') {

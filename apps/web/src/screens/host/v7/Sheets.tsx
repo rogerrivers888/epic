@@ -192,7 +192,9 @@ function CheckedSheet({ home, onClose, onChanged }: SheetProps) {
     } catch (e: any) { showToast(e.message); } finally { setUploading(false); }
   };
 
-  const ok = dbs.length === 12 && Boolean(insurance) && refs.every((r) => r.name.trim() && /.+@.+\..+/.test(r.email.trim()));
+  // A certificate already sent stands unless a new one is chosen (Codex, 2 Oct 2026).
+  const onFile = Boolean(h.insurance);
+  const ok = dbs.length === 12 && (Boolean(insurance) || onFile) && refs.every((r) => r.name.trim() && /.+@.+\..+/.test(r.email.trim()));
   const save = () => run(async () => {
     await api.laneChecked({ dbsNumber: dbs, insuranceMediaId: insurance?.id ?? null, referees: refs.map((r) => ({ name: r.name.trim(), email: r.email.trim() })) });
     await onChanged();
@@ -207,9 +209,9 @@ function CheckedSheet({ home, onClose, onChanged }: SheetProps) {
       <Labelled label="Insurance">
         <Press onPress={() => { void pickInsurance(); }} disabled={uploading} accessibilityRole="button" accessibilityLabel="Upload your certificate"
           style={[v.box, { gap: 10 }, pointer]}>
-          <Icon name={insurance ? 'check' : 'upload'} size={18} color={INK} strokeWidth={2.2} />
-          <Text style={[v.boxText, { flex: 1 }, !insurance && { color: INK_MUTED }]} numberOfLines={1}>
-            {uploading ? 'Adding…' : insurance ? insurance.name : 'Upload your certificate'}
+          <Icon name={insurance || onFile ? 'check' : 'upload'} size={18} color={INK} strokeWidth={2.2} />
+          <Text style={[v.boxText, { flex: 1 }, !insurance && !onFile && { color: INK_MUTED }]} numberOfLines={1}>
+            {uploading ? 'Adding…' : insurance ? insurance.name : onFile ? 'Certificate sent · tap to replace' : 'Upload your certificate'}
           </Text>
         </Press>
       </Labelled>
