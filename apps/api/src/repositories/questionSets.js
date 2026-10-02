@@ -127,11 +127,27 @@ async function askWaiting(client, subcategoryKey, setKey) {
     if (w.active && w.global_id) {
       await client.query('update questions set active = true, updated_at = now() where id = $1 and not active', [w.global_id]);
     } else if (w.active) {
+      // The set now attached may also serve a drawer that ignored this word; the
+      // ignore stands, so the fact stays owed rather than asked over it.
+      const { rows: words } = await client.query('select norm from attribute_aliases where target_key = $1', [w.attribute_key]);
+      if ((await setIgnores(client, setKey, words.map((r) => r.norm))).length) continue;
       const q = await addQuestion({ attributeKey: w.attribute_key, setKey, scope: 'set' }, client);
       if (q && q.active === false) await client.query('update questions set active = true, updated_at = now() where id = $1', [q.id]);
     }
     await client.query('delete from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [w.attribute_key, subcategoryKey]);
   }
+}
+
+/** Drawers on this set that ignored any of these words — whose "never ask here" a set question would override. */
+async function setIgnores(client, setKey, norms) {
+  if (!norms.length) return [];
+  const { rows } = await client.query(
+    `select distinct qs.subcategory_key
+       from question_set_subcategories qs
+       join harvest_candidates ci on ci.subcategory = qs.subcategory_key and ci.status = 'ignored' and ci.norm = any($2)
+      where qs.set_key = $1
+      order by 1`, [setKey, norms]);
+  return rows.map((r) => r.subcategory_key);
 }
 
 export async function detach(subcategoryKey) {
@@ -897,6 +913,7 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     const reactivate = async (id) => { await client.query('update questions set active = true, updated_at = now() where id = $1 and not active', [id]); };
     const { rows: [globalQ] } = await client.query("select id, active from questions where attribute_key = $1 and scope = 'global' limit 1", [key]);
     const waiting = [];
+    const blocked = [];
     if (globalQ) {
       // Asked everywhere already: no set asks it, just make sure the global is on.
       if (!globalQ.active) { await reactivate(globalQ.id); asked += 1; }
@@ -911,6 +928,12 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         // A set shared across several of these drawers is asked once, not per drawer.
         if (seenSets.has(set.set_key)) continue;
         seenSets.add(set.set_key);
+        // Questions live on sets, and a set is shared across drawers: asking it here
+        // asks every drawer on the set. If any of them ignored the word ("never ask
+        // here again"), the ignore stands and this set is not asked — reported back,
+        // never silently overridden (Codex, 2 Oct 2026).
+        const vetoes = await setIgnores(client, set.set_key, [norm]);
+        if (vetoes.length) { blocked.push({ setKey: set.set_key, ignoredIn: vetoes }); continue; }
         const { rows: [existing] } = await client.query(
           "select id, active from questions where attribute_key = $1 and scope = 'set' and set_key = $2 limit 1", [key, set.set_key]);
         if (existing) {
@@ -941,7 +964,8 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     await client.query('delete from feature_tombstones where norm = $1', [norm]);
     attrs.forget();
     // `waiting`: drawers owed the question once a set is attached to them.
-    return { feature: norm, attributeKey: key, asked, subcategories: subs, waiting };
+    // `blocked`: sets not asked because a drawer on them ignored the word.
+    return { feature: norm, attributeKey: key, asked, subcategories: subs, waiting, blocked };
   });
 }
 

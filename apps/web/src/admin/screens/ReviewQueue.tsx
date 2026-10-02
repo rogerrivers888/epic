@@ -34,7 +34,7 @@ export function ReviewQueue({ canManage }: { canManage: boolean }) {
   const decide = (f: ReviewFeature, how: 'approve' | 'ignore') => {
     if (!canManage || busy) return;
     setBusy(f.norm); setSaid(null);
-    const run: Promise<{ waiting?: string[] }> = how === 'approve'
+    const run: Promise<{ waiting?: string[]; blocked?: { setKey: string; ignoredIn: string[] }[] }> = how === 'approve'
       ? api.adminApproveFeature(f.norm)
       : api.adminIgnoreFeature(f.norm).then(() => ({}));
     Promise.resolve(run)
@@ -42,9 +42,13 @@ export function ReviewQueue({ canManage }: { canManage: boolean }) {
         if (how === 'ignore') { setSaid(`Ignored “${f.raw}”.`); return; }
         // A drawer with no question set yet is asked once a set is attached to it.
         const later = res?.waiting?.length ? ` Asked in ${res.waiting.map(drawerWord).join(', ')} once a set is attached.` : '';
+        // A set shared with a drawer that ignored the word is not asked — the ignore stands.
+        const held = res?.blocked?.length
+          ? ` Not asked in ${res.blocked.map((b) => drawerWord(b.setKey)).join(', ')}: ${res.blocked.flatMap((b) => b.ignoredIn).map(drawerWord).join(', ')} ignored it.`
+          : '';
         setSaid(f.known
-          ? `Asked “${f.raw}” here — verified from owned sources.${later}`
-          : `Approved “${f.raw}” — now a fact, verified from owned sources.${later}`);
+          ? `Asked “${f.raw}” here — verified from owned sources.${later}${held}`
+          : `Approved “${f.raw}” — now a fact, verified from owned sources.${later}${held}`);
       })
       .catch((e: any) => setSaid(e?.body?.message ?? 'That could not be done.'))
       .finally(() => { setBusy(null); load(); });

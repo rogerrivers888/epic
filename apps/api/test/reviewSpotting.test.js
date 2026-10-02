@@ -862,4 +862,44 @@ test('a word this drawer ignored is not counted as queued when spotted again', a
   assert.deepEqual((await query('select queued from review_spotting_tallies where venue_ref = $1 order by id', [ref])).rows.map((r) => r.queued), [1, 0], 'and the tally agrees');
 });
 
+test('a set shared with a drawer that ignored the word is not asked, and says so', async () => {
+  // Codex, 2 Oct 2026: questions live on sets, and a set is shared across drawers,
+  // so asking from drawer B would ask drawer A too. A's "never ask here again"
+  // stands: the set is skipped and reported, at approval and when a set is attached.
+  const subA = 'c30-shared-ign-a'; const subB = 'c30-shared-ign-b'; const subC = 'c30-shared-ign-c';
+  const a = 'google:ChIJ_c30_si_a'; const b = 'google:ChIJ_c30_si_b'; const c = 'google:ChIJ_c30_si_c';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  for (const [k, l] of [[subA, 'C30 si A'], [subB, 'C30 si B'], [subC, 'C30 si C']]) {
+    await query("insert into shelf_subcategories (key, label, category_key) values ($1, $2, 'c30-test-cat') on conflict do nothing", [k, l]);
+  }
+  await query('delete from question_set_subcategories where subcategory_key = $1', [subC]);
+  await query("insert into question_sets (key, name) values ('c30-si-set', 'C30 si set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-si-set'), ($2, 'c30-si-set') on conflict do nothing", [subA, subB]);
+  for (const [r, sub] of [[a, subA], [b, subB], [c, subC]]) {
+    await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [r, sub]);
+  }
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB, subC]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b, c]]);
+  await query("delete from attribute_aliases where norm = 'map room'").catch(() => {});
+  await query("delete from place_attributes where key = 'map-room'").catch(() => {});
+
+  // Drawer A ignores it; B and C (C has no set yet) raise it.
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A map room.' } });
+  const { rows: [candA] } = await query("select id from harvest_candidates where norm = 'map room' and subcategory = $1", [subA]);
+  await sets.ignoreCandidate(candA.id, { actor: 'tester' });
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A map room.' } });
+  await spotFromDetail({ venueRef: c, detail: { reviewSummary: 'A map room.' } });
+
+  const res = await sets.approveFeature('map room', { actor: 'tester' });
+  assert.deepEqual(res.blocked, [{ setKey: 'c30-si-set', ignoredIn: [subA] }], 'the shared set is held back, naming the drawer');
+  assert.equal(res.asked, 0, 'nothing asked over the ignore');
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-si-set'", [res.attributeKey])).rows[0].n, 0, 'no question on the shared set');
+  assert.deepEqual(res.waiting, [subC], 'C is owed it');
+
+  // Attaching C to the same shared set does not ask it over A's ignore; C stays owed.
+  await sets.attach('c30-si-set', subC);
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-si-set'", [res.attributeKey])).rows[0].n, 0, 'still not asked on the shared set');
+  assert.equal((await query('select count(*)::int n from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [res.attributeKey, subC])).rows[0].n, 1, 'and C is still owed it');
+});
+
 test.after(async () => { await pool.end(); });
