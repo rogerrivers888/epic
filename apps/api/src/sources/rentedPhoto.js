@@ -75,6 +75,16 @@ function remember(venueRef, value) {
 }
 
 /**
+ * Hold references another request already brought back — the live name lookup
+ * in sources/displayNames.js asks for them in the same call (owner, 2 Oct
+ * 2026), so a card whose name was fetched has its picture for nothing.
+ */
+export function rememberPhotos(venueRef, photos) {
+  if (!venueRef || !Array.isArray(photos)) return;
+  remember(venueRef, photos);
+}
+
+/**
  * True when a row would draw the empty tile and the provider could do better.
  *
  * `hasOwn` is the important argument and the caller must pass it: a place the
@@ -91,7 +101,19 @@ export function needsPhoto(venueRef, hasOwn) {
 export async function photosFor(venueRef, { householdId = null } = {}) {
   const cached = photosKept(venueRef);
   if (cached) return cached;
+  // One question per place at a time. A page that waited out its deadline
+  // leaves its lookups running, and the read that follows five seconds later
+  // must join them, not buy the same references again.
+  const already = inflight.get(venueRef);
+  if (already) return already;
+  const p = askFor(venueRef, householdId);
+  inflight.set(venueRef, p);
+  try { return await p; } finally { inflight.delete(venueRef); }
+}
 
+const inflight = new Map();
+
+async function askFor(venueRef, householdId) {
   // A search that ran in the last twelve hours already carried the references,
   // and asking again for what is in our hands is a billed call for nothing.
   // This is the path that usually answers: somebody looks at Places, then opens
@@ -115,6 +137,30 @@ export async function photosFor(venueRef, { householdId = null } = {}) {
   remember(venueRef, found ?? []);
   await providerCalls.record(householdId, 'google', 'atlas.photos', JSON.stringify({ google: 1 }), null, venueRef).catch(() => null);
   return found;
+}
+
+/**
+ * Find pictures for the rows that have none, now and side by side, for a page
+ * that is about to be sent (owner, 2 Oct 2026: Places "loads as fast as
+ * Inspire").
+ *
+ * Places used to leave this to `fillPhotos` after the response had gone, eight
+ * a read, one after another, behind the postcode and station lookup — which
+ * waits on OpenStreetMap and TfL for seconds a place — while the screen asked
+ * again six times and gave up. A household with fifty saved places saw icons
+ * for minutes. So the references are asked for here, in parallel, and the page
+ * waits at most `deadlineMs` for them: whatever has not answered by then keeps
+ * going, lands in memory, and is on the next read. `cap` is the same bound the
+ * name lookup keeps: a screen cannot spend without limit. Never throws.
+ */
+export async function photosNow(householdId, rows, { cap = 25, deadlineMs = 1500 } = {}) {
+  const todo = rows.filter((r) => needsPhoto(r.venueRef, r.hasOwn)).slice(0, cap);
+  if (!todo.length) return 0;
+  const all = Promise.all(todo.map((r) => photosFor(r.venueRef, { householdId }).catch(() => null)));
+  let timer;
+  await Promise.race([all, new Promise((resolve) => { timer = setTimeout(resolve, deadlineMs); })]);
+  clearTimeout(timer);
+  return todo.length;
 }
 
 /**

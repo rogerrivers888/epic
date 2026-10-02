@@ -833,10 +833,21 @@ export const googleSource = {
    * One place's display name, by its id, and nothing else — the narrowest mask
    * that returns a name (owner, 1 Oct 2026). A name is a Pro field; there is no
    * cheaper tier for it. Read in memory to show the place and never written.
+   *
+   * The photograph references ride along (owner, 2 Oct 2026: "take photo
+   * references from the resolveNames Place Details call"). `photos` is a Pro
+   * field like the name, so the mask stays at the one tier and the request
+   * costs what it did; without them Places bought a second Place Details per
+   * card, one at a time, behind the station lookup, and took minutes to fill.
+   * `onPhotos` is handed the references — an empty list when the place has
+   * none, which is a fact worth remembering too.
    */
-  async displayName(id, { meter = null } = {}) {
+  async displayName(id, { meter = null, onPhotos = null } = {}) {
     if (off(meter)) return null;
-    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,displayName', meter });
+    const p = await call(`/places/${id}`, { method: 'GET', fieldMask: 'id,displayName,photos.name,photos.authorAttributions', meter });
+    if (onPhotos && p) {
+      onPhotos((p.photos || []).slice(0, 3).map((ph) => ({ ref: ph.name, attribution: (ph.authorAttributions || []).map((a) => a.displayName).join(', ') })));
+    }
     return p?.displayName?.text ?? null;
   },
 

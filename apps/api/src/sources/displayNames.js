@@ -19,6 +19,7 @@ import { googleSource } from './google.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { ensureRecord } from '../repositories/ownedPlaces.js';
 import { noteLiveName, heldName } from './liveNames.js';
+import { rememberPhotos } from './rentedPhoto.js';
 
 const prefixOf = (ref) => String(ref ?? '').split(':')[0];
 // Only Google has a live display-name fetcher; a tripadvisor:/liteapi:/other
@@ -77,7 +78,10 @@ async function fetchLiveName(ref, purpose) {
     const id = ref.slice(prefixOf(ref).length + 1);
     const meter = {};
     let name = null;
-    try { name = await googleSource.displayName(id, { meter }); } catch { name = null; }
+    // The same request carries the place's photograph references (a Pro field
+    // like the name), so a card whose name was fetched live has its picture
+    // without a second Place Details (owner, 2 Oct 2026).
+    try { name = await googleSource.displayName(id, { meter, onPhotos: (photos) => rememberPhotos(ref, photos) }); } catch { name = null; }
     // And to the name-check, in memory, against any owned match it should agree with.
     if (name) noteLiveName(ref, name);
     // The call is written down whether it landed or was refused — the fault the

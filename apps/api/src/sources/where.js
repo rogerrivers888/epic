@@ -130,9 +130,12 @@ async function osmStation(lat, lng) {
  * refused rather than answered — the caller should ask again later. Every outbound call is attributed
  * to the household in provider_calls.
  */
-export async function whereIs(lat, lng, { householdId = null } = {}) {
-  let postcode = null;
-  try {
+export async function whereIs(lat, lng, { householdId = null, postcode: known = null } = {}) {
+  let postcode = known;
+  // A postcode already found is not asked for again when only the station is
+  // being retried (owner, 2 Oct 2026: a timeout is "failed, retry later", not
+  // "redo everything").
+  if (!postcode) try {
     const geo = await reverseGeocode(lat, lng, { zoom: 18 });
     postcode = postcodeDistrict(geo?.address?.postcode);
     await providerCalls.record(householdId, 'osm-nominatim', 'atlas.where', JSON.stringify({ 'osm-nominatim': 1 })).catch(() => null);
@@ -159,11 +162,33 @@ export async function whereIs(lat, lng, { householdId = null } = {}) {
   return { postcode, station, failed };
 }
 
+/**
+ * How long a lookup that was refused waits before it is tried again.
+ *
+ * Overpass rate-limits by IP and times out under load (119 of the 123 failures
+ * in the 25 Sep sweep). A refused row used to be tried again on the very next
+ * read of the page, so every visit to Places redid the same slow, failing
+ * lookups first (owner, 2 Oct 2026: it marks that step "failed, retry later").
+ * Held in memory: a restart simply gives every refused row its next try.
+ */
+const RETRY_MS = 30 * 60_000;
+const refusedAt = new Map();
+const refusedKey = (householdId, ref) => `${householdId}|${ref}`;
+
+/** True when this row still wants its postcode and station, and is not resting after a refusal. */
+export function whereDue(householdId, r) {
+  if (r.lat == null || r.lng == null || r.where_checked) return false;
+  const at = refusedAt.get(refusedKey(householdId, r.venue_ref));
+  return !at || Date.now() - at >= RETRY_MS;
+}
+
 /** Fill in postcode and station for atlas rows that have not been looked up yet, a few at a time. */
-export async function fillWhere(householdId, rows, { limit = 6 } = {}) {
-  const todo = rows.filter((r) => r.lat != null && r.lng != null && !r.where_checked).slice(0, limit);
+export async function fillWhere(householdId, rows, { limit = 6, lookup = whereIs } = {}) {
+  const todo = rows.filter((r) => whereDue(householdId, r)).slice(0, limit);
   for (const r of todo) {
-    const w = await whereIs(r.lat, r.lng, { householdId });
+    const w = await lookup(r.lat, r.lng, { householdId, postcode: r.postcode ?? null });
+    const key = refusedKey(householdId, r.venue_ref);
+    if (w.failed) refusedAt.set(key, Date.now()); else refusedAt.delete(key);
     await atlasRepo.saveWhere(householdId, r.venue_ref, { ...w, checkedAt: w.failed ? null : new Date() }).catch(() => null);
   }
   return todo.length;

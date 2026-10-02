@@ -259,6 +259,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   useStickyQuery(areaName ? `places.city.${areaName}` : 'places.root', areaName ? CITY_KEYS : []);
 
   const refills = useRef(0);
+  const stalled = useRef<{ last: number | null; rounds: number }>({ last: null, rounds: 0 });
 
   const members = household?.members ?? [];
   const [viewer, setViewer] = useState<string | null>(null);
@@ -305,12 +306,23 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   const city = countryRow && country?.city ? countryRow.cities.find((c) => c.name === country.city) ?? null : null;
   const home = atHome ? data?.home ?? null : null;
 
-  useEffect(() => { refills.current = 0; }, [areaKey]);
-  // Postcode, station, pictures and ratings are looked up in the background
-  // after the first read; ask again a few times while any row is waiting.
+  useEffect(() => { refills.current = 0; stalled.current = { last: null, rounds: 0 }; }, [areaKey]);
+  // Postcode, station, ratings, and any picture that missed the page's
+  // deadline are looked up in the background after the read; ask again while
+  // any row is waiting. It used to stop after six tries, thirty seconds, and a
+  // household with fifty places saw icons until they left and came back (owner,
+  // 2 Oct 2026: "stop the screen giving up after 30 s"). So it keeps going, more
+  // slowly each time (5 s, growing to a minute), and stops only when nothing is
+  // waiting or three reads in a row brought nothing new — a lookup that keeps
+  // failing is the server's to retry later, not this screen's to hammer.
   useEffect(() => {
-    if (!wherePending || refills.current >= 6) return;
-    const t = setTimeout(() => { refills.current += 1; void loadPlaces(); }, 5000);
+    if (!wherePending) return;
+    const s = stalled.current;
+    s.rounds = s.last != null && wherePending >= s.last ? s.rounds + 1 : 0;
+    s.last = wherePending;
+    if (s.rounds >= 3) return;
+    const wait = Math.min(60_000, Math.round(5000 * 1.5 ** refills.current));
+    const t = setTimeout(() => { refills.current += 1; void loadPlaces(); }, wait);
     return () => clearTimeout(t);
   }, [wherePending, places, loadPlaces]);
 

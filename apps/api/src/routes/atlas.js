@@ -15,7 +15,7 @@ import { reverseGeocode, geocode } from '../sources/geocode.js';
 import { searchAreas } from '../sources/areas.js';
 import { recallVenue } from '../sources/index.js';
 import { currentHousehold } from './household.js';
-import { fillWhere } from '../sources/where.js';
+import { fillWhere, whereDue } from '../sources/where.js';
 import { closeToHomeRadiusMiles } from '../domain/travel.js';
 
 /**
@@ -31,7 +31,7 @@ const nearHomeMiles = (h) => closeToHomeRadiusMiles({
   fallbackMiles: standingMiles(h),
 });
 import { fillTaxonomy, needsTaxonomy, taxonomyKept } from '../sources/taxonomy.js';
-import { fillPhotos, needsPhoto, photosKept } from '../sources/rentedPhoto.js';
+import { needsPhoto, photosKept, photosNow } from '../sources/rentedPhoto.js';
 import { countryOutline, sketchFor, SKETCH_ATTRIBUTION } from '../sources/sketch.js';
 import { atlasRowsFor, heroesForPlaces } from '../repositories/library.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
@@ -333,19 +333,9 @@ atlas.get('/places', async (req, res, next) => {
       return {
         ...p,
         image: ours,
-        // The rung below the ladder's floor. Only where we hold no photograph
-        // of our own, only what has been fetched since the service started,
-        // and never written down — the same rented-in-memory bargain as the
-        // taxonomy above (sources/rentedPhoto.js).
-        //
-        // A mark is not a photograph. Painshill Park had a logo from its own
-        // website and so drew that on lime in Places, while the browse it was
-        // saved from — and the drawer it opened into — showed the photograph
-        // (owner, 12 Sep 2026: "it should actually just have the same picture
-        // that I chose when I added it"). So the provider's photographs travel
-        // beside a mark, and VenueThumb draws the photograph first and keeps
-        // the mark for when there is none, or no signal.
-        photos: ours && ours.source !== 'logo' ? undefined : photosKept(p.venueRef) ?? undefined,
+        // The provider's photographs are filled in below, once the name
+        // lookup has brought what it can (the rung below the ladder's floor).
+        photos: undefined,
         // The vocabulary has to be passed, not left to default: without it the
         // resolver has no parent for a drawer and can never name one, and the
         // whole point here is the drawer's name (owner, 7 Sep 2026 — a row
@@ -405,37 +395,50 @@ atlas.get('/places', async (req, res, next) => {
     // comes from here, not from `known_label`/`label` any more.
     await resolveNames(places, { refKey: 'venueRef', purpose: 'atlas.displayName' });
     for (const p of places) p.unnamed = p.nameSource === 'none';
-    // Where a place is, and what kind of place it is, are looked up lazily a few
-    // rows per read, after the response has gone; the web asks again shortly
-    // while any row is still waiting.
-    // A row we have no picture for at all — neither ours nor the provider's,
-    // yet. Counted with the rest so the screen asks again and the tiles fill in,
-    // rather than a household seeing mint squares until they navigate away.
-    const wantPictures = places.filter((p) => needsPhoto(p.venueRef, Boolean(p.image) && p.image.source !== 'logo'));
+    // The pictures, now and side by side, before the page goes (owner, 2 Oct
+    // 2026). The live name lookup above already brought the references for
+    // every place it named; the rest — places we name ourselves — are asked
+    // for here in parallel, and the page waits a moment for them, never for
+    // the postcode or the station. What misses the deadline is on the next read.
+    const hasOwn = (p) => Boolean(p.image) && p.image.source !== 'logo';
+    await photosNow(household.id, places.map((p) => ({ venueRef: p.venueRef, hasOwn: hasOwn(p) })));
+    // The rung below the ladder's floor. Only where we hold no photograph of
+    // our own, only what has been fetched since the service started, and never
+    // written down (sources/rentedPhoto.js). A mark is not a photograph: the
+    // provider's photographs travel beside a logo, and VenueThumb draws the
+    // photograph first (owner, 12 Sep 2026).
+    for (const p of places) p.photos = hasOwn(p) ? undefined : photosKept(p.venueRef) ?? undefined;
+    // Where a place is, what kind of place it is, and what everybody else
+    // made of it are looked up lazily a few rows per read, after the response
+    // has gone; the web asks again shortly while any row is still waiting.
+    // A row we still have no picture for — the lookup above missed its
+    // deadline — is counted too, so the next read carries it.
+    const wantPictures = places.filter((p) => needsPhoto(p.venueRef, hasOwn(p)));
     // A row with no crowd rating held yet. The household's own score no longer
     // spares a row the question, because the row shows both now (handover v8);
     // the pace is the same eight a read, and a match is kept for good.
     const wantRatings = places.filter((p) => needsRating(p.venueRef, false));
-    const pending = rows.filter((r) => r.lat != null && r.lng != null && !r.where_checked).length
+    // A row whose station lookup was refused rests before it is tried again
+    // (sources/where.js), and is not counted meanwhile: otherwise the screen
+    // would keep asking for something that is not going to come.
+    const pending = rows.filter((r) => whereDue(household.id, r)).length
       + rows.filter(needsTaxonomy).length
       + wantPictures.length
       + wantRatings.length;
     res.json({ places, wherePending: pending });
     if (pending && !whereRunning.has(household.id)) {
       whereRunning.add(household.id);
-      Promise.resolve()
-        .then(() => fillWhere(household.id, rows))
-        .then(() => fillTaxonomy(household.id, rows))
-        // Last, and deliberately: the ladder is asked for nothing here, but a
-        // provider is, and a provider bills. Anything that could have filled a
-        // tile for free has already had its turn by now.
-        .then(() => fillPhotos(household.id, wantPictures.map((p) => ({ venueRef: p.venueRef, hasOwn: Boolean(p.image) && p.image.source !== 'logo' }))))
-        // Last of all, and for the same reason again: a rating and a review
-        // count are the provider's dearest fields, so everything that could
-        // have filled a row for nothing has already had its turn.
-        .then(() => fillRatings(household.id, wantRatings.map((p) => ({ venueRef: p.venueRef, ours: false }))))
-        .catch(() => null)
-        .finally(() => whereRunning.delete(household.id));
+      // Two lanes, side by side. The postcode and station wait on
+      // OpenStreetMap and TfL, seconds a place when they answer at all, and
+      // must never hold up what the provider is asked for.
+      Promise.allSettled([
+        fillWhere(household.id, rows),
+        Promise.resolve()
+          .then(() => fillTaxonomy(household.id, rows))
+          // Last, and for the same reason as ever: a rating and a review
+          // count are the provider's dearest fields.
+          .then(() => fillRatings(household.id, wantRatings.map((p) => ({ venueRef: p.venueRef, ours: false })))),
+      ]).finally(() => whereRunning.delete(household.id));
     }
   } catch (err) { next(err); }
 });
