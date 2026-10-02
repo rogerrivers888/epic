@@ -119,7 +119,10 @@ async function writeState(next, { who, expect = null } = {}) {
   try {
     await client.query('begin');
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [OSRM_BUILD_KEY]);
-    const { rows: [prior] } = await client.query('select value from bo_settings where key = $1', [OSRM_BUILD_KEY]);
+    // FOR UPDATE: the heartbeat's in-place update waits on this row, so the
+    // value judged here (a run's silence, say) is the value the write replaces
+    // — a beat cannot land between the check and a "failed" (Codex).
+    const { rows: [prior] } = await client.query('select value from bo_settings where key = $1 for update', [OSRM_BUILD_KEY]);
     const was = prior?.value ?? { state: 'none' };
     // The database's clock, the one cell_builds.at and ring_counts.computed_at
     // are stamped with: an epoch or a cutoff from the worker's own clock would
@@ -226,10 +229,15 @@ export function run(cmd, args, { cwd } = {}) {
 /** Stand osrm-routed up over one graph; returns { url, stop }. */
 export async function startRouted(graph, { port = 5055, fetchImpl = fetch, sample = null } = {}) {
   const child = spawn('osrm-routed', ['--algorithm', 'mld', '--port', String(port), '--max-table-size', '400', graph], { stdio: 'inherit' });
+  // A router that cannot be started at all (missing binary, permissions) is a
+  // rejection the job records, never an uncaught error that leaves it running.
+  let spawnError = null;
+  child.on('error', (err) => { spawnError = err; });
   const url = `http://127.0.0.1:${port}`;
   const stop = () => { try { child.kill('SIGTERM'); } catch { /* gone */ } };
   const at = sample ?? { lat: 51.5, lng: -0.12 };
   for (let i = 0; i < 120; i += 1) {
+    if (spawnError) throw new Error(`osrm-routed could not start: ${spawnError.message}`);
     if (child.exitCode != null) throw new Error(`osrm-routed exited ${child.exitCode}`);
     try {
       const res = await fetchImpl(`${url}/nearest/v1/driving/${at.lng},${at.lat}`);

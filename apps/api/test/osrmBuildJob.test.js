@@ -257,3 +257,13 @@ test('a new claim does not inherit the last run\'s old heartbeat', async () => {
   assert.equal(await job.retireStaleRun(), false, 'the new run is not retired for the old run\'s silence');
   await reset();
 });
+
+test('a router that cannot start rejects, it does not crash the job', async () => {
+  const origPath = process.env.PATH;
+  process.env.PATH = '/nonexistent';
+  try {
+    await assert.rejects(() => job.startRouted('/tmp/nothing.osrm', { port: 5999 }), /could not start/);
+  } finally {
+    process.env.PATH = origPath;
+  }
+});
