@@ -126,8 +126,10 @@ export async function areaKeyCheck() {
   // so a placeholder is seen for what it is wherever it sits.
   const placeholderPostcodes = await n(`
       select postcode, count(*)::int as places from place_records
-       where btrim(postcode) ~* '^(0+|9+|x+|-+|n/?a|none|tbc|tba|unknown)$'
-          or btrim(postcode) ~ '^(.)\\1{3,}$'
+       -- Unambiguous sentinels only: a run of four or more zeros, and words. A
+       -- repeated digit can be a real code abroad (1111 is a four-digit postcode
+       -- somewhere), so it is never called a placeholder (Codex).
+       where btrim(postcode) ~* '^(0{4,}|x{3,}|-+|n/?a|none|tbc|tba|unknown)$'
        group by 1 order by 2 desc`);
   // Migration 357, confirmed from the database itself rather than from the deploy
   // having finished: whether it is recorded, and the key and check it left behind.
