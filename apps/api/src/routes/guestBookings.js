@@ -425,7 +425,13 @@ export async function applyPaymentIntent(pi) {
 
 async function applyTipIntent(pi) {
   const tipId = pi?.metadata?.epic_tip_id;
-  if (!tipId || !UUID.test(tipId) || pi.status !== 'succeeded') return null;
+  if (!tipId || !UUID.test(tipId)) return null;
+  // A tip whose payment failed or was abandoned frees the booking for another try (Codex, 2 Oct 2026).
+  if (pi.status === 'canceled' || (pi.status === 'requires_payment_method' && pi.last_payment_error)) {
+    await query(`update booking_tips set state = 'failed' where id = $1 and stripe_ref = $2 and state = 'pending'`, [tipId, pi.id]);
+    return null;
+  }
+  if (pi.status !== 'succeeded') return null;
   const { rows: [t] } = await query(`update booking_tips set state = 'paid' where id = $1 and stripe_ref = $2 and state = 'pending' returning *`, [tipId, pi.id]);
   if (!t) return null;
   await ledger.record({ kind: 'tip', bookingId: t.booking_id, offerId: t.offer_id, hostId: t.host_id, householdId: t.household_id, amountPence: t.amount_pence + t.admin_fee_pence, epicPence: t.admin_fee_pence, hostPence: t.amount_pence, state: 'succeeded', stripeRef: pi.id, mode: 'test', reason: 'tip' });

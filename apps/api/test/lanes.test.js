@@ -333,10 +333,11 @@ test('a course whose first date was skipped is judged on its first real session'
   assert.ok(!laneBlockers(offer, host()).some((b) => /date has gone/.test(b)), 'the run starts next week, not two days ago');
 });
 
-test('decides by is never a day already gone', () => {
-  const d = new Date(); d.setUTCDate(d.getUTCDate() + 3);
-  const soon = d.toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+test('decides by is never a day already gone', async () => {
+  // Today where the event is (UK), as the rule counts it — not UTC, which is yesterday between midnight and 1am BST.
+  const { localDay, plusDays } = await import('../src/domain/lanes.js');
+  const today = localDay(new Date(), 'Europe/London');
+  const soon = plusDays(today, 3);
   assert.equal(decidesOn({ lane: 'oneoff', starts_on: soon, min_count: 5 }), today, 'three days away decides today, not four days ago');
   assert.equal(decidesOn({ lane: 'oneoff', starts_on: today, min_count: 5 }), null, 'starting today, nothing left to decide');
 });

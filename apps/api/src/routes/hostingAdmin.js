@@ -189,6 +189,8 @@ export async function releaseApproved() {
     const host = await repo.hostById(o.host_id);
     const items = checklist(o, { host, account: { email: 'x', mobile: 'x' } }, hostingConfig());
     if (items.some((i) => i.key === 'checked' && !i.done)) continue;
+    // Checked came after the date had gone: it stays out, for the host to pick a new date (Codex, 2 Oct 2026).
+    if (laneBlockers(o, host, hostingConfig()).some((b) => /date has gone/.test(b))) continue;
     const { rowCount } = await query(`update host_offers set state = 'live', published_at = now() where id = $1 and state = 'approved'`, [o.id]);
     if (rowCount) { n += 1; await logChange({ subjectKind: 'event', subjectId: o.id, field: 'state', before: { state: 'approved' }, after: { state: 'live' }, why: 'Checked done', byLabel: 'epic' }); }
   }
@@ -449,8 +451,14 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
     const { from, to, label } = periodOf(req.query);
     const kind = kindOf(req.query.kind);
     const { rows: b } = await query(
-      `select b.fee_reason, o.visibility, count(*)::int as n, coalesce(sum(b.value_pence), 0)::int as value, coalesce(sum(b.fee_pence), 0)::int as epic, coalesce(sum(b.host_pence), 0)::int as host
+      // Net of what has gone back: each booking less its refunds, Epic's and the host's parts as they were returned (Codex, 2 Oct 2026).
+      `select b.fee_reason, o.visibility, count(*)::int as n,
+              coalesce(sum(b.value_pence - coalesce(r.amount, 0)), 0)::int as value,
+              coalesce(sum(b.fee_pence - coalesce(r.epic, 0)), 0)::int as epic,
+              coalesce(sum(b.host_pence - coalesce(r.host, 0)), 0)::int as host
          from experience_bookings b join host_offers o on o.id = b.offer_id
+         left join lateral (select sum(p.amount_pence)::int as amount, sum(coalesce(p.epic_pence, 0))::int as epic, sum(coalesce(p.host_pence, 0))::int as host
+                              from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state in ('pending', 'succeeded')) r on true
         where b.payment_state in ('charged', 'partially_refunded', 'refunded') and b.created_at >= $1 and b.created_at < $2 and ($3::text is null or o.lane = $3)
         group by 1, 2`,
       [from, to, kind],
