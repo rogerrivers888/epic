@@ -637,7 +637,7 @@ router.get('/compare', requires('manage_library'), async (req, res, next) => {
       }
       if (unreachable) google.note = unreachable;
       else if (id) {
-        try { google = { ...google, id, how, fields: await detailFor('google', id, household.id), note: `${how} · fetched live` }; }
+        try { google = { ...google, id, how, fields: await detailFor('google', id, household.id, { venueRef: ref }), note: `${how} · fetched live` }; }
         catch (err) { google = { ...google, id, how, note: whySourceFailed('google', err) }; }
       } else google.note = 'Nothing at Google reads as this place: no name near enough, close enough.';
     }

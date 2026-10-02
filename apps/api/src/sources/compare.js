@@ -14,6 +14,7 @@
 import { googleSource } from './google.js';
 import { tripadvisorSource } from './tripadvisor.js';
 import * as visitsRepo from '../repositories/visits.js';
+import { spotInBackground } from './reviewSpotting.js';
 
 // The nine the board always draws, in BO2h's own order, then everything else.
 //
@@ -78,7 +79,7 @@ export function detailHeld(provider, id) {
   return Boolean(held) && Date.now() - held.at < DETAIL_TTL_MS;
 }
 
-export async function detailFor(provider, id, householdId) {
+export async function detailFor(provider, id, householdId, { venueRef = null } = {}) {
   const key = `${provider}:${id}`;
   const held = details.get(key);
   if (held && Date.now() - held.at < DETAIL_TTL_MS) return held.detail;
@@ -92,6 +93,12 @@ export async function detailFor(provider, id, householdId) {
       const detail = { ...raw, photos: (raw.photos ?? []).map((ph) => ({ attribution: ph.attribution ?? null })) };
       details.set(key, { at: Date.now(), detail });
       while (details.size > 300) details.delete(details.keys().next().value);
+      // Review-spotting (C30/C61): the reviews are in memory now, for free, on a
+      // search the back office asked for. Spot the concrete features and queue
+      // them in the background — it never blocks or breaks this fetch. Google
+      // only, a real place ref only; the cache hits above never reach here, so a
+      // detail is spotted once per fresh fetch, not on every read.
+      if (provider === 'google' && venueRef) spotInBackground({ venueRef, detail });
       return detail;
     } finally {
       // Which place it was about: the provider's own reference is the one

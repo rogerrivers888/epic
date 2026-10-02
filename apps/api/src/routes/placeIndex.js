@@ -2273,7 +2273,7 @@ router.get('/place/compare', requires('view_library'), async (req, res, next) =>
         }
         if (google.note) { /* said in plain words above */ }
         else if (id) {
-          try { google = { ...google, id, how, fields: await detailFor('google', id, household.id), note: `${how} · fetched live` }; }
+          try { google = { ...google, id, how, fields: await detailFor('google', id, household.id, { venueRef: ref }), note: `${how} · fetched live` }; }
           catch (err) { google = { ...google, id, how, note: whySourceFailed('google', err) }; }
         } else google.note = req.query.match === '1' ? 'no match' : 'not asked';
       } finally { await releaseSpend(room.reservation); }
@@ -2687,7 +2687,7 @@ async function askThese(refs, householdId) {
           continue;
         }
         if (!detailHeld('google', id)) calls += 1;
-        const detail = await detailFor('google', id, household.id);
+        const detail = await detailFor('google', id, household.id, { venueRef: ref });
         // Banded here, and the figures go no further: `crowdBand` and
         // `countBand` are the only things that leave this block, and the rating
         // and the review count die with the response (domain/scoring.js).
@@ -3210,7 +3210,7 @@ router.post('/subcategory-summary/compare-all', requires('manage_library'), asyn
         }
         if (!id) continue;
         // Fills the cache and writes its own attributed ledger row.
-        await detailFor('google', id, household.id).catch(() => null);
+        await detailFor('google', id, household.id, { venueRef: ref }).catch(() => null);
         // Counted only when the detail actually landed in the cache: a timeout,
         // a provider error or a switched-off source leaves nothing to compare
         // and must not read as progress (Codex, 29 Sep 2026).
