@@ -340,3 +340,12 @@ test('the area-key check names an unprefixed non-GB area and reads both postcode
   assert.ok(again.unsettled.some((r) => r.venue_ref === 'osm:node/akc-jersey' && r.postcode === 'JE3 6ET'));
   assert.ok(!again.unsettled.some((r) => r.venue_ref === 'osm:node/akc-gb'), 'a place with a country is not listed');
 });
+
+test('the area-key check says what the places with no country are', async () => {
+  await query(`insert into place_index (venue_ref, country_code) values ('google:nc-sample', null) on conflict (venue_ref) do update set country_code = null`);
+  const out = await m.areaKeyCheck();
+  assert.ok(out.noCountry.total >= 1);
+  assert.ok(out.noCountryBy.refKind.some((r) => r.ref_kind === 'google'));
+  assert.ok(Array.isArray(out.noCountrySample) && out.noCountrySample.length >= 1);
+  assert.ok(out.noCountryBy.sources.every((r) => typeof r.places === 'number'));
+});

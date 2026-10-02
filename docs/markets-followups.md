@@ -147,3 +147,14 @@ market whose bands are not set — and they render the same, but need different 
 So on screen the two are indistinguishable, but for SL5 the split is "0 from bands, all the
 rest from no price level"; for a Portuguese outcode it would be the reverse until the editor
 sets PT's bands.
+
+## 6. Placeholder postcodes — closed: one in the whole corpus (owner, 2 Oct 2026)
+
+**Not a corpus problem; do not re-open it as one.** Read on production on 2 Oct 2026
+(`/api/admin/desk/markets/area-key-check`, `placeholderPostcodes`): across about 424,000
+places there is exactly **one** unambiguous placeholder postcode — `00000`, on one place
+(a Dubai dune-buggy business listed at Iris Bay Tower). No N/A, TBC, "none", runs of X or
+other sentinels. No cleanup is needed. The check lists any new one as it lands, and no
+country rule treats a placeholder as evidence: the full-postcode rule needs a real ONS
+postcode, the outcode fallback needs a GB-shaped code, and the address pass reads only a
+country *name*.

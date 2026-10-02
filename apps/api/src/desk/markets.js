@@ -150,8 +150,42 @@ export async function areaKeyCheck() {
     ? (await query(`select exists (select 1 from schema_migrations where name like '357\\_%') as r`)).rows[0].r
     : null;
   m357.recordedReason = ledger ? null : 'this database has no schema_migrations table';
+  // What the places with no country are (owner, 2 Oct 2026: "they outnumber the
+  // foreign places a hundred to one and nobody has said what they are"). Counted
+  // whole, by the evidence each has; then a sample with what we own of them.
+  const { rows: [noCountry] } = await query(`
+    select count(*)::int as total,
+           count(*) filter (where pi.lat is not null)::int as with_point,
+           count(*) filter (where pi.subcategory is not null)::int as with_shelf,
+           count(*) filter (where r.venue_ref is not null)::int as with_record,
+           count(*) filter (where r.address is not null or r.postcode is not null)::int as with_address,
+           count(*) filter (where exists (select 1 from place_facts f where f.venue_ref = pi.venue_ref
+                                            and f.field = 'address' and f.source = 'nominatim'))::int as with_geocode
+      from place_index pi left join place_records r on r.venue_ref = pi.venue_ref
+     where pi.country_code is null`);
+  const noCountryBy = {
+    ownership: await n(`select ownership, count(*)::int as places from place_index where country_code is null group by 1 order by 2 desc`),
+    refKind: await n(`select split_part(venue_ref, ':', 1) as ref_kind, count(*)::int as places from place_index where country_code is null group by 1 order by 2 desc`),
+    sources: await n(`select coalesce(string_agg(distinct s.source, '+' order by s.source), '(none)') as sources, count(*)::int as places
+                        from place_index pi left join place_index_sources s on s.venue_ref = pi.venue_ref
+                       where pi.country_code is null group by pi.venue_ref`).then((rows) => {
+      const tally = new Map();
+      for (const r of rows) tally.set(r.sources, (tally.get(r.sources) ?? 0) + 1);
+      return [...tally].map(([sources, places]) => ({ sources, places })).sort((a, b) => b.places - a.places);
+    }),
+    firstSeen: await n(`select to_char(date_trunc('month', first_seen), 'YYYY-MM') as month, count(*)::int as places
+                          from place_index where country_code is null group by 1 order by 1`),
+    derivedBy: await n(`select coalesce(derived_by, '(none)') as derived_by, count(*)::int as places from place_index where country_code is null group by 1 order by 2 desc`),
+  };
+  const noCountrySample = await n(`
+      select pi.venue_ref, pi.ownership, pi.subcategory, pi.first_seen, r.name,
+             (select string_agg(s.source, '+' order by s.source) from place_index_sources s where s.venue_ref = pi.venue_ref) as sources
+        from place_index pi left join place_records r on r.venue_ref = pi.venue_ref
+       where pi.country_code is null
+       order by md5(pi.venue_ref) limit 30`);
   return {
     checkedAt: new Date().toISOString(),
+    noCountry, noCountryBy, noCountrySample,
     migration357: m357,
     nonGbTotal, nonGbPlaces, nonGbListed: nonGbPlaces.length < nonGbTotal ? `first ${nonGbPlaces.length} of ${nonGbTotal}` : 'all',
     addressVerdicts, placeholderPostcodes,
