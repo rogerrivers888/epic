@@ -340,3 +340,9 @@ test('decides by is never a day already gone', () => {
   assert.equal(decidesOn({ lane: 'oneoff', starts_on: soon, min_count: 5 }), today, 'three days away decides today, not four days ago');
   assert.equal(decidesOn({ lane: 'oneoff', starts_on: today, min_count: 5 }), null, 'starting today, nothing left to decide');
 });
+
+test('a per-booking price is one share however many come', async () => {
+  const { priceFor } = await import('../src/domain/hosting.js');
+  assert.equal(priceFor({ price_mode: 'same_each', price_pence: 5000, per: 'booking' }, { heads: 3 }).pence, 5000);
+  assert.equal(priceFor({ price_mode: 'same_each', price_pence: 5000, per: 'person' }, { heads: 3 }).pence, 15000);
+});

@@ -195,7 +195,8 @@ export function lastDate(offer, occurrence) {
  * inside the number shown, never bolted on at the end (brief §3.5).
  */
 export function priceFor(offer, { heads = 1, occurrence = null, headsNow = 0 } = {}) {
-  const shares = offer.per === 'household' ? 1 : Math.max(1, heads);
+  // A household price, or an On request price per booking (hosting v7), is one share however many come (Codex, 2 Oct 2026).
+  const shares = offer.per === 'household' || offer.per === 'booking' ? 1 : Math.max(1, heads);
   if (offer.shape === 'series' && occurrence && occurrence !== 'whole' && offer.drop_in_pence != null) {
     return { pence: offer.drop_in_pence * shares, each: offer.drop_in_pence, ceilingPence: null, likelyPence: null, mode: 'drop_in' };
   }

@@ -42,7 +42,7 @@ export function InvitedScreen({ token }: { token: string }) {
   const when = offer.shape === 'oneoff' ? [offer.startsOn ? dayLong(offer.startsOn) : null, offer.startsAt ? `from ${offer.startsAt}` : null, offer.endsAt ? `until ${offer.endsAt}` : durationWords(offer.durationMin)].filter(Boolean).join(' · ')
     : offer.shape === 'series' ? [offer.firstDate ? `From ${dayShort(offer.firstDate)}` : null, offer.startsAt, offer.dates.length ? `${offer.dates.length} times` : null].filter(Boolean).join(' · ')
       : 'Whenever suits — book a time with them';
-  const price = offer.money === 'free' ? null : `${money(offer.price.each)} each${offer.money === 'epic' ? ' · Epic collects, charged when you say yes' : ` · paid to ${first} directly`}`;
+  const price = offer.money === 'free' ? null : `${money(offer.price.each)} ${offer.per === 'booking' ? 'a booking' : offer.per === 'household' ? 'a household' : 'each'}${offer.money === 'epic' ? ' · Epic collects, charged when you say yes' : ` · paid to ${first} directly`}`;
 
   const answer = async (rsvp: 'yes' | 'no') => {
     setBusy(true);
