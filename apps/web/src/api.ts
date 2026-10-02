@@ -2747,6 +2747,8 @@ export const api = {
   createLaneOffer: (lane: HostLane, body: LanePatch = {}) => post<{ offer: LaneOffer }>('/api/host/lanes/offers', { lane, ...body }),
   laneOffer: (id: string) => request<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}`),
   saveLaneOffer: (id: string, body: LanePatch) => patch<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}`, body),
+  /** The last save as the page goes away: `keepalive`, so the browser lets it finish (Codex, 2 Oct 2026). */
+  saveLaneOfferOnLeave: (id: string, body: LanePatch) => request<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}`, { method: 'PATCH', body: JSON.stringify(body), keepalive: true }),
   deleteLaneOffer: (id: string) => del<void>(`/api/host/lanes/offers/${id}`),
   /** Say it, or pasted words: the lane's fields read out of them. `step` scopes it to the step the header mic was used on. */
   laneExtract: (body: { lane: HostLane; offerId?: string | null; step?: string | null; text: string; source?: 'said' | 'pasted' }) =>

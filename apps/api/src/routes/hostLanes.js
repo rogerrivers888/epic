@@ -231,13 +231,17 @@ router.post('/host/lanes/offers', async (req, res, next) => {
     const { household, account } = await me();
     const lane = oneOf(LANES, req.body?.lane);
     if (!lane) throw refuse(400, 'lane_required', 'Pick one of the four: one-off, weekly, course or on request.');
+    // Everything is checked before the row exists, so a refused first save leaves no empty draft behind (Codex, 2 Oct 2026).
+    const blank = { lane, state: 'draft', visibility: 'invite', money: 'free', price_mode: 'free', age_min: 18, venue: 'out_about', venue_ref: null };
+    const patch = laneBody(req.body ?? {}, blank);
+    const derived = Object.keys(patch).length ? derive(patch, blank) : {};
+    // The photo picked on step 1 travels with the first save.
+    const photoIds = req.body?.photoIds !== undefined ? await ownMediaList(household.id, req.body.photoIds, 'photo', 8) : null;
+    const cohosts = req.body?.cohosts !== undefined ? await ownCohosts(household.id, req.body.cohosts) : null;
     const host = await ensureHost(household, account);
     let offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ageMin: 18, ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
-    const patch = laneBody(req.body ?? {}, offer);
-    // The photo picked on step 1 travels with the first save (Codex, 2 Oct 2026).
-    if (req.body?.photoIds !== undefined) patch.photoIds = await ownMediaList(household.id, req.body.photoIds, 'photo', 8);
-    if (Object.keys(patch).length) offer = await repo.updateOffer(offer.id, { ...derive(patch, offer), ...(patch.photoIds ? { photoIds: patch.photoIds } : {}) });
-    if (req.body?.cohosts !== undefined) await repo.setCohosts(offer.id, await ownCohosts(household.id, req.body.cohosts));
+    if (Object.keys(derived).length || photoIds) offer = await repo.updateOffer(offer.id, { ...derived, ...(photoIds ? { photoIds } : {}) });
+    if (cohosts) await repo.setCohosts(offer.id, cohosts);
     res.status(201).json({ offer: await lanePayload(offer, host, account) });
   } catch (err) { next(err); }
 });
@@ -654,7 +658,7 @@ router.patch('/host/lanes/profile', async (req, res, next) => {
       if ((ageOn(dob) ?? 0) < cfg.hostMinAge) throw refuse(422, 'too_young', `Hosts on Epic are ${cfg.hostMinAge} or over.`);
       patch.dateOfBirth = dob;
     }
-    const updated = Object.keys(patch).length ? await repo.updateHost(host.id, patch) : host;
+    // The mobile first: if it is taken nothing else is written, so a refused save changes nothing (Codex, 2 Oct 2026).
     let acct = account;
     if (b.mobile !== undefined && account?.id) {
       const mobile = str(b.mobile, 30)?.replace(/[^\d+]/g, '') ?? null;
@@ -667,6 +671,7 @@ router.patch('/host/lanes/profile', async (req, res, next) => {
         throw e;
       }
     }
+    const updated = Object.keys(patch).length ? await repo.updateHost(host.id, patch) : host;
     res.json({ host: hostSheet(updated, acct) });
   } catch (err) { next(err); }
 });

@@ -108,6 +108,8 @@ test('a draft is made in a lane, with the lane’s steps, and only on asking', a
     assert.equal(home.body.config.seq.course.length, 9);
     assert.ok(home.body.config.bankHolidays.some((b) => b.date === '2026-12-25'), 'gov.uk’s list, England and Wales');
     assert.equal((await srv.send('POST', '/api/host/lanes/offers', { lane: 'fortnightly' })).status, 400);
+    assert.equal((await srv.send('POST', '/api/host/lanes/offers', { lane: 'oneoff', minCount: 9, maxCount: 3 })).body.error, 'min_over_max');
+    assert.equal(Number((await query("select count(*) from host_offers o join hosts h on h.id = o.host_id where h.household_id = $1", [h.id])).rows[0].count), 0, 'a refused first save leaves no draft behind');
     for (const lane of ['oneoff', 'weekly', 'course', 'onrequest']) {
       const r = await srv.send('POST', '/api/host/lanes/offers', { lane, whatLabel: 'Something', title: `A ${lane}`, draftStep: 'what' });
       assert.equal(r.status, 201, lane);

@@ -120,7 +120,7 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
       const body = pending.current; const id = idRef.current;
       if (!id || !Object.keys(body).length) return;
       pending.current = {};
-      void api.saveLaneOffer(id, body).catch(() => null);
+      void api.saveLaneOfferOnLeave(id, body).catch(() => null);
     };
     const w = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : null;
     w?.addEventListener('pagehide', send);
