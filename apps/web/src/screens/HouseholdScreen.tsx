@@ -489,12 +489,12 @@ function PhotoSheet({ member, refresh, onClose }: { member: Member; refresh: () 
  * Take (camera) or choose (library), crop square, resize to 512 and re-encode —
  * which strips EXIF and location (SX1 "Take photo" = capture, "Choose" = library).
  */
-async function pickSquarePhoto(source: 'camera' | 'library'): Promise<string | null> {
-  const opts = { mediaTypes: 'images' as const, allowsEditing: true, aspect: [1, 1] as [number, number], quality: 1, base64: false };
+export async function pickSquarePhoto(source: 'camera' | 'library', { aspect = [1, 1] as [number, number], width = 512, height = 512 } = {}): Promise<string | null> {
+  const opts = { mediaTypes: 'images' as const, allowsEditing: true, aspect, quality: 1, base64: false };
   const res = await (source === 'camera' ? ImagePicker.launchCameraAsync(opts) : ImagePicker.launchImageLibraryAsync(opts)).catch(() => null);
   if (!res || res.canceled || !res.assets?.[0]) return null;
   const ctx = ImageManipulator.ImageManipulator.manipulate(res.assets[0].uri);
-  ctx.resize({ width: 512, height: 512 });
+  ctx.resize({ width, height });
   const rendered = await ctx.renderAsync();
   const saved = await rendered.saveAsync({ format: ImageManipulator.SaveFormat.JPEG, compress: 0.8, base64: true });
   return saved.base64 ? `data:image/jpeg;base64,${saved.base64}` : null;

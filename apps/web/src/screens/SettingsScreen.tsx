@@ -18,7 +18,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
-import { api, HouseholdResponse, Member, MainDiet, RatingsView, TravelMode } from '../api';
+import { api, HouseholdResponse, Member, MainDiet, Place, RatingsView, TravelMode } from '../api';
+import { PlacePicker } from '../components/PlacePicker';
+import { pickSquarePhoto } from './HouseholdScreen';
 import { colors, fonts, spacing, type, BORDER, TARGET, LIME, INK, CREAM } from '../theme';
 import { Button } from '../components/ui';
 import { useRouter, useQueryState, asOneOf, asFlag, asText } from '../router';
@@ -114,6 +116,7 @@ function HouseholdTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
   const { account } = useSession();
   const { household, members } = data;
   const solo = account?.plan === 'solo';
+  const [editingHome, setEditingHome] = useState(false);
   if (solo) return <SoloHousehold data={data} refresh={refresh} />;
 
   const place = household.home?.label?.split(',')[0]?.trim();
@@ -125,8 +128,9 @@ function HouseholdTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
           <Text style={styles.householdName} numberOfLines={1}>{household.name}</Text>
           <Text style={type.small}>{[place, `${members.length} ${members.length === 1 ? 'person' : 'people'}`].filter(Boolean).join(' · ')}</Text>
         </View>
-        <Press onPress={() => showToast('Editing the household name is coming soon')} accessibilityRole="button"><Text style={styles.editLink}>Edit</Text></Press>
+        <Press onPress={() => setEditingHome(true)} accessibilityRole="button"><Text style={styles.editLink}>Edit</Text></Press>
       </View>
+      {editingHome ? <HouseholdEditSheet household={household} refresh={refresh} onClose={() => setEditingHome(false)} /> : null}
 
       <FaceRow members={members} me={data.me} onOpen={(id) => navigate(paths.household(id))} onAdded={refresh} />
 
@@ -152,6 +156,55 @@ function PlanRows({ household, refresh }: { household: HouseholdResponse['househ
       {plan === 'busy' ? <HowBusySheet household={household} refresh={refresh} onClose={close} /> : null}
       {plan === 'day' ? <DayRunsSheet household={household} refresh={refresh} onClose={close} /> : null}
     </>
+  );
+}
+
+// --- the household's name, home and picture ----------------------------------
+
+/**
+ * The household's name, home address and home picture. The design's own
+ * household editor is a later item; until it lands, these stay editable here,
+ * because a household that moves must be able to say so — planning reads the
+ * home (Codex, 2 Oct 2026; the old Household card's editing, carried over).
+ */
+function HouseholdEditSheet({ household, refresh, onClose }: { household: HouseholdResponse['household']; refresh: () => Promise<void>; onClose: () => void }) {
+  const [name, setName] = useState(household.name);
+  const [busy, setBusy] = useState(false);
+  const [changingHome, setChangingHome] = useState(!household.home);
+  const address = household.home?.formatted ?? household.home?.label ?? null;
+  const save = async () => {
+    const v = name.trim();
+    if (!v || v === household.name) { onClose(); return; }
+    setBusy(true);
+    try { await api.updateHousehold({ name: v }); await refresh(); showToast('Saved'); onClose(); }
+    catch (e: any) { showToast(e?.body?.message || 'Could not save'); }
+    finally { setBusy(false); }
+  };
+  const setHome = async (p: Place | null) => {
+    if (!p) return;
+    try { await api.updateHousehold({ home: p }); await refresh(); setChangingHome(false); showToast('Home saved'); }
+    catch (e: any) { showToast(e?.body?.message || 'Could not save the home'); }
+  };
+  const setPhoto = async () => {
+    const url = await pickSquarePhoto('library', { aspect: [3, 2], width: 900, height: 600 });
+    if (!url) return;
+    try { await api.updateHousehold({ homePhotoUrl: url }); await refresh(); showToast('Picture saved'); }
+    catch (e: any) { showToast(e?.body?.message || 'Could not save the picture'); }
+  };
+  return (
+    <Sheet title="Your household" onCancel={onClose} cancelLabel="Cancel" onDone={save} doneLabel="Save" doneDisabled={busy} onClose={onClose}>
+      <Text style={type.small}>Name</Text>
+      <TextInput value={name} onChangeText={setName} placeholder="Household name" placeholderTextColor={colors.inkFaint} accessibilityLabel="Household name" style={styles.input} />
+      <Text style={[type.small, { marginTop: 12 }]}>Home</Text>
+      {address && !changingHome ? (
+        <Press onPress={() => setChangingHome(true)} accessibilityRole="button"><Text style={type.body}>{address} <Text style={styles.editLink}>Change</Text></Text></Press>
+      ) : (
+        <PlacePicker value={household.home} onPick={setHome} placeholder="House name or number, street, town, postcode" />
+      )}
+      <Press onPress={() => void setPhoto()} accessibilityRole="button" style={{ marginTop: 12 }}>
+        <Text style={styles.editLink}>{household.homePhotoUrl ? 'Change the picture of home' : 'Add a picture of home'}</Text>
+      </Press>
+    </Sheet>
   );
 }
 
