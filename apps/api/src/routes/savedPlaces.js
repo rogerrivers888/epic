@@ -172,7 +172,7 @@ savedPlacesRouter.post('/backfill', requires('manage_library'), requireOwnerSign
 const REVIEWED = `(pr.venue_ref is not null and not exists (
                     select 1 from image_links l join image_assets i on i.id = l.image_id
                      where l.subject_type = 'place' and l.subject_id = r.venue_ref
-                       and i.moderation <> 'rejected' and i.fetched_at > pr.reviewed_at)
+                       and i.moderation <> 'rejected' and greatest(i.fetched_at, l.created_at) > pr.reviewed_at)
                   and not exists (
                     select 1 from venue_site_images v
                      where v.venue_ref = r.venue_ref and v.found_at > pr.reviewed_at))`;

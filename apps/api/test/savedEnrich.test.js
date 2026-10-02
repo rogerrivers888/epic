@@ -274,7 +274,11 @@ test('a website Claude found and opened has its pictures looked for at once', as
   await enrich.afterFree(ref, { householdId: hh, sessionId: null }, {
     asks: [],
     openverse: async () => ({ ok: true, stored: [], refused: 0 }),
-    venuePictures: async (_ref, site) => { looked.push(site); return { ok: true, kept: 3 }; },
+    venuePictures: async (r, site) => {
+      looked.push(site);
+      for (const n of [1, 2, 3]) await query(`insert into venue_site_images (venue_ref, image_url, page_url) values ($1, $2, $3)`, [r, `${site}${n}.jpg`, site]);
+      return { ok: true, kept: 3 };
+    },
     searchWeb: async ({ meta }) => {
       meta.costUsd = 0.02;
       return { text: '{"fields":{"website":{"value":"https://found.example/","source_url":"https://found.example/"}}}', fetched: ['https://found.example/'], searches: 1 };
@@ -348,4 +352,24 @@ test('a re-run leaves an Openverse card picture it already holds exactly as it i
   assert.equal(again.stored.length, 0, 'not counted as found again');
   const { rows: [l] } = await query(`select role from image_links where subject_id = $1`, [ref]);
   assert.equal(l.role, 'hero', 'still the card picture');
+});
+
+test('a review site, social page or booking platform is never taken as the venue\'s own website', () => {
+  const j = enrich.judge({
+    reply: {
+      fields: {
+        website: { value: 'https://www.tripadvisor.co.uk/Restaurant_Review-x', source_url: 'https://www.tripadvisor.co.uk/Restaurant_Review-x' },
+        phone: { value: '0100', source_url: 'https://www.tripadvisor.co.uk/Restaurant_Review-x' },
+      },
+      facts: [{ key: 'dogs', answer: 'yes', source_url: 'https://www.tripadvisor.co.uk/Restaurant_Review-x' }],
+    },
+    fetched: ['https://www.tripadvisor.co.uk/Restaurant_Review-x'],
+    asks: [{ id: 9, key: 'dogs', label: 'Dogs' }],
+  });
+  assert.equal(j.website, null);
+  assert.deepEqual(j.siteFacts, {}, 'nothing read there is filed as the venue\'s own');
+  assert.match(j.fields.website.why, /not the venue's own site/);
+  assert.equal(j.facts.dogs.answer, 'unknown');
+  assert.equal(enrich.notTheVenue('https://m.facebook.com/x'), true);
+  assert.equal(enrich.notTheVenue('https://www.sebastians.co.uk/'), false);
 });

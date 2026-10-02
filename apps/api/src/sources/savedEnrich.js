@@ -73,6 +73,12 @@ const sameSite = (a, b) => {
   if (!ha || !hb) return false;
   return ha === hb || ha.endsWith(`.${hb}`) || hb.endsWith(`.${ha}`);
 };
+// Pages that are about a venue but are not the venue's own: review sites,
+// social networks, booking and delivery platforms, listings and link pages.
+// Claude reading one of these never makes it "the venue's website", so
+// nothing read there is filed as `site` (Codex, 2 Oct 2026).
+const NOT_THE_VENUE = /(^|\.)(tripadvisor\.[a-z.]+|facebook\.com|instagram\.com|twitter\.com|x\.com|tiktok\.com|youtube\.com|linkedin\.com|yelp\.[a-z.]+|google\.[a-z.]+|goo\.gl|booking\.com|opentable\.[a-z.]+|resy\.com|sevenrooms\.com|designmynight\.com|bookatable\.[a-z.]+|thefork\.[a-z.]+|quandoo\.[a-z.]+|deliveroo\.[a-z.]+|ubereats\.com|just-eat\.[a-z.]+|justeat\.[a-z.]+|timeout\.com|squaremeal\.co\.uk|hardens\.com|visitengland\.com|visitbritain\.com|linktr\.ee|wikipedia\.org|wikidata\.org|yell\.com|foursquare\.com|restaurantguru\.com|groupon\.[a-z.]+|eventbrite\.[a-z.]+|airbnb\.[a-z.]+|expedia\.[a-z.]+|hotels\.com)$/i;
+export const notTheVenue = (u) => NOT_THE_VENUE.test(hostOf(u) ?? '');
 const isWikipedia = (u) => /(^|\.)wikipedia\.org$/.test(hostOf(u) ?? '');
 // Fetched pages are compared without their fragment or trailing slash, so
 // "https://x.co/menu/" read and "https://x.co/menu" cited are the same page.
@@ -261,7 +267,7 @@ export async function afterFree(venueRef, ctx, deps = {}) {
     found.pictures.openverse = ov.ok ? { stored: heldOv.n, added: ov.stored.length, refused: ov.refused } : { error: ov.why, stored: heldOv.n };
     if (record?.website) {
       const vs = await (deps.venuePictures ?? venuePicturesFor)(venueRef, record.website).catch((err) => ({ ok: false, why: err.message }));
-      found.pictures.venueSite = vs.ok ? { kept: vs.kept } : { error: vs.why };
+      found.pictures.venueSite = { ...(vs.ok ? {} : { error: vs.why }), kept: await venueHeld(venueRef) };
     }
 
     const asks = deps.asks ?? await questionsToAsk(venueRef);
@@ -300,7 +306,7 @@ export async function afterFree(venueRef, ctx, deps = {}) {
     // are looked for there and then, not on the next re-run (Codex, 2 Oct 2026).
     if (!record?.website && pass.website) {
       const vs = await (deps.venuePictures ?? venuePicturesFor)(venueRef, pass.website).catch((err) => ({ ok: false, why: err.message }));
-      found.pictures.venueSite = vs.ok ? { kept: vs.kept } : { error: vs.why };
+      found.pictures.venueSite = { ...(vs.ok ? {} : { error: vs.why }), kept: await venueHeld(venueRef) };
     }
     await query(
       `update saved_place_enrichment set state = 'done', claude_done_at = now(), last_run_at = now(),
@@ -309,6 +315,12 @@ export async function afterFree(venueRef, ctx, deps = {}) {
       [venueRef, JSON.stringify(found), pass.costUsd ?? 0]);
     return { state: 'done', found, costUsd: pass.costUsd ?? 0 };
   });
+}
+
+/** The venue-site pictures the place holds now, whatever this run's read found (Codex, 2 Oct 2026). */
+async function venueHeld(venueRef) {
+  const { rows: [r] } = await query('select count(*)::int as n from venue_site_images where venue_ref = $1', [venueRef]);
+  return r.n;
 }
 
 /**
@@ -387,7 +399,7 @@ export function judge({ reply, fetched, knownWebsite = null, asks = [] }) {
   // actually opened. A website nobody opened is a guess about a website.
   let website = knownWebsite;
   const w = reply?.fields?.website;
-  if (!website && w?.value && (wasRead(w.value) || [...read].some((u) => sameSite(u, w.value)))) {
+  if (!website && w?.value && !notTheVenue(w.value) && (wasRead(w.value) || [...read].some((u) => sameSite(u, w.value)))) {
     website = w.value;
     siteFacts.website = w.value;
     // The page that vouches for it is one that was fetched in this call —
@@ -398,7 +410,8 @@ export function judge({ reply, fetched, knownWebsite = null, asks = [] }) {
       || (fetched ?? []).find((u) => sameSite(u, w.value));
     fields.website = { value: w.value, source: 'site', sourceUrl: vouch, checkedAt: at };
   } else if (!website && w?.value) {
-    fields.website = { value: null, source: 'unknown', sourceUrl: null, checkedAt: at, why: 'found in search only, never opened' };
+    fields.website = { value: null, source: 'unknown', sourceUrl: null, checkedAt: at,
+      why: notTheVenue(w.value) ? `${hostOf(w.value)} is not the venue's own site` : 'found in search only, never opened' };
   }
   const onVenueSite = (u) => Boolean(website) && wasRead(u) && sameSite(u, website);
 

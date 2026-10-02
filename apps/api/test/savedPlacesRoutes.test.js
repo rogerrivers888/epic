@@ -205,3 +205,17 @@ test('a place judged not fit stays in the review; a picture added since a verdic
     assert.ok(open.some((p) => p.venueRef === ref), 'an approved Commons picture found since reopens it');
   } finally { await close(); }
 });
+
+test('an existing picture newly linked to a place after its verdict reopens the review', async () => {
+  const ref = `google:link-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Linked Later', '{}')`, [ref]);
+  await query(`insert into venue_site_images (venue_ref, image_url, page_url, found_at) values ($1, 'https://ll.example/a.jpg', 'https://ll.example/', now() - interval '2 days')`, [ref]);
+  await query(`insert into photo_reviews (venue_ref, verdict, reviewed_at) values ($1, 'owned_fine', now() - interval '1 day')`, [ref]);
+  const { rows: [old] } = await query(`insert into image_assets (source, source_ref, licence, may_store, moderation, fetched_at) values ('wikimedia', $1, 'CC0', true, 'approved', now() - interval '30 days') returning id`, [`File:ll-${randomUUID()}.jpg`]);
+  await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', 1)`, [old.id, ref]);
+  const { base, close } = await serve();
+  try {
+    const open = (await (await fetch(`${base}/review?q=Linked%20Later&reviewed=no`)).json()).places;
+    assert.ok(open.some((p) => p.venueRef === ref), 'fetched long ago, linked just now: a new picture for this place');
+  } finally { await close(); }
+});
