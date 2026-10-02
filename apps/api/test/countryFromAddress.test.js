@@ -18,14 +18,17 @@ test.after(() => pool.end());
 
 test('the country an address names, and only a country', () => {
   assert.equal(countryNamedIn('Piazza della Bocca della Verità, Municipio Roma I, Rome, Lazio, 00153, Italy'), 'IT');
-  assert.equal(countryNamedIn('Viale della Zitella, Vatican City, 00120'), 'VA', 'the Vatican is its own country');
+  assert.equal(countryNamedIn('Viale della Zitella, 00120, Vatican City'), 'VA', 'the Vatican is its own country');
+  assert.equal(countryNamedIn('Viale della Zitella, Vatican City, 00120'), null, 'a trailing code: the name before it may be a town');
+  assert.equal(countryNamedIn('123 Main St, Lebanon, 37087'), null, 'Lebanon, Tennessee (Codex)');
+  assert.equal(countryNamedIn('Somewhere, Canary Islands'), null, 'not an ISO country');
   assert.equal(countryNamedIn("St Peter's Square, 00120 Vatican City, Vatican City"), 'VA');
   assert.equal(countryNamedIn('Iris Bay Tower, Business Bay, Dubai, United Arab Emirates'), 'AE');
   assert.equal(countryNamedIn('Windsor, SL4 1NJ, United Kingdom'), 'GB', 'not the reserved code UK');
   assert.equal(countryNamedIn('Iris Bay Tower, Business Bay, Dubai, Dubai, 00000'), null, 'a city and a placeholder name no country');
   assert.equal(countryNamedIn('Piazza di San Giovanni in Laterano, Roma, 00184'), null, 'a city is not evidence');
   assert.equal(countryNamedIn('Atlanta, Georgia'), null, 'a name that is also a US state is refused');
-  assert.equal(countryNamedIn('Italy, Via Roma, Milan'), null, 'only the last real component counts');
+  assert.equal(countryNamedIn('Italy, Via Roma, Milan'), null, 'only the last component counts');
   assert.equal(countryNamedIn('00000'), null);
   // Current ISO codes only — never an obsolete one the runtime still names (Codex).
   for (const [name, code] of [['Germany', 'DE'], ['Serbia', 'RS'], ['Vietnam', 'VN'], ['Curaçao', 'CW'], ['Vanuatu', 'VU'], ['Yemen', 'YE'], ['Kosovo', 'XK']]) {
@@ -54,15 +57,16 @@ const countryOf = async (ref) => (await query('select country_code from place_in
 
 test('the settle pass fills a missing country from owned addresses, and reports what it could not', async () => {
   await place('google:addr-pantheon', { address: 'Piazza della Rotonda, Roma, 00186', facts: [['nominatim', 'Piazza della Rotonda, Municipio Roma I, Rome, Lazio, 00186, Italy']] });
-  await place('google:addr-vatican', { address: 'Viale della Zitella, Vatican City, 00120' });
+  await place('google:addr-vatican', { address: 'Viale della Zitella, Vatican City, 00120', facts: [['nominatim', 'Viale della Zitella, 00120, Vatican City']] });
+  await place('google:addr-vatican-site-only', { address: 'Piazza Santa Marta, Vatican City, 00120' });
   await place('google:addr-dubai', { address: 'Iris Bay Tower, Business Bay, Dubai, Dubai, 00000' });
   await place('google:addr-gb', { country: 'GB', address: 'Somewhere, Rome, Italy' });
 
-  const out = await index.settleCountriesFromAddresses(['google:addr-pantheon', 'google:addr-vatican', 'google:addr-dubai', 'google:addr-gb']);
+  const out = await index.settleCountriesFromAddresses(['google:addr-pantheon', 'google:addr-vatican', 'google:addr-vatican-site-only', 'google:addr-dubai', 'google:addr-gb']);
   assert.deepEqual(out.settled.map((s) => [s.ref, s.country]).sort(),
     [['google:addr-pantheon', 'IT'], ['google:addr-vatican', 'VA']]);
-  assert.deepEqual(out.unsettled, [{ ref: 'google:addr-dubai', reason: 'no owned address names a country' }],
-    'the placeholder 00000 settled nothing');
+  assert.deepEqual(out.unsettled.map((u) => u.ref).sort(), ['google:addr-dubai', 'google:addr-vatican-site-only'],
+    'the placeholder 00000 settled nothing, and an address ending in its postcode names no country');
   assert.equal(await countryOf('google:addr-pantheon'), 'IT');
   assert.equal(await countryOf('google:addr-vatican'), 'VA');
   assert.equal(await countryOf('google:addr-dubai'), null);

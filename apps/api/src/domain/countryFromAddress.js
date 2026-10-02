@@ -2,9 +2,9 @@
  * A place's country from its own address (owner, 2 Oct 2026: "Italy and the
  * Vatican, UAE for Dubai, from their owned addresses").
  *
- * Only a COUNTRY NAME is evidence, and only where an address puts one: the last
- * component that is not a code. "…, Rome, Lazio, 00153, Italy" is Italy;
- * "…, Vatican City, 00120" is the Vatican (VA — its own country, never Italy);
+ * Only a COUNTRY NAME is evidence, and only where an address formatter puts one:
+ * the last component, with nothing after it. "…, Rome, Lazio, 00153, Italy" is Italy;
+ * "…, Vatican City" is the Vatican (VA — its own country, never Italy);
  * "Iris Bay Tower, Business Bay, Dubai, Dubai, 00000" names no country at all,
  * because Dubai is a city and 00000 is not a postcode. Nothing is inferred from a
  * city, a region or a code — a placeholder like 00000 is skipped, never read.
@@ -30,7 +30,11 @@ const ALIASES = {
 
 // Codes that name something other than one country: reserved (UK is GB's alias,
 // and its name "United Kingdom" would otherwise shadow GB), unions and unknowns.
-const NOT_COUNTRIES = new Set(['UK', 'EU', 'EZ', 'UN', 'QO', 'ZZ']);
+const NOT_COUNTRIES = new Set(['UK', 'EU', 'EZ', 'UN', 'QO', 'ZZ',
+  // Regions the runtime names that ISO 3166 does not list as countries: Ascension,
+  // Clipperton, Sark, Diego Garcia, Ceuta & Melilla, the Canary Islands, Tristan da
+  // Cunha (Codex). A place there takes its sovereign's code from a fuller address.
+  'AC', 'CP', 'CQ', 'DG', 'EA', 'IC', 'TA']);
 // ISO 3166's user-assigned ranges: AA, QM–QZ, XA–XZ (Kosovo's XK is the one in use).
 const PRIVATE_USE = (c) => c === 'AA' || (c[0] === 'Q' && c[1] >= 'M') || (c[0] === 'X' && c !== 'XK') || c === 'ZZ';
 
@@ -63,15 +67,21 @@ const NAMES = (() => {
 /** A component that is a code, not a name: digits, or letters-and-digits (00000, SW1A 1AA, D02 X285). */
 const isCode = (part) => /\d/.test(part) && !/[a-z]{4,}/i.test(part.replace(/\d/g, ''));
 
-/** The country one address names, or null. */
+/**
+ * The country one address names, or null. Only when the country is the address's
+ * LAST component, with nothing after it — not even a code. An address formatter
+ * ends with the country; an address that ends with a postcode or a ZIP has a town
+ * in front of it, and a town can be called Lebanon, Italy or Peru ("123 Main St,
+ * Lebanon, 37087" is Tennessee — Codex). No list of such towns can be complete,
+ * so the rule is the position, not a list. A trailing placeholder (00000) makes
+ * the address name no country at all.
+ */
 export function countryNamedIn(address) {
   if (!address) return null;
   const parts = String(address).split(',').map((p) => p.trim()).filter(Boolean);
-  for (let i = parts.length - 1; i >= 0; i -= 1) {
-    if (isCode(parts[i])) continue;           // a postcode, a placeholder — never evidence
-    return NAMES.get(fold(parts[i])) ?? null;  // the last real component, and only it
-  }
-  return null;
+  const last = parts[parts.length - 1];
+  if (!last || isCode(last)) return null;
+  return NAMES.get(fold(last)) ?? null;
 }
 
 /**
