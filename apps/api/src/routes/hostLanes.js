@@ -603,8 +603,15 @@ async function applyFound({ household, account, lane, offerId, step, patch, foun
   if (keep.line) keep.lineSuggested = false;
   keep.draftSource = source;
   const body = laneBody(keep, offer);
-  const updated = await repo.updateOffer(offer.id, derive(body, offer));
-  if (patch.cohosts && (step === 'cohosts' || !current.cohosts.length)) await repo.setCohosts(offer.id, await ownCohosts(household.id, patch.cohosts));
+  const derived = derive(body, offer);
+  const cohosts = patch.cohosts && (step === 'cohosts' || !current.cohosts.length) ? await ownCohosts(household.id, patch.cohosts) : null;
+  // Under the same lock as every other set-up write, and only to a draft (Codex, 2 Oct 2026).
+  const updated = await withTransaction(async (client) => {
+    await lockDraft(client, offer.id);
+    const row = await repo.updateOffer(offer.id, derived, client);
+    if (cohosts) await repo.setCohosts(offer.id, cohosts, client);
+    return row;
+  });
   return { offer: await lanePayload(updated, host, account), found };
 }
 
@@ -994,9 +1001,11 @@ async function checkVideo(offer, householdId) {
     const system = 'You check a host\'s offer video before a person reviews it. Flag it (needsPerson true) if what is said does not match the listing, shares a phone number, email or social handle, asks for payment outside Epic, is unsafe or inappropriate (especially around children), or is not the host speaking about this offer. Otherwise needsPerson false. reasons: short phrases, empty when nothing is wrong.';
     const out = await extractWith({ system, input: `Listing: ${offer.title ?? ''} — ${offer.summary ?? ''}\n\nVideo transcript: ${heard.text ?? ''}`, schema, name: 'video_check' });
     await providerCalls.recordMetered({ householdId, provider: 'openai', purpose: 'host.review.check', units: { 'openai-requests': 1 }, costUsd: tokenCost(out.model, out.usage), ok: true });
-    await repo.updateOffer(offer.id, { reviewAi: { state: 'done', needsPerson: Boolean(out.parsed.needsPerson), reasons: list(out.parsed.reasons, 6).map((r) => str(r, 160)).filter(Boolean), at: new Date().toISOString() }, transcript: heard.text ?? null });
+    // Written only if the offer still shows the video that was checked (Codex, 2 Oct 2026).
+    const result = { state: 'done', videoId: offer.video_id, needsPerson: Boolean(out.parsed.needsPerson), reasons: list(out.parsed.reasons, 6).map((r) => str(r, 160)).filter(Boolean), at: new Date().toISOString() };
+    await query('update host_offers set review_ai = $2::jsonb, transcript = $3, updated_at = now() where id = $1 and video_id = $4', [offer.id, JSON.stringify(result), heard.text ?? null, offer.video_id]);
   } catch (err) {
-    await repo.updateOffer(offer.id, { reviewAi: { state: 'failed', reason: err.code ?? 'error', needsPerson: true } });
+    await query('update host_offers set review_ai = $2::jsonb, updated_at = now() where id = $1 and video_id = $3', [offer.id, JSON.stringify({ state: 'failed', videoId: offer.video_id, reason: err.code ?? 'error', needsPerson: true }), offer.video_id]);
   }
 }
 

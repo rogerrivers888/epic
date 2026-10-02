@@ -66,7 +66,8 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
   // --- loading ---------------------------------------------------------------
   useEffect(() => { api.laneHome().then(setHome).catch((e) => setError(e.message)); }, []);
   useEffect(() => {
-    if (!offerId) { if (laneIn) setOffer((o) => o ?? blankOffer(laneIn)); return; }
+    // A fresh step 1 (including after Start again) starts from a blank draft, never the deleted one (Codex, 2 Oct 2026).
+    if (!offerId) { if (laneIn) setOffer((o) => (o && !o.id ? o : blankOffer(laneIn))); return; }
     api.laneOffer(offerId).then((r) => {
       // A draft that has gone out is not set up any more: its checklist or its ending is where it lives.
       if (r.offer.state !== 'draft') { navigate(paths.hostDone(r.offer.id), { replace: true }); return; }
