@@ -254,4 +254,80 @@ test('an ignore is permanent across a drawer it was never seen in before', async
   assert.ok(!(await reviewQueue({ subcategory: subB })).some((f) => f.norm === 'ball pit'), 'and nothing in the new drawer’s queue');
 });
 
+test('a per-drawer ignoreCandidate does NOT tombstone the feature in other drawers', async () => {
+  // Codex, 2 Oct 2026: the global tombstone must come only from the review queue's
+  // norm-level Ignore (ignoreFeature), never from the ordinary per-subcategory
+  // ignoreCandidate. "crazy golf" raises one feature (golf alone is a head, not a
+  // solo noun, so it is filtered).
+  const subA = 'c30-pd-a'; const subB = 'c30-pd-b';
+  const a = 'google:ChIJ_c30_pd_a'; const b = 'google:ChIJ_c30_pd_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 pd A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 pd B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await query("delete from feature_tombstones where norm = 'crazy golf'");
+
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A crazy golf.' } });
+  const { rows: [cand] } = await query("select id from harvest_candidates where norm = 'crazy golf' and subcategory = $1", [subA]);
+  await sets.ignoreCandidate(cand.id, { actor: 'tester', reason: 'not in this drawer' });
+  assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'crazy golf'")).rows[0].n, 0, 'a per-drawer ignore writes no tombstone');
+
+  // The same feature in a different drawer is still spotted.
+  const report = await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A crazy golf.' } });
+  assert.ok(report.features.some((f) => f.norm === 'crazy golf'), 'still raised in the other drawer');
+  assert.equal((await query('select count(*)::int n from harvest_candidates where subcategory = $1', [subB])).rows[0].n >= 1, true, 'a candidate is raised in the other drawer');
+});
+
+test('approving a known feature asks it here and reuses the existing fact, not a new one', async () => {
+  // P2#3/P2#4 (Codex, 2 Oct 2026): a spotted feature already in our fact list must
+  // still be approvable — it adds the question in the spotted drawer — and must
+  // reuse the existing attribute rather than silently minting or merging a key.
+  const sub = 'c30-known-parks';
+  const ref = 'google:ChIJ_c30_known';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 known parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into question_sets (key, name) values ('c30-known-set', 'C30 known set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-known-set') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from attribute_aliases where norm = 'wendy house'").catch(() => {});
+  await query("insert into place_attributes (key, label, kind) values ('wendy-house', 'Wendy house', 'yesno') on conflict do nothing");
+
+  const spotted = await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A wendy house.' } });
+  assert.ok(spotted.features.find((f) => f.norm === 'wendy house')?.known, 'spotted as a known fact');
+
+  const res = await sets.approveFeature('wendy house', { actor: 'tester' });
+  assert.equal(res.attributeKey, 'wendy-house', 'reused the existing fact, not a new key');
+  assert.ok(res.asked >= 1, 'asked in the spotted drawer');
+  assert.equal((await query("select count(*)::int n from place_attributes where key like 'wendy%'")).rows[0].n, 1, 'no second label was minted');
+});
+
+test('approval refuses a custom label that collides with an unrelated fact', async () => {
+  // P2#4 (Codex, 2 Oct 2026): on conflict do nothing used to suppress the collision
+  // and silently map the feature onto whatever fact owned the key. A custom label
+  // that slugs onto an unrelated existing key is now refused.
+  const sub = 'c30-collide-parks';
+  const ref = 'google:ChIJ_c30_collide';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 collide parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from attribute_aliases where norm = 'bowling green'").catch(() => {});
+  await query("insert into place_attributes (key, label, kind) values ('picnic-area', 'Picnic area', 'yesno') on conflict do nothing");
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A bowling green.' } });
+
+  await assert.rejects(
+    () => sets.approveFeature('bowling green', { actor: 'tester', label: 'picnic area' }),
+    /already one of our labels/,
+    'a label colliding with an unrelated fact is refused',
+  );
+  // And nothing was aliased onto the unrelated fact.
+  assert.equal((await query("select count(*)::int n from attribute_aliases where norm = 'bowling green' and target_key = 'picnic-area'")).rows[0].n, 0, 'no silent merge');
+});
+
 test.after(async () => { await pool.end(); });

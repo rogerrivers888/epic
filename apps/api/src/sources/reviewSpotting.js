@@ -191,15 +191,14 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
   if (!features.size) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };
 
   const run = client ? (t, p) => client.query(t, p) : query;
-  // Ignoring a feature is for good, across every drawer (C30/C61, "Ignoring a word
-  // is permanent"). A norm ignored in ANY subcategory leaves a tombstone — its
-  // google candidate sits at status 'ignored' — and a later search that re-spots
-  // it in a NEW drawer must not raise it again. Drop the tombstoned norms before
-  // anything is written, so a fresh drawer can never reopen an ignored feature
-  // (Codex, 2 Oct 2026). recordCandidates already refuses to reopen an ignored
-  // candidate in the SAME drawer; this closes the cross-drawer gap it could not.
+  // Ignoring a feature in the review queue is for good, across every drawer (C30/C61,
+  // "Ignoring a word is permanent"). The scope is recorded explicitly in
+  // `feature_tombstones` — written only by `ignoreFeature`, the norm-level decision,
+  // never by the per-subcategory `ignoreCandidate` (Codex, 2 Oct 2026: a status-and-
+  // source guess could not tell the two apart). Drop any tombstoned norm before
+  // anything is written, so a fresh drawer can never reopen an ignored feature.
   const { rows: tombstoned } = await run(
-    "select distinct norm from harvest_candidates where norm = any($1) and status = 'ignored' and sources ? 'google'",
+    'select norm from feature_tombstones where norm = any($1)',
     [[...features.keys()]]);
   for (const t of tombstoned) features.delete(t.norm);
   if (!features.size) return { subcategory: null, queued: 0, filtered, known: 0, features: [] };

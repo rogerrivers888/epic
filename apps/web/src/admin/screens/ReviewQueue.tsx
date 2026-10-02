@@ -36,7 +36,11 @@ export function ReviewQueue({ canManage }: { canManage: boolean }) {
     setBusy(f.norm); setSaid(null);
     const run = how === 'approve' ? api.adminApproveFeature(f.norm) : api.adminIgnoreFeature(f.norm);
     Promise.resolve(run)
-      .then(() => setSaid(how === 'approve' ? `Approved “${f.raw}” — now a fact, and it will be verified from owned sources.` : `Ignored “${f.raw}”.`))
+      .then(() => setSaid(how === 'approve'
+        ? (f.known
+          ? `Asked “${f.raw}” in this drawer — it is verified from owned sources.`
+          : `Approved “${f.raw}” — now a fact, and it will be verified from owned sources.`)
+        : `Ignored “${f.raw}”.`))
       .catch((e: any) => setSaid(e?.body?.message ?? 'That could not be done.'))
       .finally(() => { setBusy(null); load(); });
   };
@@ -66,9 +70,7 @@ export function ReviewQueue({ canManage }: { canManage: boolean }) {
                 </Text>
               </View>
               <View style={styles.acts}>
-                {f.known
-                  ? <Word muted>will verify from owned sources</Word>
-                  : <Act label={busy === f.norm ? 'Approving…' : 'Approve'} small disabled={!canManage || busy != null} onPress={() => decide(f, 'approve')} />}
+                <Act label={busy === f.norm ? 'Approving…' : f.known ? 'Ask here' : 'Approve'} small disabled={!canManage || busy != null} onPress={() => decide(f, 'approve')} />
                 <Act label="Ignore" tone="secondary" small disabled={!canManage || busy != null} onPress={() => decide(f, 'ignore')} />
               </View>
             </View>

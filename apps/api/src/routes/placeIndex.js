@@ -5003,8 +5003,11 @@ router.post('/census/rollup', requires('manage_library'), async (req, res, next)
 // raised, for the owner to approve into facts or ignore.
 // ---------------------------------------------------------------------------
 
+// These decide question-set vocabulary — approving adds questions, ignoring
+// retires a word — so they are gated on the question-management capability, like
+// every other candidate/question route, not on the atlas one (Codex, 2 Oct 2026).
 /** The queue: each spotted feature, how many places mention it, an example drawer. */
-router.get('/review-queue', requires('view_library'), async (req, res, next) => {
+router.get('/review-queue', requires('view_questions'), async (req, res, next) => {
   try {
     const subcategory = req.query.sub ? String(req.query.sub) : null;
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
@@ -5014,7 +5017,7 @@ router.get('/review-queue', requires('view_library'), async (req, res, next) => 
 });
 
 /** Approve a new feature into our fact list; it is then verified from owned sources. */
-router.post('/review-queue/:norm/approve', requires('manage_library'), async (req, res, next) => {
+router.post('/review-queue/:norm/approve', requires('manage_questions'), async (req, res, next) => {
   try {
     const norm = String(req.params.norm ?? '').trim();
     if (!norm) throw bad('Which feature?');
@@ -5023,7 +5026,7 @@ router.post('/review-queue/:norm/approve', requires('manage_library'), async (re
 });
 
 /** Ignore a feature for good — it never raises again. */
-router.post('/review-queue/:norm/ignore', requires('manage_library'), async (req, res, next) => {
+router.post('/review-queue/:norm/ignore', requires('manage_questions'), async (req, res, next) => {
   try {
     const norm = String(req.params.norm ?? '').trim();
     if (!norm) throw bad('Which feature?');

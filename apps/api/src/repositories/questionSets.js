@@ -749,13 +749,22 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     let key = aliasRows[0]?.target_key ?? null;
     if (!key) {
       const text = label ?? cands[0].raw_forms?.[0] ?? norm;
-      key = slug(text);
-      try {
-        await client.query(
-          'insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing',
-          [key, sentence(text), kind]);
-      } catch {
-        throw bad(`${key} is already one of our labels. Approve it onto the label we have, or give it another name.`);
+      const wanted = slug(text);
+      // `on conflict do nothing` suppresses the unique violation, so the old catch
+      // never fired and a colliding key silently mapped this feature onto an
+      // unrelated fact (Codex, 2 Oct 2026). Read the result: a new row is ours to
+      // keep; a conflict is accepted only when the wording itself IS that fact —
+      // slug(norm) is the key, i.e. a known-feature approval, not a custom label
+      // that happens to collide — and otherwise refused.
+      const { rows: made } = await client.query(
+        'insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing returning key',
+        [wanted, sentence(text), kind]);
+      if (made[0]) {
+        key = wanted;
+      } else if (wanted === slug(norm)) {
+        key = wanted; // the existing fact this very word names — approve onto it
+      } else {
+        throw bad(`"${text}" is already one of our labels. Approve it onto the label we have, or give it another name.`);
       }
       await client.query(
         'insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing',
@@ -784,6 +793,9 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
       "update harvest_candidates set status = 'promoted', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'",
       [norm, actor]);
     await client.query('delete from review_sightings where norm = $1', [norm]);
+    // A word approved into a fact is no longer ignored: lift any tombstone so the
+    // decision reads consistently (Codex, 2 Oct 2026).
+    await client.query('delete from feature_tombstones where norm = $1', [norm]);
     attrs.forget();
     return { feature: norm, attributeKey: key, asked, subcategories: subs };
   });
@@ -805,6 +817,14 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
     // One transaction: the queue can never be left holding an actionable sighting
     // for a word whose candidate is already ignored (Codex, 2 Oct 2026).
     await client.query('delete from review_sightings where norm = $1', [norm]);
+    // The norm-level tombstone: this Ignore is a decision about the word, so a
+    // later spot in a drawer it was never seen in before must not raise it again
+    // (Codex, 2 Oct 2026). Only the review queue writes here; ignoreCandidate,
+    // which is per-subcategory, deliberately does not.
+    await client.query(
+      `insert into feature_tombstones (norm, decided_by, reason) values ($1, $2, $3)
+         on conflict (norm) do update set decided_by = excluded.decided_by, reason = excluded.reason, decided_at = now()`,
+      [norm, actor, reason ? String(reason).slice(0, 300) : null]);
     return { feature: norm, ignored: rowCount };
   });
 }

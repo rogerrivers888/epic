@@ -176,7 +176,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'First pitches to read within 48 hours, the trust ladder, and reports', group: 'Data' },
   { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'Data' },
   { key: 'queue', label: 'Content queue', icon: 'preview', needs: 'view_library', sub: 'What households have sent us, and whether it is fit to publish', group: 'Data' },
-  { key: 'review', label: 'Review queue', icon: 'list', needs: 'view_library', sub: 'Features Google review-spotting found, to approve into facts or ignore', group: 'Data' },
+  { key: 'review', label: 'Review queue', icon: 'list', needs: 'view_questions', sub: 'Features Google review-spotting found, to approve into facts or ignore', group: 'Data' },
   { key: 'runs', label: 'Runs', icon: 'download', needs: 'view_library', sub: 'What is going, what it cost, and what failed', group: 'Data' },
   // First in the Admin group, above Roles (Supporting docs › EPIC staff
   // management). manage_staff is owner-only, so only the owner sees it.
@@ -306,7 +306,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'coverage' ? <Coverage /> : null}
       {screen === 'filing' ? <Filing canManage={can('manage_library')} /> : null}
       {screen === 'places' ? <Places canManage={can('manage_library')} canSettings={can('manage_settings')} /> : null}
-      {screen === 'review' ? <ReviewQueue canManage={can('manage_library')} /> : null}
+      {screen === 'review' ? <ReviewQueue canManage={can('manage_questions')} /> : null}
       {/* Two capabilities, because two different things: starting a run is the
           library's, and setting the month's ceiling is the settings'. One flag
           gave a library manager an enabled box that always answered 403, and
