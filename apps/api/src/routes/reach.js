@@ -21,7 +21,7 @@
  */
 
 import express from 'express';
-import { requires } from '../access.js';
+import { requires, requireOwnerSignedIn } from '../access.js';
 import { CAP_MINUTES, EDGE_MINUTES, HORIZON_MINUTES, labelOf, sectorOf } from '../domain/reach.js';
 import { travelMode } from '../domain/travel.js';
 import * as reach from '../repositories/reach.js';
@@ -192,7 +192,13 @@ router.post('/build', requires('manage_library'), async (req, res, next) => {
     // minute build that would strip every origin's wider rows (Codex).
     const asked = parseBuildCap(req.body?.capMinutes);
     if (asked === false) throw bad('capMinutes must be a whole number of minutes from 5 to 180, or left out for the approved horizon.');
-    const capMinutes = asked ?? await reach.approvedHorizon(req.body?.mode ?? 'driving');
+    const approved = await reach.approvedHorizon(req.body?.mode ?? 'driving');
+    // A cap past the approved horizon is the wider build by another door: it is
+    // approved first, on its card, never started here (Codex).
+    if (asked != null && asked > approved) {
+      return res.status(409).json({ error: `The approved horizon for this mode is ${approved} minutes; approve a wider one first (POST /admin/reach/horizon).` });
+    }
+    const capMinutes = asked ?? approved;
     const mode = travelMode(req.body?.mode ?? 'driving');
     if (await reach.osrmOwns(mode)) return res.status(409).json({ error: `${mode} is routed by OSRM; rebuild it with reach-osrm, not the estimator.` });
     if (req.body?.wait === true) return res.json(await reach.buildMatrix({ mode, capMinutes }));
@@ -209,7 +215,7 @@ router.post('/build', requires('manage_library'), async (req, res, next) => {
  * batch at a time and resumably, so a deploy mid-way loses nothing. Driving
  * only: walking and cycling are routed by OSRM and transit has no matrix.
  */
-router.post('/horizon', requires('manage_library'), async (req, res, next) => {
+router.post('/horizon', requires('manage_library'), requireOwnerSignedIn('approve the wider driving build'), async (req, res, next) => {
   try {
     const mode = travelMode(req.body?.mode ?? 'driving');
     if (mode !== 'driving') return res.status(400).json({ error: `Only driving is built by the estimator; ${mode} is not.` });
@@ -229,7 +235,7 @@ router.post('/horizon', requires('manage_library'), async (req, res, next) => {
 router.get('/osrm-build', requires('view_library'), async (req, res, next) => {
   try { res.json(await osrmBuildState()); } catch (err) { next(err); }
 });
-router.post('/osrm-build', requires('manage_library'), async (req, res, next) => {
+router.post('/osrm-build', requires('manage_library'), requireOwnerSignedIn('approve the OSRM walking and cycling build'), async (req, res, next) => {
   try {
     res.json(await approveOsrmBuild({ by: req.account?.email ?? req.session?.label ?? req.session?.id ?? null }));
   } catch (err) {

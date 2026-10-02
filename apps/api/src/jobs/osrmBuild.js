@@ -12,7 +12,7 @@
  *            `reach:osrm-build` approved. Nothing runs in the API.
  *   run      the `osrm-build` Railway service (ops/osrm-build) wakes on a cron,
  *            calls `runOsrmBuildJob`, and exits within seconds unless a build is
- *            approved. When one is, it claims it atomically, downloads the GB
+ *            approved. When one is, it claims it atomically, downloads the UK
  *            extract, and for each of walking and cycling builds the OSRM graph,
  *            stands `osrm-routed` up inside the container, writes the matrix
  *            (sources/osrmMatrix.js), stops the router and deletes that
@@ -253,7 +253,10 @@ export async function download(url, dest, { fetchImpl = fetch } = {}) {
  */
 export async function runOsrmBuildJob({
   dataDir = process.env.EPIC_OSRM_DATA_DIR || '/data',
-  extractUrl = process.env.EPIC_OSRM_EXTRACT_URL || 'https://download.geofabrik.de/europe/great-britain-latest.osm.pbf',
+  // The UK extract, Northern Ireland included: the sector grid has every BT
+  // sector, and a Great-Britain-only extract would snap them onto GB roads and
+  // invent their routes (Codex).
+  extractUrl = process.env.EPIC_OSRM_EXTRACT_URL || 'https://download.geofabrik.de/europe/united-kingdom-latest.osm.pbf',
   horizon = HORIZON_MINUTES,
   bbox = null,
   // How long to wait before a second sweep for ring counts that were already
