@@ -29,6 +29,62 @@ export async function listMarkets() {
   return rows.map(marketView);
 }
 
+/**
+ * The area-key check (markets step 6, owner 2 Oct 2026): what the (country, slug)
+ * area key and the full-postcode country rule would meet on this database, read
+ * before migration 326 is written so its stop-and-name check rests on counts, not an
+ * assumption. Read-only, uncapped where it names rows — the owner asked to see any
+ * unprefixed non-GB area before the migration exists — and every figure the ONS
+ * table is needed for says it cannot speak when that table is empty.
+ *
+ * The postcode rule being checked: a settled non-GB country may be overridden to GB
+ * only by a FULL postcode that ONS holds (`postcodes.pcds`), never by an outcode —
+ * W12 is a London outcode and a Dublin routing key, and an Eircode's four-character
+ * second part can never be a GB pcds.
+ */
+const NORMAL_PC = (col) => `upper(regexp_replace(${col}, '\\s', '', 'g'))`;
+const AS_PCDS = (col) => `(left(${NORMAL_PC(col)}, length(${NORMAL_PC(col)}) - 3) || ' ' || right(${NORMAL_PC(col)}, 3))`;
+const PC_OUTCODE = (col) => `(case
+  when ${NORMAL_PC(col)} ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' then ${NORMAL_PC(col)}
+  when position(' ' in btrim(${col})) > 0 then split_part(btrim(upper(${col})), ' ', 1)
+  else left(${NORMAL_PC(col)}, greatest(0, length(${NORMAL_PC(col)}) - 3)) end)`;
+
+export async function areaKeyCheck() {
+  const n = async (sql, params = []) => (await query(sql, params)).rows;
+  const [{ loaded }] = await n('select exists (select 1 from postcodes) as loaded');
+  const placesByCountry = await n(`select coalesce(upper(country_code), '(none)') as country, count(*)::int as places
+      from place_index group by 1 order by 2 desc`);
+  const localitiesByCountry = await n(`select upper(country_code) as country, kind, count(*)::int as n
+      from localities group by 1, 2 order by 1, 2`);
+  // Every non-GB locality whose slug does not carry its country — the rows the
+  // migration's check would stop on. Uncapped on purpose.
+  const unprefixed = await n(`select slug, name, kind, upper(country_code) as country from localities
+      where upper(country_code) <> 'GB' and slug <> lower(country_code)
+        and slug not like lower(country_code) || '-%' order by country, kind, slug`);
+  const areaCountsByCountry = await n(`select upper(country_code) as country, count(*)::int as rows,
+      count(distinct area_slug)::int as areas from area_counts group by 1 order by 1`);
+  const nonGbPlacesFiledByArea = await n(`select upper(pi.country_code) as country, count(*)::int as links
+      from place_areas pa join place_index pi on pi.venue_ref = pa.venue_ref
+     where upper(pi.country_code) <> 'GB' group by 1 order by 1`);
+  // What today's outcode rule and the full-postcode rule each do to places with a
+  // postcode whose country is not GB (or not known).
+  const rule = loaded ? await n(`
+      select coalesce(upper(pi.country_code), '(none)') as country,
+             count(*)::int as with_postcode,
+             count(*) filter (where exists (select 1 from postcodes p where p.outcode = ${PC_OUTCODE('r.postcode')}))::int as outcode_rule_says_gb,
+             count(*) filter (where ${NORMAL_PC('r.postcode')} ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}$'
+                                and exists (select 1 from postcodes p where p.pcds = ${AS_PCDS('r.postcode')}))::int as full_postcode_rule_says_gb
+        from place_index pi join place_records r on r.venue_ref = pi.venue_ref
+       where r.postcode is not null and upper(pi.country_code) is distinct from 'GB'
+       group by 1 order by 1`) : null;
+  return {
+    checkedAt: new Date().toISOString(),
+    placesByCountry, localitiesByCountry, unprefixed, areaCountsByCountry, nonGbPlacesFiledByArea,
+    postcodeRule: rule,
+    postcodeRuleReason: loaded ? null : 'the ONS postcode table is empty here, so neither rule can be read',
+  };
+}
+
 /** One market, with its not-applicable subcategories. */
 export async function getMarket(code) {
   const c = String(code || '').toUpperCase();

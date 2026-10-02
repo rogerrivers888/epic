@@ -538,6 +538,11 @@ deskRoutes.get('/markets', requires('view_library'), async (_req, res, next) => 
   try { res.json({ markets: await markets.listMarkets(), blocked: markets.blockedMarkets() }); } catch (err) { next(err); }
 });
 
+/** The area-key check (markets step 6) — read-only, before migration 326 is written. */
+deskRoutes.get('/markets/area-key-check', requires('view_library'), async (_req, res, next) => {
+  try { res.json(await markets.areaKeyCheck()); } catch (err) { next(err); }
+});
+
 /** Connect a source that exists in a market but was not wired up yet. */
 deskRoutes.post('/markets/:code/sources/:id/connect', requires('manage_library'), async (req, res, next) => {
   try { res.json(await markets.connectSource(String(req.params.code), String(req.params.id), who(req))); } catch (err) { next(err); }

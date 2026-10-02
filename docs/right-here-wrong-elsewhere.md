@@ -64,3 +64,17 @@ spent so far — a known figure, not an unknown**, so this month reads £0, the 
 on that £0, and the title says the export is not in yet while still showing last month's
 figure for context. This is the first entry that is a *time* boundary rather than a *place*
 one — the reason the file is no longer named for geography.
+
+### 4. The closed-check test's frozen "today" (2 Oct 2026, commit `bba64d0f`)
+`test/c57-closed.test.js` pins the closed-check's `today` to `2026-09-29` but recorded a
+family's visit at `current_date - 2` — the real calendar. On every day up to 1 October the
+visit fell on or before the pinned "today" and the review settled "a family went"; from
+**2 October** the visit was *after* the pinned "today", `familyVerdict` rightly refused it as
+a visit in the future, and two tests failed on every run — on bare `origin/main` as well as on
+every branch, so every session's pre-push was blocked from midnight. Found by capturing a
+failure instead of calling it a flake (owner, 2 Oct 2026: "a flake that appears twice is not
+a flake"); it reproduced three runs out of three. Fixed by making both the visit and the
+review date offsets from the test's own `TODAY`, so the fixture no longer ages. The shape:
+**a test that mixes a frozen clock with the real one is right on the day it is written and
+wrong on a later one** — wrong at a time rather than a place. When a test pins a date, every
+date in its fixtures is derived from that pin, never from `now()` or `current_date`.
