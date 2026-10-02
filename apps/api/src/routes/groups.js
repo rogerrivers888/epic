@@ -1417,9 +1417,13 @@ router.post('/join/:token/household', async (req, res, next) => {
       if (adding && already.length + adding > householdsRepo.HOUSEHOLD_PLAN_CAP) {
         return res.status(403).json({ error: 'plan_cap', message: `Your Household plan covers up to ${householdsRepo.HOUSEHOLD_PLAN_CAP} people.` });
       }
+      // The same name twice is one person, here as in the count above, so the
+      // second never trips the cap after the first has landed (Codex, 2 Oct 2026).
+      const seen = new Set();
       for (const m of rows) {
         const name = String(m.name ?? '').trim();
-        if (!isNew(m)) continue;
+        if (!isNew(m) || seen.has(name.toLowerCase())) continue;
+        seen.add(name.toLowerCase());
         await householdsRepo.insertMember(account.household_id, {
           name,
           isMinor: Boolean(m.child),

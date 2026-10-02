@@ -673,3 +673,46 @@ test('Remember with more children than the plan has room for writes nothing at a
     assert.equal(me.diet, 'none', 'and the diet was not half-written before the refusal');
   } finally { await srv.close(); }
 });
+
+test('joining a group: the same new name twice is one person, and a full household adds nobody', async () => {
+  const express = (await import('express')).default;
+  const { randomBytes } = await import('node:crypto');
+  const groupRoutes = (await import('../src/routes/groups.js')).default;
+  const groupsRepo = await import('../src/repositories/groups.js');
+  const { household: organiser } = await aHousehold(query);
+  const trip = await trips.insertPlannedStay(organiser.id, {
+    title: 'Group · test', notes: null, placeLabel: 'Bath', startDate: '2099-08-01', endDate: '2099-08-02',
+    baseLabel: 'Bath', baseLat: 51.38, baseLng: -2.36, hasCar: true, dayStart: '10:00', dayEnd: '18:00',
+    travelMode: 'driving', intensity: 'balanced', timezone: 'Europe/London',
+  });
+  const group = await groupsRepo.insertGroup(trip.id, organiser.id, {
+    name: 'Bath lot', expectedCount: 6, minimumCount: null, maximumCount: null, wantedBy: null,
+    inviteToken: randomBytes(12).toString('hex'), remindersOn: false, cadence: 'weekly', firstReminderOn: null,
+  });
+  const { household: guestHh, member: guest } = await aHousehold(query);
+  for (let i = 0; i < 4; i += 1) await addMember(guestHh.id, `G${i}`); // 5 with the guest: one place left
+  const acct = await createAccountOnHousehold(guestHh.id, { memberId: guest.id, name: 'Guest', role: 'customer', plan: 'household', email: 'guest-join@example.com' });
+  const pToken = randomBytes(8).toString('hex');
+  const p = await groupsRepo.insertParticipant(group.id, { name: 'Guest', heads: 1, token: pToken });
+  await query('update group_participants set account_id = $1 where id = $2', [acct.id, p.id]);
+
+  const app = express();
+  app.use(express.json());
+  app.use('/api', groupRoutes);
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code ?? 'x', message: err.message }));
+  const s = app.listen(0, '127.0.0.1');
+  await new Promise((r) => s.once('listening', r));
+  const url = `http://127.0.0.1:${s.address().port}/api/join/${group.invite_token}/household`;
+  const send = (members) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ participantToken: pToken, members }) });
+  try {
+    const twice = await send([{ name: 'Nia' }, { name: 'nia ' }]);
+    assert.ok(twice.status < 300, `one new person, said twice, fits the last place (${twice.status})`);
+    let { rows: [n] } = await query('select count(*)::int n from members where household_id = $1', [guestHh.id]);
+    assert.equal(n.n, 6);
+    const over = await send([{ name: 'Ola' }]);
+    assert.equal(over.status, 403, 'a full household refuses before writing');
+    ({ rows: [n] } = await query('select count(*)::int n from members where household_id = $1', [guestHh.id]));
+    assert.equal(n.n, 6, 'nobody added');
+  } finally { await new Promise((r) => s.close(r)); }
+});
