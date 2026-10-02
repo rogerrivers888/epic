@@ -31,7 +31,7 @@ test('nothing in square brackets goes public, and the owner fills are in', () =>
   assert.match(PRIVACY, /analytics \(Google Analytics and Google Ads, only if you accept analytics and advertising cookies\)/);
   assert.match(PRIVACY, /If you are unhappy, contact support@epic\.day\./);
   assert.match(PRIVACY, /within 30 days/);
-  assert.match(COOKIES, /use the Cookie settings link in the footer of any page/);
+  assert.match(COOKIES, /\*\*Changing your mind:\*\* use the Cookie settings link in the footer of any page\./);
   assert.doesNotMatch(COOKIES, /\| Statistics \|[^\n]*On by default/, 'statistics are opt-in, as built (consent.ts)');
 });
 
@@ -96,5 +96,8 @@ test('with the cookie banner on, the notice lists the consent cookie and only th
   assert.ok(ga.includes('_ga') && !ga.includes('_gcl_au'));
   const ads = cookiesNotice({ ga4: false, ads: true });
   assert.ok(ads.includes('_gcl_au') && !/\| _ga,/.test(ads));
-  for (const t of [both, ga, ads]) assert.doesNotMatch(t, /\[[^\]]*\]/);
+  for (const t of [both, ga, ads]) {
+    assert.doesNotMatch(t, /\[[^\]]*\]/);
+    assert.ok(t.trimEnd().endsWith('You can also control cookies in your browser settings.'), 'tracker rows go in the table, the closing paragraph stays last');
+  }
 });
