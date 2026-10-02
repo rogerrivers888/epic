@@ -394,7 +394,9 @@ export async function counts({ areaSlug = null, state: forState = 'waiting' } = 
 /** The queue itself. Reported first, because it is on a different clock. */
 export async function list({ kind = null, state = 'waiting', areaSlug = null } = {}) {
   const { rows } = await query(
-    `select q.*,
+    // The place under the name the household sees, from its reference — the
+    // stored copy is emptied for a provider's place (migration 341).
+    `select q.*, epic_shown_name(q.venue_ref, q.household_id, q.place_label) as place_label,
             -- The first words of the thing, so the row and the "next" block can
             -- show what is being decided rather than only that something is.
             -- BO5a prints the review; the list used to print a name and a date
@@ -524,7 +526,8 @@ export async function versionOf(subjectType, subjectId, run = query) {
 }
 
 export async function one(id) {
-  const { rows: [q] } = await query('select * from content_queue where id = $1', [id]);
+  const { rows: [q] } = await query(
+    'select q.*, epic_shown_name(q.venue_ref, q.household_id, q.place_label) as place_label from content_queue q where q.id = $1', [id]);
   if (!q) return null;
   const out = { ...q, detail: null, maker: null, picture: null };
   // What the screen is about to be shown, so the decision can name it.
@@ -722,7 +725,8 @@ export async function approve(ids, who, { seen = null } = {}) {
  */
 export async function reject({ id, reason, message = null, tell = false, who, seen = undefined }) {
   const { rows: [q] } = await query(
-    `select kind, state, reason, told, message, household_id, account_id, place_label,
+    `select kind, state, reason, told, message, household_id, account_id,
+            epic_shown_name(venue_ref, household_id, place_label) as place_label,
             subject_type, subject_id
        from content_queue where id = $1`, [id]);
   if (!q) return null;

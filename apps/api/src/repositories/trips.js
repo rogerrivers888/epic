@@ -532,7 +532,7 @@ export async function runningShortlist(tripId, dayId) {
 /** The ones set aside or full: shown beside the day, not in it. */
 export async function setAsideShortlist(tripId, dayId) {
   const { rows } = await query(
-    `select id, venue_label, category, status, status_note, status_on from trip_shortlist
+    `select id, venue_ref, venue_label, category, status, status_note, status_on from trip_shortlist
       where trip_id = $1 and (day_id = $2 or day_id is null) and status not in ('to_call','booked','no_booking')
       order by position nulls last, added_at`,
     [tripId, dayId],
