@@ -92,6 +92,20 @@ test('a live name that clearly differs sets the match aside: its point is no lon
   assert.equal(again.written, false);
 });
 
+test('a stored copy whose own source the trigger derives still loses the doubted point', async () => {
+  nc.forgetChecks(); live.clearLiveNames();
+  const ref = `google:${randomUUID()}`;
+  const id = await fsaPlace('The Ferryman Arms', LAT - 0.006, LNG);
+  await recordOwnedPoint({ ref, lat: LAT - 0.006, lng: LNG, source: 'fsa', sourceRef: id, method: 'name+distance' });
+  // A researched record that says its point came from the open map: the
+  // trigger would keep its point under 'osm' once the owned row is gone.
+  await query(`insert into place_records (venue_ref, lat, lng, provenance) values ($1, $2, $3, '{"lat":"osm"}')`, [ref, LAT - 0.006, LNG]);
+  live.noteLiveName(ref, 'Quantum Vape Emporium');
+  assert.equal((await nc.drain()).doubted, 1);
+  const { rows: [r] } = await query('select lat, lng, point_from from place_records where venue_ref = $1', [ref]);
+  assert.deepEqual(r, { lat: null, lng: null, point_from: null });
+});
+
 test('a doubted place is re-matched on its live name, in memory', async () => {
   nc.forgetChecks(); live.clearLiveNames();
   const ref = `google:${randomUUID()}`;
@@ -104,7 +118,7 @@ test('a doubted place is re-matched on its live name, in memory', async () => {
   assert.equal(out.rematched, 1);
   const { rows: [o] } = await query('select source, source_ref, method from owned_points where venue_ref = $1', [ref]);
   assert.equal(o.source_ref, newId);
-  assert.match(o.method, /^first sight:/);
+  assert.match(o.method, /^rematch:/, 'a re-match is not counted as a first sight');
   const { rows: [s] } = await query('select rematched_source, rematched_ref from owned_point_suspects where venue_ref = $1', [ref]);
   assert.deepEqual(s, { rematched_source: 'fsa', rematched_ref: newId });
 });
@@ -135,6 +149,8 @@ test('a middling name says nothing and leaves the match standing', async () => {
 
 test('the Monday figures count the week\'s checks', async () => {
   const w = await nc.weekly(new Date());
-  assert.ok(w.agreed >= 1 && w.doubted >= 2 && w.rematched >= 1 && w.first_sight >= 2, JSON.stringify(w));
+  assert.ok(w.agreed >= 1 && w.doubted >= 3 && w.rematched >= 1 && w.first_sight >= 1, JSON.stringify(w));
+  // The re-match is the suspects' figure, not a first sight (Codex, 2 Oct 2026).
+  assert.equal((await query(`select count(*)::int as n from owned_points where method like 'rematch:%'`)).rows[0].n >= 1, true);
   for (const k of ['saved_places', 'trip_stops', 'shortlist', 'visits']) assert.equal(typeof w.gaps[k], 'number');
 });

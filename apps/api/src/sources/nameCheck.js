@@ -33,7 +33,7 @@
 import { query, pool } from '../db.js';
 import { nameScore, significantStems } from './openMatch.js';
 import { matchPlace, boxOf, ownedNameGaps } from './ownedMatch.js';
-import { recordOwnedPoint, OWNED_POINT_NAME } from './ownedPoints.js';
+import { recordOwnedPoint, OWNED_POINT_NAME, lockPlace } from './ownedPoints.js';
 import { takeLiveNames } from './liveNames.js';
 
 /** As alike as the matcher demands of a match (ownedMatch.js RULES). */
@@ -89,12 +89,16 @@ async function whereIs(ref, noted) {
   return { point, box: boxOf(pi?.slice) };
 }
 
-/** Match a place on its live name, in memory; write the owned point if one is clearly it. */
-async function matchOnLiveName(ref, liveName, noted) {
+/**
+ * Match a place on its live name, in memory; write the owned point if one is
+ * clearly it. `kind` is 'first sight' (it had no owned point) or 'rematch' (a
+ * doubtful one was just set aside), so the two are counted apart.
+ */
+async function matchOnLiveName(ref, liveName, noted, kind = 'first sight') {
   const { point, box } = await whereIs(ref, noted);
   const out = await matchPlace({ ref, names: [liveName], point, box, rented: true });
   if (out.none) return { matched: false, why: out.none };
-  const w = await recordOwnedPoint({ ref, ...out, method: `first sight: ${out.method}` });
+  const w = await recordOwnedPoint({ ref, ...out, method: `${kind}: ${out.method}` });
   return w.written ? { matched: true, source: out.source, sourceRef: String(out.sourceRef ?? '') } : { matched: false, why: w.why };
 }
 
@@ -109,6 +113,15 @@ export async function setAside(row, score) {
   const c = await pool.connect();
   try {
     await c.query('begin');
+    // The same lock recordOwnedPoint takes: nothing can write this match back
+    // between the suspicion and the deletion (Codex, 2 Oct 2026).
+    await lockPlace(c, row.venue_ref);
+    // The point as it stands now, under the lock. A match that has changed
+    // since it was judged is not this one: leave it for the next check.
+    const { rows: [held] } = await c.query(
+      `select lat, lng from owned_points where venue_ref = $1 and source = $2 and coalesce(source_ref, '') = $3`,
+      [row.venue_ref, row.source, row.source_ref]);
+    if (!held) { await c.query('rollback'); return { setAside: false, why: 'the match changed before it could be set aside' }; }
     await c.query(
       `insert into owned_point_suspects (venue_ref, source, source_ref, score, reason) values ($1, $2, $3, $4, $5)
        on conflict (venue_ref, source, source_ref) do update set checked_at = now(), score = excluded.score, reason = excluded.reason`,
@@ -118,14 +131,23 @@ export async function setAside(row, score) {
     await c.query(
       `update place_index set lat = null, lng = null, coords_from = null, coords_at = null, cell = null, placed_at = null
         where venue_ref = $1 and coords_from = $2`, [row.venue_ref, row.source]);
+    // Every copy still holding the doubted point loses it, coordinates and
+    // all: clearing only `point_from` let a copy whose own source the trigger
+    // derives independently (a researched record's open-map provenance, an
+    // atlas row) keep the very point being doubted under another name (Codex,
+    // 2 Oct 2026). A saved or visited copy then falls back to its census box;
+    // a stored one holds no point until a better match lands.
     for (const table of ['household_places', 'trip_shortlist', 'trip_stops', 'visits', 'scout_places', 'place_records']) {
-      await c.query(`update ${table} set point_from = null where venue_ref = $1`, [row.venue_ref]);
+      await c.query(`update ${table} set lat = null, lng = null, point_from = null where venue_ref = $1 and lat = $2 and lng = $3`,
+        [row.venue_ref, held.lat, held.lng]);
     }
     await c.query(
-      `update attractions set point_from = null
-        where venue_ref = $1 or external_ref = $1
-           or id = (case when $1 like 'atlas:%' then epic_try_uuid(substr($1, 7)) end)`, [row.venue_ref]);
+      `update attractions set lat = null, lng = null, point_from = null
+        where (venue_ref = $1 or external_ref = $1
+               or id = (case when $1 like 'atlas:%' then epic_try_uuid(substr($1, 7)) end))
+          and lat = $2 and lng = $3`, [row.venue_ref, held.lat, held.lng]);
     await c.query('commit');
+    return { setAside: true };
   } catch (err) {
     await c.query('rollback').catch(() => null);
     throw err;
@@ -163,9 +185,10 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
           await query('update owned_points set checked_at = now() where venue_ref = $1', [x.ref]);
           out.agreed += 1;
         } else if (v.verdict === 'doubtful') {
-          await setAside(row, v.score);
+          const a = await setAside(row, v.score);
+          if (!a.setAside) { out.cantSpeak += 1; continue; }
           out.doubted += 1;
-          const m = await matchOnLiveName(x.ref, x.name, x);
+          const m = await matchOnLiveName(x.ref, x.name, x, 'rematch');
           if (m.matched) {
             out.rematched += 1;
             await query(
@@ -200,6 +223,7 @@ export async function weekly(now = new Date()) {
     `select (select count(*)::int from owned_points where checked_at >= $1) as agreed,
             (select count(*)::int from owned_point_suspects where created_at >= $1) as doubted,
             (select count(*)::int from owned_point_suspects where created_at >= $1 and rematched_source is not null) as rematched,
+            -- A re-match is written 'rematch:' and counted with the suspects, never here.
             (select count(*)::int from owned_points where method like 'first sight:%' and matched_at >= $1) as first_sight,
             (select count(*)::int from owned_point_suspects) as doubted_ever`, [since]);
   return { gaps, ...r };

@@ -52,6 +52,15 @@ export const OWNED_POINT_NAME = (o = 'o') => `(case ${o}.source
   when 'osm' then (select x.name from osm_features x where x.ref = ${o}.source_ref)
   end)`;
 
+/**
+ * One place's owned point, held still for the rest of the transaction: taken
+ * by recordOwnedPoint and by the name-check's setAside, so a check and a write
+ * on the same place happen one after the other, never across each other.
+ */
+export async function lockPlace(client, ref) {
+  await client.query(`select pg_advisory_xact_lock(hashtext('owned-point:' || $1))`, [ref]);
+}
+
 /** Whose a reference's own point is, read off the reference: the fallback when nothing says. */
 export function pointSourceOfRef(ref) {
   const prefix = String(ref ?? '').split(':')[0];
@@ -99,7 +108,10 @@ async function recordIn({ ref, lat, lng, source, sourceRef = null, method, dista
   if (!LICENCES[source]) throw new Error(`not an owned source: ${source}`);
   // A match a live name has already doubted is never written back, by the
   // weekly re-match or anything else: this is the one door every owned point
-  // comes through (owner, 1 Oct 2026; sources/nameCheck.js).
+  // comes through (owner, 1 Oct 2026; sources/nameCheck.js). The place is
+  // locked first, the same lock setAside takes, so a match being set aside
+  // while this runs cannot slip back in behind it (Codex, 2 Oct 2026).
+  await lockPlace(client, ref);
   const { rows: [doubted] } = await client.query(
     'select 1 from owned_point_suspects where venue_ref = $1 and source = $2 and source_ref = $3',
     [ref, source, String(sourceRef ?? '')]);
