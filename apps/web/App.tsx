@@ -759,7 +759,7 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
         <Text style={type.small}>
           {offline.pages
             ? `No signal — showing what's saved on this device. Your places, trips and visits are all here.`
-            : `No signal, and nothing saved yet. Open Settings › On this device when you're back to save it all.`}
+            : `No signal, and nothing saved on this device yet. What you open is kept here once you're back online.`}
         </Text>
       </View>
     </View>
