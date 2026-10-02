@@ -129,3 +129,10 @@ test('a source area stamped abroad does not file a place the postcode rule settl
   const { rows } = await query(`select area_slug from place_areas where venue_ref = $1 and area_slug like '%zq7' order by 1`, [ref]);
   assert.deepEqual(rows.map((r) => r.area_slug), ['zq7'], 'filed under its own country, not the source area\'s');
 });
+
+test('a compact Eircode is filed under its routing key', async () => {
+  const { rows: [r] } = await query(`select ${index.OUTCODE_FROM("'W12X2Y3'")} as a, ${index.OUTCODE_FROM("'D02AF30'")} as b,
+                                            ${index.OUTCODE_FROM("'SW1A1AA'")} as c, ${index.OUTCODE_FROM("'W127RJ'")} as d`);
+  assert.deepEqual([r.a, r.b, r.c, r.d], ['w12', 'd02', 'sw1a', 'w12'], 'Eircodes give the routing key; GB codes are unchanged');
+  assert.equal(await index.postcodeSaysGb('W12X2Y3', null), false, 'and the routing key still cannot make it GB');
+});

@@ -918,23 +918,7 @@ async function reindexWhileLocked({ onProgress }) {
       from place_records r
       left join place_index pi on pi.venue_ref = r.venue_ref
      where r.postcode is not null
-       and lower(case
-             -- Already an outward code, which is what the place editor stores
-             -- and what half the sources give us. Taking the last three
-             -- characters off "ZZ99" leaves "Z" — so a full reindex deleted the
-             -- link the editor had just made and never put it back, and the
-             -- place vanished off that outcode's board (Codex, 18 Sep 2026).
-             when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$'
-               then btrim(upper(r.postcode))
-             -- The outward code is everything before the space. Stripping the
-             -- space first and then matching let the pattern eat the incode's
-             -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
-             -- that does not exist (the invariant check, 18 Sep 2026).
-             when position(' ' in btrim(r.postcode)) > 0
-               then split_part(btrim(upper(r.postcode)), ' ', 1)
-             -- Written without one, the incode is always the last three.
-             else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
-           end) ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
+       and ${OUTCODE_FROM('r.postcode')} ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
     on conflict do nothing`);
 
   // A non-GB postcode area has no ONS load to create its locality, so filing makes
@@ -1200,15 +1184,17 @@ const BUILD_LOCK = 'epic.placeIndex.build';
  * here so the country correction below reads it without depending on the areas
  * having been rebuilt yet.
  *
- * It assumes a UK incode of three characters. A space-separated Eircode ("D02 AF30")
- * is handled — the routing key is taken before the space — but a compact one
- * ("D02AF30") would strip four, not three, and yield "d02a". That is a pre-existing
- * limitation of this shared derivation and only bites Ireland, which is groundwork
- * with no live data; it is left for the IE launch rather than reworked here (Codex).
+ * A UK incode is three characters. An Eircode's is four: a spaced one ("D02 AF30")
+ * splits at the space, and a compact one ("D02AF30", "W12X2Y3") — seven characters
+ * beginning letter-digit, a shape no GB postcode has (every seven-character GB
+ * postcode begins with two letters) — gives its three-character routing key, not
+ * "d02a" (Codex, markets step 6). The GB-shape guard in POSTCODE_SAYS_GB still keeps
+ * that routing key from ever settling a country as GB.
  */
 export const OUTCODE_FROM = (col) => `lower(case
   when btrim(upper(${col})) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' then btrim(upper(${col}))
   when position(' ' in btrim(${col})) > 0 then split_part(btrim(upper(${col})), ' ', 1)
+  when btrim(upper(${col})) ~ '^[A-Z][0-9][0-9W][0-9A-Z]{4}$' then left(btrim(upper(${col})), 3)
   else left(upper(btrim(${col})), greatest(0, length(btrim(${col})) - 3))
 end)`;
 
@@ -1517,23 +1503,7 @@ async function settleWhileLocked(limit) {
       from place_records r
       left join place_index pi on pi.venue_ref = r.venue_ref
      where r.venue_ref = any($1) and r.postcode is not null
-       and lower(case
-             -- Already an outward code, which is what the place editor stores
-             -- and what half the sources give us. Taking the last three
-             -- characters off "ZZ99" leaves "Z" — so a full reindex deleted the
-             -- link the editor had just made and never put it back, and the
-             -- place vanished off that outcode's board (Codex, 18 Sep 2026).
-             when btrim(upper(r.postcode)) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$'
-               then btrim(upper(r.postcode))
-             -- The outward code is everything before the space. Stripping the
-             -- space first and then matching let the pattern eat the incode's
-             -- first digit, so "SL4 1DE" was filed under "SL41" — an outcode
-             -- that does not exist (the invariant check, 18 Sep 2026).
-             when position(' ' in btrim(r.postcode)) > 0
-               then split_part(btrim(upper(r.postcode)), ' ', 1)
-             -- Written without one, the incode is always the last three.
-             else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
-           end) ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
+       and ${OUTCODE_FROM('r.postcode')} ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
     on conflict do nothing`, [refs]);
 
   // A non-GB postcode area has no ONS load to create its locality, so filing makes
