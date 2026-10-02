@@ -15,7 +15,8 @@ import { logChange } from './changes.js';
 import { BLOCKED_MARKETS } from '../domain/markets.js';
 import { NAMESPACES, hasDrifted } from '../domain/wording.js';
 import { scaleFor } from '../domain/costBand.js';
-import { OUTCODE_FROM, PCDS_FROM as AS_PCDS } from '../repositories/placeIndex.js';
+import { OUTCODE_FROM, PCDS_FROM as AS_PCDS, nullCountryAddresses } from '../repositories/placeIndex.js';
+import { countryFromAddresses } from '../domain/countryFromAddress.js';
 
 /* ------------------------------------------------------------------ markets */
 
@@ -83,8 +84,52 @@ export async function areaKeyCheck() {
          and not exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('r.postcode')}))
          and not exists (select 1 from postcodes p where p.pcds = ${AS_PCDS('r.postcode')})
        order by r.postcode, pi.venue_ref`) : null;
+  // Every place settled outside GB, with the address it was settled from — the
+  // owner asked for what settled and what did not, not a count (2 Oct 2026). Listed
+  // whole while the set is small; past 500 it says it is the first 500.
+  const { rows: [{ n: nonGbTotal }] } = await query(
+    `select count(*)::int as n from place_index where country_code is not null and upper(country_code) <> 'GB'`);
+  const nonGbPlaces = await n(`
+      select pi.venue_ref, upper(pi.country_code) as country, r.name, r.address, r.postcode
+        from place_index pi left join place_records r on r.venue_ref = pi.venue_ref
+       where pi.country_code is not null and upper(pi.country_code) <> 'GB'
+       order by 2, r.name nulls last, pi.venue_ref limit 500`);
+  // Every place still without a country that holds an address, and why its address
+  // did not settle it.
+  const addressVerdicts = (await nullCountryAddresses()).map((r) => {
+    const v = countryFromAddresses(r.addresses ?? []);
+    return { venue_ref: r.venue_ref, addresses: r.addresses, country: v.code, reason: v.reason ?? null };
+  });
+  // Postcodes that are not postcodes — 00000 and its kind — across the whole corpus,
+  // so a placeholder is seen for what it is wherever it sits.
+  const placeholderPostcodes = await n(`
+      select postcode, count(*)::int as places from place_records
+       where btrim(postcode) ~ '^(0+|9+|x+|-+|n/?a|none|tbc|tba|unknown)$'
+          or btrim(postcode) ~ '^(.)\\1{3,}$'
+       group by 1 order by 2 desc`);
+  // Migration 357, confirmed from the database itself rather than from the deploy
+  // having finished: whether it is recorded, and the key and check it left behind.
+  const { rows: [m357] } = await query(`
+    select (select array_agg(a.attname::text order by k.ord)
+              from pg_constraint c
+              cross join lateral unnest(c.conkey) with ordinality as k(attnum, ord)
+              join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+             where c.conrelid = 'area_counts'::regclass and c.contype = 'p') as area_counts_key,
+           exists (select 1 from pg_constraint where conname = 'localities_slug_names_its_country') as slug_check,
+           (select column_default from information_schema.columns
+             where table_name = 'area_counts' and column_name = 'country_code') as country_default`);
+  // Recorded-as-applied needs the runner's own table; a database built some other
+  // way (the test helper) has none, and then the answer is "cannot say", not false.
+  const { rows: [{ ledger }] } = await query(`select to_regclass('schema_migrations') is not null as ledger`);
+  m357.recorded = ledger
+    ? (await query(`select exists (select 1 from schema_migrations where name like '357\\_%') as r`)).rows[0].r
+    : null;
+  m357.recordedReason = ledger ? null : 'this database has no schema_migrations table';
   return {
     checkedAt: new Date().toISOString(),
+    migration357: m357,
+    nonGbTotal, nonGbPlaces, nonGbListed: nonGbPlaces.length < nonGbTotal ? `first ${nonGbPlaces.length} of ${nonGbTotal}` : 'all',
+    addressVerdicts, placeholderPostcodes,
     unsettled,
     placesByCountry, localitiesByCountry, unprefixed, areaCountsByCountry, nonGbPlacesFiledByArea,
     postcodeRule: rule,

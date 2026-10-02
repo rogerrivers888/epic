@@ -18,6 +18,7 @@
  */
 
 import { pool, query, withTransaction } from '../db.js';
+import { countryFromAddresses } from '../domain/countryFromAddress.js';
 import { shelvesForAtlas, shelvesForVenue } from '../domain/moods.js';
 import { labelsOf, labelsOfAtlas } from '../domain/labels.js';
 import { rules as shelfRules } from './shelfRules.js';
@@ -1372,6 +1373,47 @@ export async function applyPendingCountryBackfill(q = query) {
   return n;
 }
 
+/**
+ * A missing country, from the place's own address (owner, 2 Oct 2026: "Italy and
+ * the Vatican, UAE for Dubai, from their owned addresses").
+ *
+ * Fills a null country only — a stamp is never overridden from text. Reads every
+ * owned address the place holds (the composed record's and each kept source's fact),
+ * and settles only where they name one country by name (`domain/countryFromAddress.js`):
+ * a city, a region or a code is never evidence, so a placeholder like 00000 decides
+ * nothing, and two addresses naming two countries leave it unknown. Settled rows are
+ * requeued so settle files them under their country. Returns, per place, what settled
+ * and what did not and why — the owner asked for that, not a count.
+ */
+export async function settleCountriesFromAddresses(refs = null, q = query) {
+  const rows = await nullCountryAddresses(refs, q);
+  const settled = []; const unsettled = [];
+  for (const row of rows) {
+    const out = countryFromAddresses(row.addresses ?? []);
+    if (!out.code) { unsettled.push({ ref: row.venue_ref, reason: out.reason }); continue; }
+    const { rowCount } = await q(
+      `update place_index set country_code = $2, placed_at = null, settle_tried_at = null
+        where venue_ref = $1 and country_code is null`, [row.venue_ref, out.code]);
+    if (rowCount) settled.push({ ref: row.venue_ref, country: out.code, from: out.from });
+  }
+  return { settled, unsettled };
+}
+
+/** Places with no country, each with every owned address it holds. Read-only. */
+export async function nullCountryAddresses(refs = null, q = query) {
+  const { rows } = await q(`
+    select pi.venue_ref,
+           array_remove(array_agg(distinct f.value #>> '{}') || array[max(r.address)], null) as addresses
+      from place_index pi
+      left join place_records r on r.venue_ref = pi.venue_ref
+      left join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address' and f.expires_at is null
+     where pi.country_code is null
+       ${refs ? 'and pi.venue_ref = any($1)' : ''}
+     group by pi.venue_ref
+    having count(f.venue_ref) > 0 or max(r.address) is not null`, refs ? [refs] : []);
+  return rows;
+}
+
 export async function settleNew({ limit = 5000 } = {}) {
   // Under the same lock as a full rebuild: the two write the same tables, and a
   // settling pass running inside a rebuild can leave either half-done (Codex,
@@ -1388,6 +1430,9 @@ async function settleWhileLocked(limit) {
   // applied here, under the lock settle holds — so it always lands within the hour
   // (Codex). A no-op once it has caught up.
   await applyPendingCountryBackfill();
+  // A place with no country whose owned address names one takes it (owner, 2 Oct
+  // 2026), and is requeued so this same pass refiles it under that country.
+  await settleCountriesFromAddresses();
   // Oldest attempt first, never-tried first of all.
   //
   // In no order, a row that cannot be placed — the postcode service down, a
