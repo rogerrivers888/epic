@@ -435,3 +435,21 @@ test('a re-run shows the facts already answered beside its own', async () => {
   assert.equal(f.answer, 'yes');
   assert.equal(f.source, 'osm');
 });
+
+test('a venue page that redirects off its own site gives up no pictures', async () => {
+  const { venuePicturesFor } = await import('../src/sources/venueImages.js');
+  const ref = `google:redir-${randomUUID()}`;
+  const out = await venuePicturesFor(ref, 'https://venue.example/', {
+    fetchHtmlImpl: async () => ({ url: 'https://www.facebook.com/venue', html: '<meta property="og:image" content="https://fb.example/x.jpg">' }),
+    politeness: async () => ({ ok: true }),
+  });
+  assert.equal(out.ok, false);
+  assert.equal(out.why, 'redirected_off_site');
+  const { rows } = await query('select count(*)::int as n from venue_site_images where venue_ref = $1', [ref]);
+  assert.equal(rows[0].n, 0);
+  const sub = await venuePicturesFor(`google:redir2-${randomUUID()}`, 'https://venue.example/', {
+    fetchHtmlImpl: async () => ({ url: 'https://www.venue.example/home', html: '<meta property="og:image" content="/a.jpg">' }),
+    politeness: async () => ({ ok: true }),
+  });
+  assert.equal(sub.ok, true, 'its own www is still its own site');
+});

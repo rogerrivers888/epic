@@ -232,3 +232,17 @@ test('an existing picture newly linked to a place after its verdict reopens the 
     assert.ok(open.some((p) => p.venueRef === ref), 'fetched long ago, linked just now: a new picture for this place');
   } finally { await close(); }
 });
+
+test('a turned-down picture is still shown in the place\'s detail, on a signed link', async () => {
+  const ref = `google:shown-${randomUUID()}`;
+  const { rows: [img] } = await query(`insert into image_assets (source, source_ref, licence, may_store, moderation) values ('openverse', $1, 'CC BY 2.0', true, 'rejected') returning id`, [`openverse:sh-${randomUUID()}`]);
+  await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', 10)`, [img.id, ref]);
+  const { base, close } = await serve();
+  try {
+    const d = await (await fetch(`${base}/saved/place?ref=${encodeURIComponent(ref)}`)).json();
+    const p = d.ownedPictures.find((x) => x.id === img.id);
+    assert.ok(p, 'there to be reconsidered');
+    assert.equal(p.moderation, 'rejected');
+    assert.ok(p.sig && p.exp, 'drawn on a signed link');
+  } finally { await close(); }
+});

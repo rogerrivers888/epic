@@ -20,6 +20,15 @@ import { beforeFetching } from './politeness.js';
 
 const MAX_KEEP = 8;
 
+const hostOf = (u) => {
+  try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ''); } catch { return null; }
+};
+/** The same site: one host, or one a subdomain of the other. */
+export const sameSite = (a, b) => {
+  const ha = hostOf(a); const hb = hostOf(b);
+  return Boolean(ha && hb) && (ha === hb || ha.endsWith(`.${hb}`) || hb.endsWith(`.${ha}`));
+};
+
 const attr = (tag, name) => {
   const m = new RegExp(`\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
   return m ? (m[2] ?? m[3] ?? m[4] ?? '').trim() : null;
@@ -81,6 +90,10 @@ export async function venuePicturesFor(venueRef, website, { fetchHtmlImpl = fetc
   if (!may.ok) return { ok: false, kept: 0, why: may.why ?? 'not_allowed' };
   const page = await fetchHtmlImpl(website);
   if (!page) return { ok: false, kept: 0, why: 'page_unreadable' };
+  // A redirect off the venue's own site — to Facebook, a booking platform, a
+  // parked domain — is somebody else's page: nothing is taken from it, and its
+  // own host's robots.txt was never asked (Codex, 2 Oct 2026).
+  if (page.url && !sameSite(page.url, website)) return { ok: false, kept: 0, why: 'redirected_off_site' };
   const pics = picturesOnPage(page.html, page.url);
   for (const p of pics) {
     await query(

@@ -153,8 +153,9 @@ imageRouter.get('/:id/:width', async (req, res, next) => {
     // and it is not cached in public (Codex, 12 Sep 2026). The same holds for a
     // picture found for a saved place and waiting for the owner's look beside
     // Google's (Openverse, sources/openverse.js): only the back office signs a
-    // link to it (routes/savedPlaces.js), and only that link draws it.
-    const theirs = image?.moderation === 'pending' && imageLinkValid(image.id, req.query);
+    // link to it (routes/savedPlaces.js), and only that link draws it — a
+    // turned-down one too, so a verdict can be reconsidered with it in view.
+    const theirs = (image?.moderation === 'pending' || image?.moderation === 'rejected') && imageLinkValid(image.id, req.query);
     if (!image || (image.moderation !== 'approved' && !theirs)) return res.status(404).end();
     const variant = await lib.variantFor(image.id, Number(req.params.width));
     if (!variant) return res.status(404).end();

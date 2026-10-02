@@ -54,8 +54,11 @@ async function ownedPicturesOf(venueRef) {
     `select i.id, i.source, i.licence, i.licence_url, i.creator, i.credit_line, i.source_page_url,
             i.attribution_required, i.moderation, i.width, i.height, i.lqip, l.role, l.position
        from image_links l join image_assets i on i.id = l.image_id
-      where l.subject_type = 'place' and l.subject_id = $1 and i.moderation <> 'rejected'
-      order by (l.role = 'hero') desc, l.position, i.fetched_at`, [venueRef]);
+      where l.subject_type = 'place' and l.subject_id = $1
+      -- Turned-down pictures too: a place judged not fit stays in the review so
+      -- its verdict can be changed, and the owner must see what he is
+      -- reconsidering (Codex, 2 Oct 2026). Drawn on a signed link, here only.
+      order by (i.moderation = 'rejected'), (l.role = 'hero') desc, l.position, i.fetched_at`, [venueRef]);
   return rows.map((r) => {
     const signed = r.moderation === 'approved' ? { id: r.id } : stampImage({ id: r.id });
     return {
