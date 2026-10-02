@@ -191,6 +191,32 @@ export async function membersOf(householdId) {
 /** The Household plan covers six people, counted here where every door can see it. */
 export const HOUSEHOLD_PLAN_CAP = Number(process.env.EPIC_HOUSEHOLD_PLAN_CAP || 6);
 
+/**
+ * How many people this household's plan covers: Solo is just you (one), and
+ * adding anybody means the Household plan (owner, 2 Oct 2026). The plan is the
+ * lead's — the account the household was set up on, in the order the spend
+ * ceiling and the lead checks use.
+ */
+export async function planCapFor(householdId, client) {
+  const run = client ? (t, p) => client.query(t, p) : query;
+  const { rows } = await run(
+    `select plan from accounts where household_id = $1 order by (role = 'owner') desc, created_at, id limit 1`,
+    [householdId],
+  );
+  return rows[0]?.plan === 'solo' ? { cap: 1, plan: 'solo' } : { cap: HOUSEHOLD_PLAN_CAP, plan: 'household' };
+}
+
+/** The one refusal every door gives at the cap — on Solo it says to upgrade. */
+export function planCapRefusal({ cap, plan }) {
+  const err = new Error(plan === 'solo'
+    ? 'Solo is just you. Adding people needs the Household plan.'
+    : `Your Household plan covers up to ${cap} people.`);
+  err.status = 403;
+  err.code = 'plan_cap';
+  err.details = { plan, cap, upgrade: plan === 'solo' };
+  return err;
+}
+
 export async function insertMember(householdId, m) {
   // The cap is enforced here, under the household's row lock, so every door
   // that adds a person — Settings, voice, a group invite — shares one check
@@ -199,12 +225,8 @@ export async function insertMember(householdId, m) {
   await withTransaction(async (client) => {
     await client.query('select id from households where id = $1 for update', [householdId]);
     const { rows: counted } = await client.query('select count(*)::int n from members where household_id = $1', [householdId]);
-    if (counted[0].n >= HOUSEHOLD_PLAN_CAP) {
-      const err = new Error(`Your Household plan covers up to ${HOUSEHOLD_PLAN_CAP} people.`);
-      err.status = 403;
-      err.code = 'plan_cap';
-      throw err;
-    }
+    const limit = await planCapFor(householdId, client);
+    if (counted[0].n >= limit.cap) throw planCapRefusal(limit);
     const { rows } = await client.query(
       `insert into members (household_id, name, is_minor, relationship, birth_year, birth_date, avatar_url, typical_visit_minutes, max_travel_minutes, email, mobile)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,

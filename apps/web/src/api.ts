@@ -45,6 +45,7 @@ function noteSavedState(path: string, method: string, rawBody: BodyInit | null |
 }
 import { flush as flushOutbox, queue as queueWrite, refreshOutbox } from './offline/outbox';
 import { copyHolder, deviceLabel, holderOf, sessionExpired, sessionToken, setCopyHolder, setSessionToken } from './session';
+import { raiseUpgradePrompt } from './upgradePrompt';
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 
@@ -176,6 +177,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         const saved = await recall<T>(path);
         if (saved) { servingSaved(true); return saved.body; }
       }
+      // An add past a Solo plan's one person: the same prompt from every door.
+      if (res.status === 403 && body?.details?.upgrade) raiseUpgradePrompt(body.message ?? 'Adding people needs the Household plan.');
       throw new ApiError(res.status, body);
     }
     servingSaved(false);

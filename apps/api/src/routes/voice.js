@@ -678,9 +678,8 @@ router.post('/intake/:id/remember', async (req, res, next) => {
     // (Codex, 2 Oct 2026).
     const making = (offer?.items ?? []).filter((i) => i.kind === 'kids')
       .reduce((n, i) => n + Math.max(0, i.ages.length - children.filter((c) => c.age == null).length), 0);
-    if (making && members.length + making > households.HOUSEHOLD_PLAN_CAP) {
-      return res.status(403).json({ error: 'plan_cap', message: `Your Household plan covers up to ${households.HOUSEHOLD_PLAN_CAP} people.` });
-    }
+    const limit = await households.planCapFor(household.id);
+    if (making && members.length + making > limit.cap) throw households.planCapRefusal(limit);
     for (const item of offer?.items ?? []) {
       if (item.kind === 'diet') {
         // Diet is a member column now (migration 327), never a constraint row —
@@ -774,9 +773,8 @@ router.post('/household/who/apply', async (req, res, next) => {
     // insert checks the cap on its own, so a list too long half-landed and then
     // failed without saying who was written (Codex, 2 Oct 2026).
     const adding = body.people.filter((p) => !p.existingId).length;
-    if (adding && (await households.memberCount(household.id)) + adding > households.HOUSEHOLD_PLAN_CAP) {
-      return res.status(403).json({ error: 'plan_cap', message: `Your Household plan covers up to ${households.HOUSEHOLD_PLAN_CAP} people.` });
-    }
+    const limit = await households.planCapFor(household.id);
+    if (adding && (await households.memberCount(household.id)) + adding > limit.cap) throw households.planCapRefusal(limit);
     const written = [];
     for (const p of body.people) {
       const age = p.age ?? (p.band ? bandAge[p.band] : null);

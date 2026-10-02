@@ -730,3 +730,23 @@ test('an explicit null for close to home is "Any distance"; leaving it out keeps
     assert.equal(hh.closeToHomeMinutes, null, 'null is any distance, as the API type says');
   } finally { await srv.close(); }
 });
+
+test('Solo is just you: every door refuses a second person and says to upgrade', async () => {
+  const { household: h, member: me } = await aHousehold(query);
+  await createAccountOnHousehold(h.id, { memberId: me.id, name: 'Sol', role: 'customer', plan: 'solo', email: 'solo-cap@example.com' });
+  const { rows: [acct] } = await query('select * from accounts where member_id = $1', [me.id]);
+  const srv = await server({ ...acct, status: 'active' });
+  try {
+    const viaSettings = await srv.send('POST', '/api/household/members', { name: 'Partner' });
+    assert.equal(viaSettings.status, 403);
+    assert.equal(viaSettings.body.error, 'plan_cap');
+    assert.match(viaSettings.body.message, /Household plan/, 'the refusal names the upgrade');
+    const viaVoice = await srv.send('POST', '/api/voice/household/who/apply', { people: [{ name: 'Kid', role: 'child', age: 6 }] });
+    assert.equal(viaVoice.status, 403, 'the spoken household is refused the same way');
+    const { rows: [n] } = await query('select count(*)::int n from members where household_id = $1', [h.id]);
+    assert.equal(n.n, 1, 'still just you');
+  } finally { await srv.close(); }
+  // The shared door carries the flag the app turns into the upgrade prompt.
+  const err = households.planCapRefusal(await households.planCapFor(h.id));
+  assert.deepEqual(err.details, { plan: 'solo', cap: 1, upgrade: true });
+});

@@ -450,9 +450,8 @@ router.post('/members', async (req, res, next) => {
     if (!name?.trim()) return res.status(400).json({ error: 'name_required' });
     // The Household plan covers up to six people (server-enforced; the UI dims
     // the Add tile at six, but the door is here).
-    if (await households.memberCount(household.id) >= HOUSEHOLD_PLAN_CAP) {
-      return res.status(403).json({ error: 'plan_cap', message: `Your Household plan covers up to ${HOUSEHOLD_PLAN_CAP} people.` });
-    }
+    const limit = await households.planCapFor(household.id);
+    if (await households.memberCount(household.id) >= limit.cap) throw households.planCapRefusal(limit);
     if (email && !EMAIL.test(email)) return res.status(400).json({ error: 'invalid_email', message: 'That does not look like an e-mail address.' });
     const number = mobile ? normaliseMobile(mobile) : null;
     if (mobile && !number) return res.status(400).json({ error: 'invalid_mobile', message: `“${mobile}” does not look like a mobile number. A UK one starts 07, or +44.` });
