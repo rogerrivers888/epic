@@ -17,7 +17,8 @@ import { testDatabase } from './helpers/db.js';
 // imports `db.js` loads — `reviewSpotting.js` imports it, so it comes in here,
 // dynamically, after the switch (the same reason questions.test.js does).
 const { query, pool } = await testDatabase();
-const { looksLikeFeature, spotFeatures, spotFromDetail } = await import('../src/sources/reviewSpotting.js');
+const { looksLikeFeature, spotFeatures, spotFromDetail, reviewQueue } = await import('../src/sources/reviewSpotting.js');
+const sets = await import('../src/repositories/questionSets.js');
 
 test('concrete features pass the filter; opinions, adjectives and service words do not', () => {
   for (const f of ['splash pad', 'toddler pool', 'mini race track', 'waterfall', 'sauna', 'steam room', 'trig point', 'soft play', 'changing room', 'swimming pool']) {
@@ -161,6 +162,63 @@ test('C61 records review-spotting AND leaves the paid bulk pass refused', async 
   const spotting = await query("select supersedes from data_verdicts where key = 'harvest.review-spotting'");
   assert.equal(spotting.rowCount, 1, 'the review-spotting verdict is recorded');
   assert.equal(spotting.rows[0].supersedes, null, 'it must not supersede the paid-pass row');
+});
+
+test('the review queue lists spotted features with place counts and an example drawer', async () => {
+  const sub = 'c30-queue-parks';
+  const a = 'google:ChIJ_c30_q_a'; const b = 'google:ChIJ_c30_q_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 queue parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  for (const r of [a, b]) await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [r, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A splash pad and a sauna.' } });
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A splash pad.' } });
+  const sp = (await reviewQueue({ subcategory: sub })).find((f) => f.norm === 'splash pad');
+  assert.ok(sp, 'splash pad is in the queue');
+  assert.equal(sp.places, 2, 'seen at two places');
+  assert.equal(sp.exampleSubcategory, sub);
+  assert.equal(sp.known, false, 'not yet one of our facts');
+});
+
+test('approving a feature makes it a fact, asks it where there is a set, and clears the queue', async () => {
+  const sub = 'c30-approve-parks';
+  const ref = 'google:ChIJ_c30_appr';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 approve parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into question_sets (key, name) values ('c30-set', 'C30 set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-set') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from attribute_aliases where norm = 'water slide'").catch(() => {});
+  await query("delete from place_attributes where key = 'water-slide'").catch(() => {});
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A water slide.' } });
+  assert.ok((await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'water slide'), 'queued first');
+
+  const res = await sets.approveFeature('water slide', { actor: 'tester' });
+  assert.ok(res.attributeKey, 'a label was created');
+  assert.ok(res.asked >= 1, 'asked in the drawer that has a set');
+  assert.equal((await query('select 1 from place_attributes where key = $1', [res.attributeKey])).rowCount, 1, 'it is a fact now');
+  assert.equal((await query('select 1 from questions where attribute_key = $1', [res.attributeKey])).rowCount, 1, 'and a question to verify');
+  assert.ok(!(await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'water slide'), 'gone from the queue');
+  assert.equal((await query("select 1 from review_sightings where norm = 'water slide'")).rowCount, 0, 'sightings cleared');
+  assert.equal((await query("select status from harvest_candidates where subcategory = $1 and norm = 'water slide'", [sub])).rows[0].status, 'promoted');
+});
+
+test('ignoring a feature drops it from the queue for good', async () => {
+  const sub = 'c30-ignore-parks';
+  const ref = 'google:ChIJ_c30_ign';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 ignore parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A climbing wall.' } });
+  await sets.ignoreFeature('climbing wall', { actor: 'tester', reason: 'not one we track' });
+  assert.ok(!(await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'climbing wall'), 'gone from the queue');
+  assert.equal((await query("select status from harvest_candidates where subcategory = $1 and norm = 'climbing wall'", [sub])).rows[0].status, 'ignored');
+  assert.equal((await query("select 1 from review_sightings where norm = 'climbing wall'")).rowCount, 0, 'sightings cleared');
 });
 
 test.after(async () => { await pool.end(); });

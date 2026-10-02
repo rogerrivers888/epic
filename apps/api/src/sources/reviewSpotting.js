@@ -248,3 +248,43 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
 export function spotInBackground(args) {
   return Promise.resolve().then(() => spotFromDetail(args)).catch(() => null);
 }
+
+/**
+ * The review queue: every feature review-spotting has raised and nobody has yet
+ * decided, with how many places mention it and an example of the drawer it was
+ * seen in — the list the owner approves or ignores (C30/C61). Each place count is
+ * a `count(distinct venue_ref)` over `review_sightings`, joined to `place_index`
+ * so a deleted place is gone and a reclassified one counts in its current drawer.
+ * A decided feature has no sightings (they are dropped on approve/ignore), so it
+ * falls out of the queue by itself. `known` marks a feature already in our fact
+ * list — shown as a verification suggestion rather than something new to approve.
+ */
+export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
+  const known = await knownFeatureKeys();
+  const where = subcategory ? 'where p.subcategory = $2' : '';
+  const params = subcategory ? [limit, subcategory] : [limit];
+  const { rows } = await query(
+    `select s.norm,
+            min(s.raw) as raw,
+            count(distinct s.venue_ref) as places,
+            min(p.subcategory) as example_subcategory,
+            sum(s.asserts) as asserts, sum(s.denies) as denies, sum(s.asks) as asks,
+            max(s.last_seen) as last_seen
+       from review_sightings s
+       join place_index p on p.venue_ref = s.venue_ref
+       ${where}
+      group by s.norm
+      order by count(distinct s.venue_ref) desc, s.norm
+      limit $1`,
+    params);
+  return rows.map((r) => ({
+    norm: r.norm,
+    raw: r.raw ?? r.norm,
+    places: Number(r.places),
+    exampleSubcategory: r.example_subcategory,
+    asserts: Number(r.asserts), denies: Number(r.denies), asks: Number(r.asks),
+    mostlyAgainst: (Number(r.denies) + Number(r.asks)) > Number(r.asserts),
+    known: known.has(r.norm),
+    lastSeen: r.last_seen,
+  }));
+}

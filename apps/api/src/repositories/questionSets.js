@@ -696,6 +696,9 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
           set status = 'promoted', question_id = $2, decided_by = $3, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null
         where id = $1`, [id, question?.id ?? null, actor],
     );
+    // A decided word drops its place-level scaffolding wherever it is kept — the
+    // examples above, and the review-spotting sightings too (C30, Codex 2 Oct).
+    await client.query('delete from review_sightings where norm = $1', [candidate.norm]);
     attrs.forget();
     return { candidate: candidate.norm, question, attributeKey: key, setKey };
   });
@@ -715,7 +718,86 @@ export async function ignoreCandidate(id, { actor = null, reason = null } = {}) 
       where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor, reason ? String(reason).slice(0, 300) : null],
   );
   if (!rows[0]) throw bad('That word has already been decided.');
+  // The review-spotting sightings are place-level scaffolding too: they go with
+  // the decision, like the examples (C30, Codex 2 Oct 2026).
+  await query('delete from review_sightings where norm = $1', [rows[0].norm]);
   return rows[0];
+}
+
+/**
+ * Approve a review-spotted feature into our fact list (C30/C61).
+ *
+ * This is the human act the review queue exists for: the owner vouches for a
+ * Google-raised feature, so it becomes one of our facts and is asked — and from
+ * then on answered only from owned sources (C33/C35), never from Google. It is a
+ * promotion authorised by a person, so it does NOT need the owned evidence quote
+ * `promote()` requires of a classifier verdict (C21): the person is the evidence.
+ *
+ * The fact is created once (a `place_attributes` label, reusing an alias if the
+ * wording already resolves to one) and asked in every drawer the feature was seen
+ * in that uses a question set. Every undecided candidate for the word is marked
+ * promoted and its place-level scaffolding — examples and review_sightings — is
+ * dropped. Nothing from Google is written: only the label, which is ours.
+ */
+export async function approveFeature(norm, { actor = null, kind = 'yesno', label = null } = {}) {
+  return withTransaction(async (client) => {
+    const { rows: cands } = await client.query(
+      "select * from harvest_candidates where norm = $1 and status in ('new', 'unresolved') and sources ? 'google' order by subcategory for update",
+      [norm]);
+    if (!cands.length) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
+    // Create or reuse the label — human-authorised, so no quote gate.
+    const { rows: aliasRows } = await client.query('select target_key from attribute_aliases where norm = $1', [norm]);
+    let key = aliasRows[0]?.target_key ?? null;
+    if (!key) {
+      const text = label ?? cands[0].raw_forms?.[0] ?? norm;
+      key = slug(text);
+      try {
+        await client.query(
+          'insert into place_attributes (key, label, kind, position) values ($1, $2, $3, 200) on conflict (key) do nothing',
+          [key, sentence(text), kind]);
+      } catch {
+        throw bad(`${key} is already one of our labels. Approve it onto the label we have, or give it another name.`);
+      }
+      await client.query(
+        'insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing',
+        [norm, key, cands[0].raw_forms?.[0] ?? null]);
+    }
+    // Ask it in every drawer it was seen in that uses a set. A drawer with no set
+    // is not a failure — the fact exists and can be asked there once a set is
+    // attached; a set already asking it (or asking it globally) is left as it is.
+    const subs = [...new Set(cands.map((c) => c.subcategory))];
+    let asked = 0;
+    for (const sub of subs) {
+      const { rows: [set] } = await client.query('select set_key from question_set_subcategories where subcategory_key = $1', [sub]);
+      if (!set?.set_key) continue;
+      try {
+        const q = await addQuestion({ attributeKey: key, setKey: set.set_key, scope: 'set', fromCandidate: cands.find((c) => c.subcategory === sub)?.id ?? null }, client);
+        if (q) asked += 1;
+      } catch { /* already asked here, or asked globally — the fact stands */ }
+    }
+    await client.query(
+      "update harvest_candidates set status = 'promoted', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'",
+      [norm, actor]);
+    await client.query('delete from review_sightings where norm = $1', [norm]);
+    attrs.forget();
+    return { feature: norm, attributeKey: key, asked, subcategories: subs };
+  });
+}
+
+/**
+ * Ignore a review-spotted feature for good — the review queue's other button.
+ * Every undecided Google-raised candidate for the word is marked ignored (an
+ * ignore is permanent, so it never raises again) and its sightings are dropped.
+ */
+export async function ignoreFeature(norm, { actor = null, reason = null } = {}) {
+  const { rowCount } = await query(
+    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
+            decision_reason = coalesce($3, decision_reason)
+      where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'`,
+    [norm, actor, reason ? String(reason).slice(0, 300) : null]);
+  if (!rowCount) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
+  await query('delete from review_sightings where norm = $1', [norm]);
+  return { feature: norm, ignored: rowCount };
 }
 
 /** The alias table says this wording means `key`, or the decision is refused rather than recorded against another. */

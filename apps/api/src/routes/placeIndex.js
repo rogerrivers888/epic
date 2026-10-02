@@ -26,6 +26,8 @@ import { query, withTransaction } from '../db.js';
 import { IN_CENSUS_MARKET } from '../domain/markets.js';
 import * as index from '../repositories/placeIndex.js';
 import { decodeEntities } from '../repositories/placeIndex.js';
+import { reviewQueue } from '../sources/reviewSpotting.js';
+import { approveFeature, ignoreFeature } from '../repositories/questionSets.js';
 import { phoneOf } from '../domain/contact.js';
 import { censusInRing, censusByOutcodeSum, placingPoints, nearestSector, sectorsOfBox, widthOf, FINE_M } from '../repositories/censusRing.js';
 import { TEXT_QUESTIONS, textStillAsked } from '../sources/censusQuestions.js';
@@ -4993,6 +4995,39 @@ router.post('/census/rollup', requires('manage_library'), async (req, res, next)
   try {
     const outcodes = Array.isArray(req.body?.outcodes) ? req.body.outcodes : null;
     res.json(await censusRun.rollUpOutcodes({ outcodes, runId: req.body?.runId ?? null }));
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Review-spotting review queue (C30/C61) — the features Google review-spotting
+// raised, for the owner to approve into facts or ignore.
+// ---------------------------------------------------------------------------
+
+/** The queue: each spotted feature, how many places mention it, an example drawer. */
+router.get('/review-queue', requires('view_library'), async (req, res, next) => {
+  try {
+    const subcategory = req.query.sub ? String(req.query.sub) : null;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+    const features = await reviewQueue({ limit, subcategory });
+    res.json({ features, newCount: features.filter((f) => !f.known).length, knownCount: features.filter((f) => f.known).length });
+  } catch (err) { next(err); }
+});
+
+/** Approve a new feature into our fact list; it is then verified from owned sources. */
+router.post('/review-queue/:norm/approve', requires('manage_library'), async (req, res, next) => {
+  try {
+    const norm = String(req.params.norm ?? '').trim();
+    if (!norm) throw bad('Which feature?');
+    res.json(await approveFeature(norm, { actor: actor(req).actorLabel, kind: req.body?.kind ? String(req.body.kind) : 'yesno', label: req.body?.label ? String(req.body.label) : null }));
+  } catch (err) { next(err); }
+});
+
+/** Ignore a feature for good — it never raises again. */
+router.post('/review-queue/:norm/ignore', requires('manage_library'), async (req, res, next) => {
+  try {
+    const norm = String(req.params.norm ?? '').trim();
+    if (!norm) throw bad('Which feature?');
+    res.json(await ignoreFeature(norm, { actor: actor(req).actorLabel, reason: req.body?.reason ? String(req.body.reason) : null }));
   } catch (err) { next(err); }
 });
 

@@ -79,11 +79,27 @@ export function detailHeld(provider, id) {
   return Boolean(held) && Date.now() - held.at < DETAIL_TTL_MS;
 }
 
+// The (place, detail) pairs review-spotting has already seen, so a detail served
+// from the six-hour cache is still spotted for a ref that fetched it later — but
+// only once per (place, detail), not on every read. The fresh-fetch path warmed
+// the cache without a ref (demand.js) or for a different ref, so without this a
+// later compare with a real ref would return the cache and never spot it (Codex,
+// 2 Oct 2026). Bounded like the detail cache.
+const spotted = new Set();
+function maybeSpot(provider, id, venueRef, detail) {
+  if (provider !== 'google' || !venueRef || !detail) return;
+  const k = `${provider}:${id}:${venueRef}`;
+  if (spotted.has(k)) return;
+  spotted.add(k);
+  while (spotted.size > 2000) spotted.delete(spotted.keys().next().value);
+  spotInBackground({ venueRef, detail });
+}
+
 export async function detailFor(provider, id, householdId, { venueRef = null } = {}) {
   const key = `${provider}:${id}`;
   const held = details.get(key);
-  if (held && Date.now() - held.at < DETAIL_TTL_MS) return held.detail;
-  if (detailsInFlight.has(key)) return detailsInFlight.get(key);
+  if (held && Date.now() - held.at < DETAIL_TTL_MS) { maybeSpot(provider, id, venueRef, held.detail); return held.detail; }
+  if (detailsInFlight.has(key)) return detailsInFlight.get(key).then((d) => { maybeSpot(provider, id, venueRef, d); return d; });
   const run = (async () => {
     const meter = {};
     try {
@@ -95,10 +111,8 @@ export async function detailFor(provider, id, householdId, { venueRef = null } =
       while (details.size > 300) details.delete(details.keys().next().value);
       // Review-spotting (C30/C61): the reviews are in memory now, for free, on a
       // search the back office asked for. Spot the concrete features and queue
-      // them in the background — it never blocks or breaks this fetch. Google
-      // only, a real place ref only; the cache hits above never reach here, so a
-      // detail is spotted once per fresh fetch, not on every read.
-      if (provider === 'google' && venueRef) spotInBackground({ venueRef, detail });
+      // them in the background — it never blocks or breaks this fetch.
+      maybeSpot(provider, id, venueRef, detail);
       return detail;
     } finally {
       // Which place it was about: the provider's own reference is the one
