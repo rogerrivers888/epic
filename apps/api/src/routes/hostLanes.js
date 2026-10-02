@@ -885,7 +885,7 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
       }
     }
     async function publishPrivate() {
-      const pro = await hostingPro(account, household.id);
+      let pro = await hostingPro(account, household.id);
       const plan = oneOf(['event', 'pro'], req.body?.plan) ?? offer.private_plan ?? (pro ? 'pro' : 'event');
       if (plan !== offer.private_plan) offer = await repo.updateOffer(offer.id, { privatePlan: plan });
       // 'included' is Pro's, and counts only while Pro does (Codex, 2 Oct 2026).
@@ -896,6 +896,8 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
         const open = await stripe.retrieveCheckout(offer.private_fee_ref, { householdId: household.id });
         if (stripe.checkoutPaid(open)) {
           offer = await markFeePaid(offer, open, household, account);
+          // Paid just now: read Pro again, so this press sends rather than opening a second subscription (Codex, 2 Oct 2026).
+          pro = await hostingPro(account, household.id);
         } else {
           const samePlan = (open?.metadata?.epic_kind === 'pro') === (plan === 'pro');
           if (open?.status === 'open' && samePlan && open.url) return res.json({ pay: { url: open.url } });

@@ -41,7 +41,7 @@ const fake = http.createServer((req, res) => {
     if (req.url.startsWith('/v1/identity/verification_sessions/')) return json({ id: 'vs_test_1', status: 'verified' });
     if (req.url === '/v1/checkout/sessions' && req.method === 'POST') return json({ id: 'cs_test_1', url: 'https://checkout.stripe.test/pay' });
     if (req.url.endsWith('/expire')) return json({ id: 'cs_test_1', status: 'expired' });
-    if (req.url.startsWith('/v1/checkout/sessions/')) return json(checkoutStatus === 'paid' ? { id: 'cs_test_1', mode: 'payment', status: 'complete', payment_status: 'paid', metadata: { epic_kind: 'event' } } : { id: 'cs_test_1', mode: 'payment', status: 'open', payment_status: 'unpaid', url: 'https://checkout.stripe.test/pay', metadata: { epic_kind: 'event' } });
+    if (req.url.startsWith('/v1/checkout/sessions/')) return json(checkoutStatus === 'pro-paid' ? { id: 'cs_pro_1', mode: 'subscription', status: 'complete', payment_status: 'paid', subscription: 'sub_1', metadata: { epic_kind: 'pro' } } : checkoutStatus === 'paid' ? { id: 'cs_test_1', mode: 'payment', status: 'complete', payment_status: 'paid', metadata: { epic_kind: 'event' } } : { id: 'cs_test_1', mode: 'payment', status: 'open', payment_status: 'unpaid', url: 'https://checkout.stripe.test/pay', metadata: { epic_kind: 'event' } });
     return json({ error: { code: 'not_found' } }, 404);
   });
 });
@@ -514,5 +514,24 @@ test('a venue picked from a provider keeps its reference, and its name is never 
     assert.notEqual(row.venue_label_from, 'host', 'never marked as the host’s own words');
     assert.ok(!row.venue_label, 'the provider’s name is not kept');
     assert.ok(!r.body.offer.missing.includes('where'), 'the reference is enough for the step');
+  } finally { await srv.close(); }
+});
+
+test('a Pro Checkout paid but never synced sends on the next press — never a second subscription', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await readyHost(h, member));
+  try {
+    const offer = await filledOneoff(srv);
+    await withStripe('sk_test_fake', async () => {
+      await query("update host_offers set private_plan = 'pro', private_fee_state = 'pending', private_fee_ref = 'cs_pro_1' where id = $1", [offer.id]);
+      await query("insert into hosting_payments (kind, offer_id, household_id, amount_pence, state, stripe_ref, mode) values ('pro', $1, $2, 1299, 'pending', 'cs_pro_1', 'test')", [offer.id, h.id]);
+      checkoutStatus = 'pro-paid';
+      const made = calls.filter((c) => c.url === '/v1/checkout/sessions' && c.method === 'POST').length;
+      const r = await srv.send('POST', `/api/host/lanes/offers/${offer.id}/publish`, { plan: 'pro' });
+      checkoutStatus = 'paid';
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal(r.body.offer?.state, 'live', 'sent, not asked to pay again');
+      assert.equal(calls.filter((c) => c.url === '/v1/checkout/sessions' && c.method === 'POST').length, made, 'no second Checkout');
+    });
   } finally { await srv.close(); }
 });
