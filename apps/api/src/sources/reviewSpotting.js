@@ -21,7 +21,7 @@
  * opinions drowned the signal — 41,816 words, nought promotable. This extracts
  * concrete features only and filters the opinions out, which is the whole of the
  * difference. The **paid bulk `googleHarvest` and open-ended n-gram mining stay
- * refused** (C61; see migration 320). Nothing here spends: it never makes a
+ * refused** (C61; see migration 322). Nothing here spends: it never makes a
  * Google call, it reads a detail another request already paid for.
  */
 
