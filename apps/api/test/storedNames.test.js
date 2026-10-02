@@ -83,3 +83,38 @@ test('a budget leg named live from Google says so, so the device can strip it', 
   const b = computeBudget({ trip, stops, household: null });
   assert.deepEqual(b.legs.map((l) => Boolean(l.live)), [false, true, true], 'into it and out of it');
 });
+
+test('a provider\'s name is not written down: the reference stands in, or nothing — an open reference and a nickname are left alone', async () => {
+  const hh = await household();
+  const g = `google:${randomUUID()}`;
+  const open = `fixtures:${randomUUID()}`;
+  await query(`insert into household_places (household_id, venue_ref, label, nickname) values ($1, $2, 'Google Name', 'Ours'), ($1, $3, 'The Tree House', null)`, [hh, g, open]);
+  const hp = Object.fromEntries((await query('select venue_ref, label, nickname from household_places where household_id = $1', [hh])).rows.map((r) => [r.venue_ref, r]));
+  assert.deepEqual([hp[g].label, hp[g].nickname], [g, 'Ours'], 'the reference stands in; the nickname is untouched');
+  assert.equal(hp[open].label, 'The Tree House');
+  // An update that brings the provider's name back is refused the same way.
+  await query('update household_places set label = $3 where household_id = $1 and venue_ref = $2', [hh, g, 'Google Name Again']);
+  assert.equal((await query('select label from household_places where household_id = $1 and venue_ref = $2', [hh, g])).rows[0].label, g);
+
+  const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date)
+    values ($1, 'T', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning id`, [hh])).rows[0];
+  await query(`insert into trip_stops (trip_id, position, venue_ref, venue_name, dwell_minutes) values ($1, 1, $2, 'Google Stop', 60), ($1, 2, $3, 'Lunch at Gran''s', 60)`, [trip.id, g, open]);
+  assert.deepEqual((await query('select venue_name from trip_stops where trip_id = $1 order by position', [trip.id])).rows.map((r) => r.venue_name), [g, "Lunch at Gran's"]);
+  await query(`insert into visits (household_id, venue_ref, venue_label, visited_on) values ($1, $2, 'Google Visit', '2026-10-01')`, [hh, g]);
+  assert.equal((await query('select venue_label from visits where household_id = $1', [hh])).rows[0].venue_label, g);
+  await query(`insert into orders (household_id, venue_ref, venue_label) values ($1, $2, 'Google Order')`, [hh, g]);
+  assert.equal((await query('select venue_label from orders where household_id = $1', [hh])).rows[0].venue_label, null);
+  await query(`insert into place_menus (venue_ref, venue_label, source_url, source_kind) values ($1, 'Google Menu', 'https://example.org/menu', 'html')`, [g]);
+  assert.equal((await query('select venue_label from place_menus where venue_ref = $1', [g])).rows[0].venue_label, null);
+});
+
+test('a chat topic about a provider\'s stop keeps no label of theirs', async () => {
+  const hh = await household();
+  const trip = (await query(`insert into trips (household_id, title, origin_label, origin_lat, origin_lng, depart_at, return_at, start_date, end_date)
+    values ($1, 'T', 'Home', 51.4, -0.6, now(), now(), '2026-10-04', '2026-10-05') returning id`, [hh])).rows[0];
+  const g = `google:${randomUUID()}`;
+  const { rows: [t] } = await query(
+    `insert into chat_topics (context_type, context_id, tag_kind, tag_ref, tag_label, audience, title, state)
+     values ('trip', $1, 'stop', $2, 'Google Stop Name', 'everyone', 'When do we leave?', 'open') returning tag_label`, [trip.id, g]);
+  assert.equal(t.tag_label, null);
+});
