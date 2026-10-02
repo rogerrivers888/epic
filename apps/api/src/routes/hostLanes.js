@@ -780,6 +780,8 @@ router.post('/host/lanes/verify', async (req, res, next) => {
       const open = await stripe.retrieveIdentity(host.identity_session_id, { householdId: household.id }).catch(() => null);
       if (open?.status === 'verified') { await repo.updateHost(host.id, { identityState: 'verified', identityVerifiedAt: new Date() }); return res.json({ url: null, verified: true }); }
       if (open?.status === 'requires_input' && open.url) return res.json({ url: open.url });
+      // Stripe is still reading what was sent: wait for it, never start a second check (Codex, 2 Oct 2026).
+      if (open?.status === 'processing') return res.json({ url: null, processing: true });
     }
     const s = await stripe.identitySession({ returnUrl: back, hostId: host.id, householdId: household.id });
     await repo.updateHost(host.id, { identitySessionId: s.id, identityState: 'pending', stripeMode: 'test' });

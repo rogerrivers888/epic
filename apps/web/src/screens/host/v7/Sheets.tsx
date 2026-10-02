@@ -239,6 +239,7 @@ function VerifySheet({ offer, onClose, onChanged }: SheetProps) {
   const go = () => run(async () => {
     const r = await api.laneVerify(offer.id);
     if (r.url) { goToStripe(r.url); return; }
+    if (r.processing) showToast('Stripe is checking it. We’ll tick it off when it’s done.');
     await onChanged();
     onClose();
   });

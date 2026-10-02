@@ -2768,7 +2768,7 @@ export const api = {
   laneTax: (reference: string) => post<{ host: HostSheet }>('/api/host/lanes/tax', { reference }),
   laneChecked: (body: { dbsNumber: string; insuranceMediaId?: string | null; referees: { name: string; email: string }[] }) => post<{ host: HostSheet }>('/api/host/lanes/checked', body),
   lanePayouts: (offerId: string) => post<{ url: string }>('/api/host/lanes/payouts', { offerId }),
-  laneVerify: (offerId: string) => post<{ url: string | null; verified?: boolean }>('/api/host/lanes/verify', { offerId }),
+  laneVerify: (offerId: string) => post<{ url: string | null; verified?: boolean; processing?: boolean }>('/api/host/lanes/verify', { offerId }),
   laneSync: (id: string) => post<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}/sync`, {}),
   laneVideo: (id: string, body: { videoId?: string | null; madeBy?: 'self' | 'epic'; coverS?: number | null; onProfile?: boolean; photoIds?: string[]; helloId?: string | null }) =>
     post<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}/video`, body),

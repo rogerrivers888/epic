@@ -195,7 +195,11 @@ export function Setup({ lane: laneIn, offerId }: { lane: HostLane | null; offerI
   const View_ = STEP_VIEWS[step];
 
   // Say it, Upload it and the draft are modes over step 1 (and the mic's Say it over any step).
-  const startAgain = async () => { if (offer.id) await api.deleteLaneOffer(offer.id).catch(() => null); navigate(paths.hostCompose(lane), { replace: true }); };
+  // Only once the draft is really gone: a failed delete keeps the host on it and says so (Codex, 2 Oct 2026).
+  const startAgain = async () => {
+    if (offer.id) { try { await api.deleteLaneOffer(offer.id); } catch (e: any) { showToast(e.message); return; } }
+    navigate(paths.hostCompose(lane), { replace: true });
+  };
   const body = mode === 'say' ? <SayIt {...props} step={step} setBar={setModeBar} onBuilt={(o) => { setOffer(o); if (step === 'what') navigate(paths.hostSetup(o.id, 'what', 'draft'), { replace: true }); else navigate(paths.hostSetup(o.id, step), { replace: true }); }} />
     : mode === 'upload' ? <UploadIt {...props} setBar={setModeBar} onBuilt={(o) => { setOffer(o); navigate(paths.hostSetup(o.id, 'what', 'draft'), { replace: true }); }} />
       : mode === 'draft' ? <YourDraft {...props} onStartAgain={() => { void startAgain(); }} />
