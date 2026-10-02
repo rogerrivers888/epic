@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
+import { useViewport } from '../hooks/useViewport';
 import { LIME, INK, CREAM, TAB_UNSELECTED, fonts } from '../theme';
 
 /**
@@ -35,6 +36,9 @@ export function InkMenu<T extends string>({ tabs, selected, onSelect, flyToKey }
   // §5: 2 tabs at 16px, 3–4 tabs at 15px.
   const fs = tabs.length <= 2 ? 16 : 15;
   const nothing = selected == null;
+  // On a phone the bar is ~2mm taller (owner, 2 Oct 2026: "this menu bar 2 mm
+  // taller … on every tab that the menu bar exists"): 6 more above, 5 below.
+  const phone = useViewport().width < 900;
   return (
     <View style={styles.bar} accessibilityRole="tablist">
       {tabs.map((t) => {
@@ -47,7 +51,7 @@ export function InkMenu<T extends string>({ tabs, selected, onSelect, flyToKey }
           <Press
             key={t.key}
             onPress={() => onSelect(t.key)}
-            style={[styles.cell, nothing ? styles.cellFlat : (on ? styles.cellOn : styles.cellOff)]}
+            style={[styles.cell, phone && styles.cellPhone, nothing ? (phone ? styles.cellFlatPhone : styles.cellFlat) : (on ? styles.cellOn : styles.cellOff)]}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
           >
@@ -77,6 +81,9 @@ const styles = StyleSheet.create({
   cellOff: {},
   // Nothing selected: no marker at all, so the bottom pad takes the 4px back.
   cellFlat: { paddingBottom: 15, borderBottomWidth: 0 },
+  // Phone: 11px taller (≈2mm on an iPhone) — 21 above, 17 below (20 when flat).
+  cellPhone: { paddingTop: 21, paddingBottom: 17 },
+  cellFlatPhone: { paddingBottom: 20, borderBottomWidth: 0 },
   // A zero-size marker centred in the cell for the heart-fly to land on.
   flyMark: { position: 'absolute', top: '50%', left: '50%', width: 1, height: 1 },
   label: { fontFamily: fonts.heading, textAlign: 'center' },

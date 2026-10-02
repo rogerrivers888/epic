@@ -46,3 +46,10 @@ test('the title band (Settings, Host) takes the same 14px trim: no extra 10px, 2
   assert.match(src, /export function TitleBand[\s\S]*?<View style=\{styles\.tallTop\}>/);
   assert.match(src, /titleRow: \{[^}]*paddingTop: 22, paddingBottom: 20 \}/);
 });
+
+test('on a phone the ink menu is 11px (≈2mm) taller: 21 above, 17 below', () => {
+  const src = read('src/components/InkMenu.tsx');
+  assert.match(src, /const phone = useViewport\(\)\.width < 900;/);
+  assert.match(src, /cellPhone: \{ paddingTop: 21, paddingBottom: 17 \}/);
+  assert.match(src, /cellFlatPhone: \{ paddingBottom: 20, borderBottomWidth: 0 \}/);
+});
