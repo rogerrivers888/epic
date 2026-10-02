@@ -1390,6 +1390,11 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
   const rows = await nullCountryAddresses(refs, q);
   const settled = []; const unsettled = [];
   for (const row of rows) {
+    // Judged from the plain read first: an address that names no country costs
+    // nothing more, so the places that can never settle do not each hold a
+    // transaction on every pass (Codex). Only a candidate goes on to the lock.
+    const first = countryFromAddresses(row.addresses ?? []);
+    if (!first.code) { unsettled.push({ ref: row.venue_ref, reason: first.reason }); continue; }
     // One short transaction a place: the geocoded address is locked, read again,
     // judged and stamped before anyone may replace it. The stamp is for good —
     // later passes fill only a null — so a refresh committing between a read and a
@@ -1412,6 +1417,8 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
   return { settled, unsettled };
 }
 
+const NULL_COUNTRY_PASS = 5000;
+
 /** Places with no country, each with its reverse-geocoded address(es). Read-only. */
 export async function nullCountryAddresses(refs = null, q = query) {
   const { rows } = await q(`
@@ -1421,7 +1428,10 @@ export async function nullCountryAddresses(refs = null, q = query) {
                         and f.source = 'nominatim' and f.expires_at is null
      where pi.country_code is null
        ${refs ? 'and pi.venue_ref = any($1)' : ''}
-     group by pi.venue_ref`, refs ? [refs] : []);
+     group by pi.venue_ref
+     order by pi.venue_ref
+     -- Bounded, like the rest of settle: a read of at most this many a pass.
+     limit ${refs ? 'null' : NULL_COUNTRY_PASS}`, refs ? [refs] : []);
   return rows;
 }
 
