@@ -934,6 +934,22 @@ async function reindexWhileLocked({ onProgress }) {
              else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
            end) ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
     on conflict do nothing`);
+
+  // A non-GB postcode area has no ONS load to create its locality, so filing makes
+  // one: without the row the link joins to nothing and the district disappears from
+  // every view that reads place_areas through localities (Codex). Named by its
+  // outcode, in its own country; GB districts keep coming from the ONS load.
+  await query(`
+    insert into localities (slug, name, kind, country_code)
+    select distinct pa.area_slug, upper(${OUTCODE_FROM('r.postcode')}), 'postcode', upper(pi.country_code)
+      from place_areas pa
+      join place_index pi on pi.venue_ref = pa.venue_ref
+      join place_records r on r.venue_ref = pa.venue_ref
+     where pi.country_code is not null and upper(pi.country_code) <> 'GB'
+       and r.postcode is not null
+       and pa.area_slug = ${AREA_SLUG('pi.country_code', OUTCODE_FROM('r.postcode'))}
+       
+    on conflict (slug) do nothing`);
   // And where the household said it was — the same source the hourly pass reads
   // (Codex, 18 Sep 2026). Matched by name, because the column is a word rather
   // than a slug, and only where we hold a locality by that name.
@@ -1200,6 +1216,15 @@ end)`;
  * else carries its country (`ie-w12`), so a Dublin routing key and a London outcode
  * are two areas, never one. A row with no country is filed as GB, as it always was.
  */
+/**
+ * The outward code a postcode locality stands for, in SQL: its slug less the country
+ * prefix a non-GB area carries (`ie-w12` → W12), upper-cased the way people write it.
+ * The editor round-trips this, so it must never show the routing slug (Codex).
+ */
+export const OUTCODE_OF_LOCALITY = (alias = 'l') => `upper(case
+  when upper(${alias}.country_code) <> 'GB' and ${alias}.slug like lower(${alias}.country_code) || '-%'
+  then substr(${alias}.slug, length(${alias}.country_code) + 2) else ${alias}.slug end)`;
+
 export const AREA_SLUG = (countryCol, codeExpr) => `(case
   when ${countryCol} is null or upper(${countryCol}) = 'GB' then ${codeExpr}
   else lower(${countryCol}) || '-' || ${codeExpr} end)`;
@@ -1503,6 +1528,22 @@ async function settleWhileLocked(limit) {
              else left(upper(btrim(r.postcode)), greatest(0, length(btrim(r.postcode)) - 3))
            end) ~ '^[a-z]{1,2}[0-9][a-z0-9]?$'
     on conflict do nothing`, [refs]);
+
+  // A non-GB postcode area has no ONS load to create its locality, so filing makes
+  // one: without the row the link joins to nothing and the district disappears from
+  // every view that reads place_areas through localities (Codex). Named by its
+  // outcode, in its own country; GB districts keep coming from the ONS load.
+  await query(`
+    insert into localities (slug, name, kind, country_code)
+    select distinct pa.area_slug, upper(${OUTCODE_FROM('r.postcode')}), 'postcode', upper(pi.country_code)
+      from place_areas pa
+      join place_index pi on pi.venue_ref = pa.venue_ref
+      join place_records r on r.venue_ref = pa.venue_ref
+     where pi.country_code is not null and upper(pi.country_code) <> 'GB'
+       and r.postcode is not null
+       and pa.area_slug = ${AREA_SLUG('pi.country_code', OUTCODE_FROM('r.postcode'))}
+       and pa.venue_ref = any($1)
+    on conflict (slug) do nothing`, [refs]);
   // And where the household said it was.
   //
   // A place somebody saves carries the locality the geocoder gave it, and
@@ -2828,7 +2869,7 @@ export async function places(areaSlug, {
     select pi.venue_ref, pi.subcategory, pi.category, pi.data_score, pi.ready, pi.score_parts, pi.ownership, pi.oldest_fact,
            (select count(*)::int from place_index_sources src where src.venue_ref = pi.venue_ref and (${FOUND_IT('src')})) as seen_by,
            (select string_agg(src.source, ',' order by src.source) from place_index_sources src where src.venue_ref = pi.venue_ref and (${FOUND_IT('src')})) as srcs,
-           (select upper(pa.area_slug) from place_areas pa join localities l on l.slug = pa.area_slug
+           (select ${OUTCODE_OF_LOCALITY('l')} from place_areas pa join localities l on l.slug = pa.area_slug
              where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode
       from place_index pi
       left join place_records r on r.venue_ref = pi.venue_ref
@@ -3189,7 +3230,7 @@ export async function household(areaSlug, {
     -- And the index's own, last: where an activity-sweep row keeps no Google
     -- point of its own (migration 307), the index holds it (Codex).
     coalesce(r.lat, sp.lat, a.lat, pi.lat) as lat, coalesce(r.lng, sp.lng, a.lng, pi.lng) as lng,
-    (select upper(pa.area_slug) from place_areas pa join localities l on l.slug = pa.area_slug
+    (select ${OUTCODE_OF_LOCALITY('l')} from place_areas pa join localities l on l.slug = pa.area_slug
       where pa.venue_ref = pi.venue_ref and l.kind = 'postcode' limit 1) as outcode,
     (select li.image_id from image_links li join image_assets ia on ia.id = li.image_id
       where ia.may_store and ia.moderation = 'approved'

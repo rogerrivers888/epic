@@ -57,6 +57,15 @@ test('an Irish place on routing key W12 is filed under ie-w12, a London one unde
   assert.deepEqual(await areas(london), ['w12']);
   const country = async (ref) => (await query('select country_code from place_index where venue_ref = $1', [ref])).rows[0].country_code;
   assert.equal(await country(irish), 'IE', 'and the settle did not make it GB from the shared outcode');
+  // Filing made the district a row of its own, so it joins to something (Codex)…
+  const { rows: [loc] } = await query(`select name, kind, country_code from localities where slug = 'ie-w12'`);
+  assert.deepEqual(loc, { name: 'W12', kind: 'postcode', country_code: 'IE' });
+  // …and what a person is shown and edits is the outcode, never the routing slug.
+  const { OUTCODE_OF_LOCALITY } = index;
+  const { rows: [shown] } = await query(
+    `select ${OUTCODE_OF_LOCALITY('l')} as outcode from place_areas pa join localities l on l.slug = pa.area_slug
+      where pa.venue_ref = $1 and l.kind = 'postcode'`, [irish]);
+  assert.equal(shown.outcode, 'W12');
 });
 
 test('admission: a full ONS postcode settles GB over a stale stamp; an Eircode never does', async () => {

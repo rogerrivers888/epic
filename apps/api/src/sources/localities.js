@@ -32,6 +32,7 @@
  */
 
 import { query } from '../db.js';
+import { OUTCODE_OF_LOCALITY } from '../repositories/placeIndex.js';
 import { userAgent } from '../origins.js';
 import { reverseGeocode } from './geocode.js';
 import * as providerCalls from '../repositories/providerCalls.js';
@@ -393,8 +394,7 @@ export async function refreshCounts() {
 
   // A postcode locality's outcode is its slug less any country prefix (`ie-w12` →
   // W12; migration 357), or a non-GB district would count nothing (Codex).
-  const OUTCODE = `upper(case when upper(l.country_code) <> 'GB' and l.slug like lower(l.country_code) || '-%'
-                              then substr(l.slug, length(l.country_code) + 2) else l.slug end)`;
+  const OUTCODE = OUTCODE_OF_LOCALITY('l');
   await query(
     `update localities l set
        to_go_count  = (select count(*) from attractions a
