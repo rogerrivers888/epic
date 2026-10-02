@@ -103,8 +103,9 @@ export async function vocabularyFor(household) {
     loadMembers(household.id).catch(() => []),
     query('select title, destination_label, base_label, locality from trips where household_id = $1 order by created_at desc limit 12', [household.id]).then((r) => r.rows).catch(() => []),
     // The names the household sees, never a provider's stored label (migration 340).
+    // Named ones only, then the thirty most recent of those (Codex, 2 Oct 2026).
     query(`select label from (select epic_shown_name(venue_ref, household_id, label) as label, last_seen from household_places
-             where household_id = $1 order by last_seen desc nulls last limit 30) n where label is not null`, [household.id]).then((r) => r.rows).catch(() => []),
+             where household_id = $1) n where label is not null order by last_seen desc nulls last limit 30`, [household.id]).then((r) => r.rows).catch(() => []),
   ]);
   const seen = new Set();
   const keep = (v) => { const t = String(v ?? '').trim(); if (t && t.length <= 60 && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); return t; } return null; };
