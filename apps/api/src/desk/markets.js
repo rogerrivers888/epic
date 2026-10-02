@@ -220,7 +220,11 @@ export async function countryContradictions() {
     const { rows } = await query(`
       select pi.venue_ref, upper(pi.country_code) as country, r.name, r.phone, r.website, r.price_range,
              coalesce(jsonb_agg(distinct jsonb_build_object('source', f.source, 'value', f.value #>> '{}'))
-                        filter (where f.venue_ref is not null), '[]'::jsonb) as addresses
+                        filter (where f.venue_ref is not null), '[]'::jsonb)
+               -- And the record's own address, which a back-office edit writes only
+               -- there (Codex), labelled as the record's.
+               || case when r.address is not null then jsonb_build_array(jsonb_build_object('source', 'record', 'value', r.address))
+                       else '[]'::jsonb end as addresses
         from place_index pi
         join place_records r on r.venue_ref = pi.venue_ref
         left join place_facts f on f.venue_ref = pi.venue_ref and f.field = 'address' and f.expires_at is null
@@ -228,7 +232,7 @@ export async function countryContradictions() {
          -- A record that holds something of ours; an empty placeholder row is not
          -- owned text and must not swell the checked total (Codex).
          and ${ownedRecordSql('r')}
-       group by pi.venue_ref, pi.country_code, r.name, r.phone, r.website, r.price_range
+       group by pi.venue_ref, pi.country_code, r.name, r.phone, r.website, r.price_range, r.address
        order by pi.venue_ref limit 5000`, [after]);
     if (!rows.length) break;
     for (const r of rows) {

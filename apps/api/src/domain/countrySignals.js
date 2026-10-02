@@ -19,6 +19,9 @@ import { countryNamedIn } from './countryFromAddress.js';
 /** A country named as the address's very last component, with nothing after it — or null. */
 function strictLastCountry(address) {
   const parts = String(address).split(',').map((p) => p.trim()).filter(Boolean);
+  // At least street, town, country: two parts ending in a name are a street and a
+  // town as often as anything — "123 Main St, Lebanon" is Tennessee (Codex).
+  if (parts.length < 3) return null;
   const last = parts[parts.length - 1];
   if (!last || /\d/.test(last)) return null;
   return countryNamedIn(last);

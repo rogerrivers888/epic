@@ -43,6 +43,7 @@ test('a place whose own text agrees with its stamp raises nothing', () => {
   assert.deepEqual(disagreements({ country: 'GB', addresses: [{ source: 'site', value: 'High St, Windsor, SL4 1NJ, United Kingdom' }], phone: '+44 1753 1', website: 'https://x.co.uk', priceRange: '££' }, () => 'GBP'), []);
   // Codex: a town that shares a country's name is not read from a venue's address…
   assert.deepEqual(disagreements({ country: 'US', addresses: [{ source: 'site', value: '123 Main St, Lebanon, 37087' }] }), []);
+  assert.deepEqual(disagreements({ country: 'US', addresses: [{ source: 'site', value: '123 Main St, Lebanon' }] }), [], 'a street and a town');
   // …and an unrecognised prefix, or a stamp the table does not cover, says nothing.
   assert.deepEqual(disagreements({ country: 'ID', phone: '+62 21 1234' }), []);
   assert.deepEqual(disagreements({ country: 'GB', phone: '+62 21 1234' }), []);
@@ -67,5 +68,12 @@ test('the check reads every settled place with a record and names the contradict
   assert.equal(iris.signals.length, 3);
   assert.ok(!out.places.some((p) => p.venue_ref === 'google:cs-fine'));
   assert.ok(out.checked >= 2 && out.flagged >= 1 && out.twoOrMore >= 1);
+  // An address typed into the record itself is read too (Codex).
+  await query(`insert into place_index (venue_ref, country_code) values ('google:cs-typed', 'GB') on conflict (venue_ref) do update set country_code = 'GB'`);
+  await query(`insert into place_records (venue_ref, address) values ('google:cs-typed', '1 Rue de Rivoli, Paris, France')
+               on conflict (venue_ref) do update set address = excluded.address`);
+  const again = await m.countryContradictions();
+  const typed = again.places.find((p) => p.venue_ref === 'google:cs-typed');
+  assert.deepEqual(typed?.signals.map((x) => [x.signal, x.says, x.source]), [['address', 'FR', 'record']]);
   assert.equal(out.listed, 'all');
 });
