@@ -68,7 +68,7 @@ test('a Google-raised feature is queued in the pen as our own derived output, no
   // A known feature already in our fact list, and a new one that is not.
   await query("insert into place_attributes (key, label, kind) values ('swimming-pool', 'Swimming pool', 'yesno') on conflict do nothing");
   await query('delete from harvest_candidates where subcategory = $1', [sub]);
-  await query('delete from review_sightings where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
 
   const report = await spotFromDetail({
     venueRef: ref,
@@ -112,19 +112,27 @@ test('a feature seen at two places counts two; the same place twice counts once'
   await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 count parks', 'c30-test-cat') on conflict do nothing", [sub]);
   for (const r of [a, b]) await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [r, sub]);
   await query('delete from harvest_candidates where subcategory = $1', [sub]);
-  await query('delete from review_sightings where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
 
   const detail = { reviewSummary: 'A lovely splash pad.' };
   await spotFromDetail({ venueRef: a, detail });
-  await spotFromDetail({ venueRef: a, detail });   // same place again — must not double-count
-  const after1 = await query("select places_seen, asserts from harvest_candidates where subcategory = $1 and norm = 'splash pad'", [sub]);
-  assert.equal(after1.rows[0].places_seen, 1, 'one place, however many times it is searched');
+  const again = await spotFromDetail({ venueRef: a, detail });   // same place again — must not double-count
+  assert.equal(again.features.find((f) => f.norm === 'splash pad').places, 1, 'one place, however many times it is searched');
 
-  await spotFromDetail({ venueRef: b, detail });    // a second, different place
-  const after2 = await query("select places_seen from harvest_candidates where subcategory = $1 and norm = 'splash pad'", [sub]);
-  assert.equal(after2.rows[0].places_seen, 2, 'two distinct places, counted two — not greatest(1,1)');
-  const sightings = await query("select count(*)::int as n from review_sightings where subcategory = $1 and norm = 'splash pad'", [sub]);
+  const second = await spotFromDetail({ venueRef: b, detail });    // a second, different place
+  assert.equal(second.features.find((f) => f.norm === 'splash pad').places, 2, 'two distinct places, counted two — not greatest(1,1)');
+  const sightings = await query("select count(*)::int as n from review_sightings where norm = 'splash pad' and venue_ref = any($1)", [[a, b]]);
   assert.equal(sightings.rows[0].n, 2, 'one sighting row per place');
+});
+
+test('a deleted place takes its sightings with it (cascade)', async () => {
+  const sub = 'c30-count-parks';
+  const gone = 'google:ChIJ_c30_gone';
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [gone, sub]);
+  await spotFromDetail({ venueRef: gone, detail: { reviewSummary: 'A splash pad.' } });
+  assert.equal((await query('select count(*)::int n from review_sightings where venue_ref = $1', [gone])).rows[0].n, 1);
+  await query('delete from place_index where venue_ref = $1', [gone]);
+  assert.equal((await query('select count(*)::int n from review_sightings where venue_ref = $1', [gone])).rows[0].n, 0, 'the sighting went with the place');
 });
 
 test('spotFromDetail never throws, and queues nothing it cannot file', async () => {

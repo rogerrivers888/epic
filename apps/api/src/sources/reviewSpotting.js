@@ -192,19 +192,20 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
   const run = client ? (t, p) => client.query(t, p) : query;
   const known = await knownFeatureKeys(client);
   const entries = [];
-  const report = [];
+  const norms = [...features.keys()];
   for (const [norm, e] of features) {
     // One sighting per (feature, place), idempotent: searching the same place
-    // again updates its polarity and does not count the place twice.
+    // again updates its polarity and does not count the place twice. The honest
+    // "how many places" is a count(distinct venue_ref) over these rows, read below.
     await run(
-      `insert into review_sightings (subcategory, norm, venue_ref, asserts, denies, asks)
+      `insert into review_sightings (norm, venue_ref, raw, asserts, denies, asks)
          values ($1, $2, $3, $4, $5, $6)
-       on conflict (subcategory, norm, venue_ref) do update
+       on conflict (norm, venue_ref) do update
          set asserts = greatest(review_sightings.asserts, excluded.asserts),
              denies  = greatest(review_sightings.denies,  excluded.denies),
              asks    = greatest(review_sightings.asks,    excluded.asks),
              last_seen = now()`,
-      [subcategory, norm, venueRef, e.asserts, e.denies, e.asks]);
+      [norm, venueRef, e.raw, e.asserts, e.denies, e.asks]);
     entries.push({
       norm, raw: e.raw, rawForms: [e.raw],
       sources: ['google'],            // rented: no evidence quote is kept (QUOTABLE_SOURCES)
@@ -213,41 +214,31 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
       placesSeen: 1,
       asserts: e.asserts, denies: e.denies, asks: e.asks,
     });
-    report.push({ norm, known: known.has(norm) });
   }
-  // Maintain the pen candidate (status, kind, the examples sample, the quote
-  // gate) through the normal door …
+  // The candidate itself lives in the pen through the normal door, so the existing
+  // ignore/promote machinery covers it. recordCandidates merges a repeat with
+  // greatest(), which is safe — it never overwrites a count another source (the
+  // feature harvest) put there; the per-place totals are NOT written to the shared
+  // candidate, they are read from review_sightings (Codex, 2 Oct 2026).
   await recordCandidates(subcategory, entries, { placesTotal: 1, client });
-  // … then set its counts to the honest aggregate over the sightings: the number
-  // of distinct places, and the polarity summed across them. recordCandidates
-  // merges with greatest(), which cannot accumulate one place at a time, so the
-  // true totals are written here (Codex, 2 Oct 2026). Only the pen rows — a
-  // promoted or ignored word is left as it was decided.
-  const norms = [...features.keys()];
-  await run(
-    `update harvest_candidates c set
-       places_seen = agg.places,
-       places_total = agg.places,
-       asserts = agg.asserts, denies = agg.denies, asks = agg.asks
-     from (
-       select norm,
-              count(distinct venue_ref) as places,
-              sum(asserts) as asserts, sum(denies) as denies, sum(asks) as asks
-         from review_sightings where subcategory = $1 and norm = any($2)
-         group by norm
-     ) agg
-     where c.subcategory = $1 and c.norm = agg.norm and c.status in ('new', 'unresolved')`,
-    [subcategory, norms]);
 
-  // Report accurate place counts for each feature (for the research stream / tests).
+  // The accurate count per feature, for the report and the review queue: distinct
+  // places, in the place's CURRENT drawer, ignoring any since deleted — derived by
+  // joining place_index, never from a stored subcategory (Codex, 2 Oct 2026).
   const { rows: counts } = await run(
-    'select norm, places_seen, asserts, denies, asks from harvest_candidates where subcategory = $1 and norm = any($2)',
-    [subcategory, norms]);
+    `select s.norm,
+            count(distinct s.venue_ref) as places,
+            sum(s.asserts) as asserts, sum(s.denies) as denies, sum(s.asks) as asks
+       from review_sightings s
+       join place_index p on p.venue_ref = s.venue_ref
+      where s.norm = any($1) and p.subcategory = $2
+      group by s.norm`,
+    [norms, subcategory]);
   const byNorm = Object.fromEntries(counts.map((r) => [r.norm, r]));
-  for (const r of report) {
-    const c = byNorm[r.norm] ?? {};
-    r.places = c.places_seen ?? 1; r.asserts = c.asserts ?? 0; r.denies = c.denies ?? 0; r.asks = c.asks ?? 0;
-  }
+  const report = norms.map((norm) => {
+    const c = byNorm[norm] ?? {};
+    return { norm, known: known.has(norm), places: Number(c.places ?? 1), asserts: Number(c.asserts ?? 0), denies: Number(c.denies ?? 0), asks: Number(c.asks ?? 0) };
+  });
   return { subcategory, queued: entries.length, filtered, known: report.filter((r) => r.known).length, features: report };
 }
 
