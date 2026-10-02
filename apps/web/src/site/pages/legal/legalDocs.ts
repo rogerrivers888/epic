@@ -34,7 +34,7 @@ export function cookiesNotice({ ga4, ads }: { ga4: boolean; ads: boolean }): str
   const which = ga4 && ads ? 'Google Analytics and Google Ads cookies' : ga4 ? 'Google Analytics cookies' : 'Google Ads cookie';
   const rows = ['| epic_consent (cookie) | Remembers whether you accepted or rejected analytics and advertising cookies | 12 months | Essential |'];
   if (ga4) rows.push('| _ga, _ga_\\* (cookies, Google Analytics) | Count visits and how the website is used | Up to 2 years | Not essential (statistics) — only if you accept |');
-  if (ads) rows.push('| _gcl_au (cookie, Google Ads) | Measures whether our ads led to a visit | 90 days | Not essential (marketing) — only if you accept |');
+  if (ads) rows.push('| _gcl_au, _gcl_aw, _gcl_\\* (cookies, Google Ads) | Measure whether our ads led to a visit, including which ad was clicked | 90 days | Not essential (marketing) — only if you accept |');
   return COOKIES.replace(
     "**What epic.day stores today.** Nothing is used for statistics or marketing yet; if that changes, it is added here, and it is only set if you accept it in the cookie banner.",
     `**What epic.day stores today.** The ${which} at the end of this list are set only if you choose Accept all in the cookie banner; everything else is listed as it is.`,
