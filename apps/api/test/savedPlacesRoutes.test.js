@@ -246,3 +246,22 @@ test('a turned-down picture is still shown in the place\'s detail, on a signed l
     assert.ok(p.sig && p.exp, 'drawn on a signed link');
   } finally { await close(); }
 });
+
+test('accepting a verdict where a turned-down picture still holds the card puts the accepted one there instead', async () => {
+  const ref = `google:rhero-${randomUUID()}`;
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'Rejected Hero', '{}')`, [ref]);
+  const { rows: [old] } = await query(`insert into image_assets (source, source_ref, licence, may_store, moderation) values ('wikimedia', $1, 'CC0', true, 'rejected') returning id`, [`File:rh-${randomUUID()}.jpg`]);
+  await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'hero', 0)`, [old.id, ref]);
+  const { rows: [nu] } = await query(`insert into image_assets (source, source_ref, licence, may_store, moderation) values ('openverse', $1, 'CC BY 2.0', true, 'pending') returning id`, [`openverse:rh-${randomUUID()}`]);
+  await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', 10)`, [nu.id, ref]);
+  const { base, close } = await serve();
+  try {
+    const res = await post(`${base}/review/verdict`, { ref, verdict: 'owned_fine' });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).hero, nu.id);
+    const { rows } = await query(`select image_id, role from image_links where subject_id = $1 order by role`, [ref]);
+    assert.deepEqual(rows.map((r) => [r.image_id, r.role]).sort(), [[nu.id, 'hero'], [old.id, 'gallery']].sort());
+    const list = (await (await fetch(`${base}/review?q=Rejected%20Hero`)).json()).places;
+    assert.equal(list.find((p) => p.venueRef === ref).pictures, 2, 'turned-down pictures counted, as shown');
+  } finally { await close(); }
+});

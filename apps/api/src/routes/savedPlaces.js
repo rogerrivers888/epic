@@ -21,7 +21,7 @@
 
 import express from 'express';
 import { requires, requireOwnerSignedIn } from '../access.js';
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { currentAccount } from '../context.js';
 import { currentHousehold } from './household.js';
 import { googleSource } from '../sources/google.js';
@@ -202,8 +202,8 @@ photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
     if (reviewed === 'no') where.push(`not ${REVIEWED}`);
     const { rows } = await query(
       `select r.venue_ref, r.name, r.category, r.postcode, pr.verdict, pr.reviewed_at,
-              (select count(*) from image_links l join image_assets i on i.id = l.image_id
-                where l.subject_type = 'place' and l.subject_id = r.venue_ref and i.moderation <> 'rejected')
+              -- Every picture the review shows, turned-down ones included.
+              (select count(*) from image_links l where l.subject_type = 'place' and l.subject_id = r.venue_ref)
               + (select count(*) from venue_site_images v where v.venue_ref = r.venue_ref) as pictures
          from place_records r left join photo_reviews pr on pr.venue_ref = r.venue_ref
         where ${where.join(' and ')}
@@ -265,43 +265,43 @@ photoReviewRouter.post('/verdict', requires('manage_library'), requireOwnerSigne
     if (!ref) throw bad('Which place? Pass its ref.');
     if (!VERDICTS.includes(verdict)) throw bad(`A verdict is one of ${VERDICTS.join(', ')}.`);
     const note = req.body?.note ? String(req.body.note).slice(0, 500) : null;
-    const { rows } = await query(
-      `insert into photo_reviews (venue_ref, verdict, note, reviewed_by)
-       values ($1, $2, $3, $4)
-       on conflict (venue_ref) do update set verdict = excluded.verdict, note = excluded.note,
-         reviewed_by = excluded.reviewed_by, reviewed_at = now()
-       returning venue_ref, verdict, note, reviewed_at`,
-      [ref, verdict, note, currentAccount()?.id ?? null]);
-    // The verdict settles the pictures that were waiting for it (Codex, 2 Oct
-    // 2026). Only the ones found for a saved place (Openverse): a household's
-    // own upload waits for its own look, and is not decided here. Fine or
-    // acceptable publishes them, and the first becomes the card picture where
-    // the place has none; not fit turns them down.
-    // A changed verdict re-settles what an earlier one decided, both ways
-    // (Codex, 2 Oct 2026): fine → not fit takes a published picture down (and
-    // off the card), not fit → fine brings a turned-down one back.
-    const accept = verdict !== 'owned_not_fit';
-    const { rows: settled } = await query(
-      `update image_assets i set moderation = $2, updated_at = now()
-         from image_links l
-        where l.image_id = i.id and l.subject_type = 'place' and l.subject_id = $1
-          and i.source = 'openverse'
-        returning i.id, l.position, l.role`, [ref, accept ? 'approved' : 'rejected']);
-    if (!accept) {
-      await query(
+    // All or nothing: the verdict and what it does to the pictures land
+    // together, or not at all (Codex, 2 Oct 2026).
+    const out = await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `insert into photo_reviews (venue_ref, verdict, note, reviewed_by)
+         values ($1, $2, $3, $4)
+         on conflict (venue_ref) do update set verdict = excluded.verdict, note = excluded.note,
+           reviewed_by = excluded.reviewed_by, reviewed_at = now()
+         returning venue_ref, verdict, note, reviewed_at`,
+        [ref, verdict, note, currentAccount()?.id ?? null]);
+      // The verdict settles the pictures found for a saved place (Openverse),
+      // both ways and whatever an earlier verdict decided: fine or acceptable
+      // publishes them, not fit turns them down and takes them off the card. A
+      // household's own upload waits for its own look and is not decided here.
+      const accept = verdict !== 'owned_not_fit';
+      const { rows: settled } = await client.query(
+        `update image_assets i set moderation = $2, updated_at = now()
+           from image_links l
+          where l.image_id = i.id and l.subject_type = 'place' and l.subject_id = $1
+            and i.source = 'openverse'
+          returning i.id, l.position, l.role`, [ref, accept ? 'approved' : 'rejected']);
+      // A turned-down picture never holds the card: whatever it is, and before
+      // anything is promoted into its place (one hero per place, by index).
+      await client.query(
         `update image_links l set role = 'gallery' from image_assets i
-          where i.id = l.image_id and l.subject_type = 'place' and l.subject_id = $1 and l.role = 'hero' and i.source = 'openverse'`, [ref]);
-    }
-    let hero = null;
-    if (accept && settled.length) {
-      const { rows: [has] } = await query(
-        `select 1 from image_links l join image_assets i on i.id = l.image_id
-          where l.subject_type = 'place' and l.subject_id = $1 and l.role = 'hero' and i.moderation <> 'rejected' limit 1`, [ref]);
-      if (!has) {
-        hero = settled.sort((a, b) => a.position - b.position)[0].id;
-        await query(`update image_links set role = 'hero' where image_id = $1 and subject_type = 'place' and subject_id = $2`, [hero, ref]);
+          where i.id = l.image_id and l.subject_type = 'place' and l.subject_id = $1 and l.role = 'hero' and i.moderation = 'rejected'`, [ref]);
+      let hero = null;
+      if (accept && settled.length) {
+        const { rows: [has] } = await client.query(
+          `select 1 from image_links where subject_type = 'place' and subject_id = $1 and role = 'hero' limit 1`, [ref]);
+        if (!has) {
+          hero = settled.sort((x, y) => x.position - y.position)[0].id;
+          await client.query(`update image_links set role = 'hero' where image_id = $1 and subject_type = 'place' and subject_id = $2`, [hero, ref]);
+        }
       }
-    }
-    res.json({ ...rows[0], settled: settled.length, hero });
+      return { ...rows[0], settled: settled.length, hero };
+    });
+    res.json(out);
   } catch (err) { next(err); }
 });
