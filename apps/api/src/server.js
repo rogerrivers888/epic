@@ -1124,7 +1124,7 @@ setInterval(() => { void ukCensusDaily(); }, 10 * 60_000).unref?.();
 // with no owned point matched on it at first sight (sources/nameCheck.js).
 // Database work only — it never calls a provider.
 const nameCheckDrain = () => import('./sources/nameCheck.js').then(({ drain }) => drain())
-  .then((r) => { if (r?.doubted || r?.firstSight) console.log(`epic-api: name-check — ${r.looked} looked, ${r.agreed} agreed, ${r.doubted} set aside (${r.rematched} re-matched), ${r.firstSight} matched at first sight`); })
+  .then((r) => { if (r?.doubted || r?.rematched || r?.firstSight || r?.failed) console.log(`epic-api: name-check — ${r.looked} looked, ${r.agreed} agreed, ${r.doubted} set aside (${r.rematched} re-matched), ${r.firstSight} matched at first sight, ${r.failed} failed`); })
   .catch((err) => console.error('name-check', err.message));
 setInterval(() => { void nameCheckDrain(); }, 60_000).unref?.();
 
