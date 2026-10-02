@@ -285,9 +285,15 @@ export function PriceStep(props: StepProps) {
 
 export function WhoStep(props: StepProps & { reload: () => Promise<void> }) {
   const { offer, update, reload, config } = props;
-  const [ranged, setRanged] = useState(offer.ageMin != null || offer.ageMax != null);
-  const [from, setFrom] = useState(offer.ageMin == null ? '' : String(offer.ageMin));
-  const [to, setTo] = useState(offer.ageMax == null ? '' : String(offer.ageMax));
+  // Who is it for: Adults (where every event starts — no children, so no children's checks),
+  // Anyone, or an age range (owner, 2 Oct 2026: "the default should be adults, so the checks
+  // don't kick in unless they select Anyone").
+  type Who = 'adults' | 'anyone' | 'range';
+  const whoOf = (): Who => (offer.ageMin == null && offer.ageMax == null ? 'anyone' : offer.ageMin === config.adultAge && offer.ageMax == null ? 'adults' : 'range');
+  const [who, setWho] = useState<Who>(whoOf);
+  const ranged = who === 'range';
+  const [from, setFrom] = useState(whoOf() === 'range' && offer.ageMin != null ? String(offer.ageMin) : '');
+  const [to, setTo] = useState(whoOf() === 'range' && offer.ageMax != null ? String(offer.ageMax) : '');
   const asks = asksParentsOnWho({ lane: offer.lane, ageMax: offer.ageMax }, config.adultAge);
   const setAges = (f: string, t: string) => {
     const a = f.trim() ? Math.min(120, Math.max(0, Number(f.replace(/\D/g, '')))) : null;
@@ -302,11 +308,17 @@ export function WhoStep(props: StepProps & { reload: () => Promise<void> }) {
 
       <Kicker style={{ marginTop: 4 }}>Who is it for?</Kicker>
       <View style={{ flexDirection: 'row', gap: 2 }}>
-        {([['Anyone', false], ['An age range', true]] as const).map(([t, r]) => (
-          <Press key={t} onPress={() => { setRanged(r); if (!r) { setFrom(''); setTo(''); update({ ageMin: null, ageMax: null, ...(offer.lane === 'course' ? {} : { parents: null }) }); } }}
-            accessibilityRole="radio" accessibilityState={{ selected: ranged === r }}
-            style={[{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: ranged === r ? LIME : INACTIVE }, pointer]}>
-            <Text style={tx(14, ranged === r ? '800' : '600')}>{t}</Text>
+        {([['Adults', 'adults'], ['Anyone', 'anyone'], ['An age range', 'range']] as const).map(([t, k]) => (
+          <Press key={k} onPress={() => {
+            setWho(k);
+            const clearParents = offer.lane === 'course' ? {} : { parents: null };
+            if (k === 'adults') { setFrom(''); setTo(''); update({ ageMin: config.adultAge, ageMax: null, ...clearParents }); }
+            if (k === 'anyone') { setFrom(''); setTo(''); update({ ageMin: null, ageMax: null, ...clearParents }); }
+            if (k === 'range') { setFrom(''); setTo(''); update({ ageMin: null, ageMax: null }); }
+          }}
+            accessibilityRole="radio" accessibilityState={{ selected: who === k }}
+            style={[{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: who === k ? LIME : INACTIVE }, pointer]}>
+            <Text style={tx(14, who === k ? '800' : '600')}>{t}</Text>
           </Press>
         ))}
       </View>

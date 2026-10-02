@@ -220,7 +220,7 @@ router.post('/host/lanes/offers', async (req, res, next) => {
     const lane = oneOf(LANES, req.body?.lane);
     if (!lane) throw refuse(400, 'lane_required', 'Pick one of the four: one-off, weekly, course or on request.');
     const host = await ensureHost(household, account);
-    let offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
+    let offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ageMin: 18, ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
     const patch = laneBody(req.body ?? {}, offer);
     // The photo picked on step 1 travels with the first save (Codex, 2 Oct 2026).
     if (req.body?.photoIds !== undefined) patch.photoIds = await ownMediaList(household.id, req.body.photoIds, 'photo', 8);
@@ -534,13 +534,15 @@ async function applyFound({ household, account, lane, offerId, step, patch, foun
   let offer = offerId ? await repo.offerOfHost(offerId, host.id) : null;
   if (offerId && (!offer || offer.lane !== lane)) throw refuse(404, 'offer_not_found', 'That is not one of your offers.');
   if (offer && offer.state !== 'draft') throw refuse(409, 'already_sent', 'This one is out already.');
-  if (!offer) offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
+  if (!offer) offer = await repo.insertOffer(host.id, SHAPE_OF[lane], { lane, state: 'draft', visibility: 'invite', money: 'free', priceMode: 'free', ageMin: 18, ...(lane === 'course' ? { joinMode: 'whole' } : {}) });
   const current = await lanePayload(offer, host, account);
   const keep = {};
   for (const [k, v] of Object.entries(patch)) {
     if (k === 'cohosts') continue;
     const now = k === 'line' ? current.line : current[k];
-    const empty = now == null || now === '' || (Array.isArray(now) && !now.length) || (typeof now === 'object' && !Array.isArray(now) && !Object.keys(now).length) || (k === 'priceMode' && now === 'free') || (k === 'venue' && !current.venueLabel && !current.venueArea && !current.onlineMode);
+    const empty = now == null || now === '' || (Array.isArray(now) && !now.length) || (typeof now === 'object' && !Array.isArray(now) && !Object.keys(now).length) || (k === 'priceMode' && now === 'free') || (k === 'venue' && !current.venueLabel && !current.venueArea && !current.onlineMode)
+      // Adults is where a draft starts, not an answer: a said or read age range replaces it.
+      || ((k === 'ageMin' || k === 'ageMax') && current.ageMin === 18 && current.ageMax == null && !offer.who_chosen);
     if (step || empty) keep[k] = v;
   }
   if (keep.line) keep.lineSuggested = false;
@@ -734,7 +736,10 @@ router.post('/host/lanes/offers/:id/sync', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** POST …/video {videoId?, madeBy, coverS, onProfile, photoIds, helloId} — the offer video and its choices. */
+/**
+ * POST …/video {videoId, coverS, onProfile} — the offer video, recorded or uploaded by the
+ * host. Epic does not make one for them (owner, 2 Oct 2026: "They need to make their own video").
+ */
 router.post('/host/lanes/offers/:id/video', async (req, res, next) => {
   try {
     const { household, host, account, offer } = await myLaneOffer(req.params.id);
@@ -742,27 +747,16 @@ router.post('/host/lanes/offers/:id/video', async (req, res, next) => {
     const cfg = hostingConfig();
     const patch = {};
     if (b.videoId !== undefined) patch.videoId = b.videoId ? (await ownMediaList(household.id, [b.videoId], 'video', 1))[0] : null;
-    if (b.helloId !== undefined) patch.helloVideoId = b.helloId ? (await ownMediaList(household.id, [b.helloId], 'video', 1))[0] : null;
-    if (b.photoIds !== undefined) {
-      patch.videoPhotoIds = await ownMediaList(household.id, b.photoIds, 'photo', cfg.epicVideoPhotos.max);
-    }
     // The length the checklist shows is the take's own, and it is held to the configured
-    // range here, not only on the device (Codex, 2 Oct 2026). Two seconds' grace either way
-    // for a recorder that stops a beat late.
-    const lengthOk = async (id, lo, hi) => { const m = await repo.mediaMeta(id); const s = Number(m?.duration_s); return Number.isFinite(s) && s >= lo - 2 && s <= hi + 2; };
-    if (patch.videoId && !(await lengthOk(patch.videoId, cfg.videoSeconds.min, cfg.videoSeconds.max))) throw refuse(400, 'video_length', `The video should be ${cfg.videoSeconds.min} to ${cfg.videoSeconds.max} seconds.`);
-    if (patch.helloVideoId && !(await lengthOk(patch.helloVideoId, 3, cfg.videoSeconds.hello))) throw refuse(400, 'hello_length', `Ten seconds of you is plenty — up to ${cfg.videoSeconds.hello}.`);
-    if (b.madeBy !== undefined) patch.videoMadeBy = oneOf(['self', 'epic'], b.madeBy);
+    // range here, not only on the device. Two seconds' grace either way for a recorder that
+    // stops a beat late.
+    if (patch.videoId) {
+      const m = await repo.mediaMeta(patch.videoId); const secs = Number(m?.duration_s);
+      if (!(Number.isFinite(secs) && secs >= cfg.videoSeconds.min - 2 && secs <= cfg.videoSeconds.max + 2)) throw refuse(400, 'video_length', `The video should be ${cfg.videoSeconds.min} to ${cfg.videoSeconds.max} seconds.`);
+    }
+    if (b.videoId !== undefined) { patch.videoMadeBy = patch.videoId ? 'self' : null; patch.videoPhotoIds = []; patch.helloVideoId = null; }
     if (b.coverS !== undefined) patch.videoCoverS = num(b.coverS);
     if (b.onProfile !== undefined) patch.videoOnProfile = Boolean(b.onProfile);
-    if (patch.videoMadeBy === 'epic' && (patch.videoPhotoIds ?? offer.video_photo_ids ?? []).length < cfg.epicVideoPhotos.min) {
-      throw refuse(400, 'more_photos', `Pick ${cfg.epicVideoPhotos.min} to ${cfg.epicVideoPhotos.max} photos.`);
-    }
-    if (patch.videoMadeBy === 'self') { patch.videoPhotoIds = []; patch.helloVideoId = null; }
-    // Let Epic make it: the film is made later, but the host's own ten seconds are a real
-    // video now — it is what review watches and what a guest sees until the film lands.
-    if ((patch.videoMadeBy ?? offer.video_made_by) === 'epic' && (patch.helloVideoId ?? offer.hello_video_id)) patch.videoId = patch.helloVideoId ?? offer.hello_video_id;
-    if (patch.videoMadeBy === 'epic' && patch.helloVideoId === undefined && !offer.hello_video_id && b.videoId === undefined) patch.videoId = null;
     const updated = await repo.updateOffer(offer.id, patch);
     if (b.onProfile && updated.video_id && !host.intro_video_id) await repo.updateHost(host.id, { introVideoId: updated.video_id });
     res.json({ offer: await lanePayload(updated, host, account) });

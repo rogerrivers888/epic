@@ -107,12 +107,16 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
 
   if (!home) return <View style={styles.centre}><Text style={t.sub}>{error ?? 'Loading…'}</Text></View>;
   // Not hosting yet: Host home 4e (hosting v7) — the four ways in.
-  if (!home.host || !home.offers.length) return <HostLanes />;
+  // Host home is 4e for everybody (owner, 2 Oct 2026: hosts with offers do not land on the
+  // dashboard). The dashboard lives at /host/offers until host management has its own design,
+  // and 4e links to it only when there is something there.
+  if (route.page !== 'manage') return <HostLanes yours={home.host ? home.offers.length : 0} />;
+  if (!home.host || !home.offers.length) return <HostLanes yours={0} />;
 
   // The Host tab's own sub-screens, all query state on /host. Opening one is a
   // move (a push, below); Back walks the history, or one layer up to /host for
   // somebody who arrived on a shared link.
-  const goBack = () => back(paths.host());
+  const goBack = () => back(paths.hostManage());
   const open = (patch: Record<string, string | null>) => setQuery(patch, { replace: false });
   const activityId = query.get('activity');
   const activity = activityId ? home.offers.find((o) => o.id === activityId) ?? null : null;

@@ -214,11 +214,9 @@ test('public checklist: verified and the video block review; Checked blocks goin
   assert.equal(items.find((i) => i.key === 'checked').blocks, 'live');
   // Parents stay: no Checked.
   assert.ok(!checklist({ ...offer, parents: 'stay' }, { host: host(), account }).some((i) => i.key === 'checked'));
-  // Let Epic make it, public: the photos and ten seconds of the host.
-  const epicMade = { ...offer, parents: 'stay', video_made_by: 'epic', video_photo_ids: ['a', 'b', 'c'] };
-  assert.equal(checklist(epicMade, { host: host(), account }).find((i) => i.key === 'video').done, false, 'public needs a real video — photos alone are a request, not a video');
-  assert.equal(checklist({ ...epicMade, hello_video_id: 'h', video_id: 'h' }, { host: host(), account }).find((i) => i.key === 'video').done, true, 'the hello take stands as the video');
-  assert.equal(checklist({ ...epicMade, visibility: 'invite' }, { host: host(), account }).find((i) => i.key === 'video').done, true, 'private may ask Epic for one');
+  // The host makes their own video: photos alone are never a video.
+  assert.equal(checklist({ ...offer, parents: 'stay', video_made_by: 'epic', video_photo_ids: ['a', 'b', 'c'] }, { host: host(), account }).find((i) => i.key === 'video').done, false);
+  assert.equal(checklist({ ...offer, parents: 'stay', video_id: 'v' }, { host: host(), account }).find((i) => i.key === 'video').done, true);
 });
 
 test('the checklist button says what pressing it does', () => {
@@ -305,4 +303,9 @@ test('a session plan keeps each topic on its own session, and a gone date blocks
   const { laneBlockers } = await import('../src/domain/lanes.js');
   const gone = laneBlockers({ lane: 'oneoff', starts_on: '2026-01-10', starts_at: '10:00', ends_at: '12:00', visibility: 'invite', who_chosen: true }, host());
   assert.match(gone[0], /date has gone/);
+});
+
+test('an adults’ event has no children to drop off, so Checked never kicks in', () => {
+  assert.equal(needsChecked({ lane: 'course', visibility: 'public', parents: 'drop_off', age_min: 18 }), false, 'Adults is the default');
+  assert.equal(needsChecked({ lane: 'course', visibility: 'public', parents: 'drop_off', age_min: null }), true, 'Anyone, dropped off, public');
 });

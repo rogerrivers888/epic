@@ -146,7 +146,9 @@ export type Tab = 'inspire' | 'plan' | 'places' | 'trips' | 'host' | 'settings' 
 export type HostPage = 'home' | 'shape' | 'examples' | 'example' | 'who' | 'profile' | 'start' | 'new' | 'offer' | 'edit' | 'video' | 'questions'
   // Four ways to host (hosting v7, 2 Oct 2026): the four lanes (4e), one lane's screen, step 1 before a
   // draft exists, a draft's set-up (?step=), its publish checklist (?sheet=) and the ending.
-  | 'lanes' | 'lane' | 'compose' | 'setup' | 'publish' | 'done';
+  | 'lanes' | 'lane' | 'compose' | 'setup' | 'publish' | 'done'
+  // A host's offers and drafts (the existing dashboard), until host management has its own design.
+  | 'manage';
 
 /** The four lanes, by how often the thing runs (hosting v7). */
 export const HOST_LANES = ['oneoff', 'weekly', 'course', 'onrequest'] as const;
@@ -608,6 +610,7 @@ export function parseRoute(path: string): Route {
         if (!lane || (c && c !== 'what') || segments[4]) return { name: 'unknown', path };
         return { name: 'host', page: c ? 'compose' : 'lane', offerId: null, param: lane };
       }
+      if (a === 'offers' && !b) return { name: 'host', page: 'manage', offerId: null };
       if (a === 'offers' && b && b !== 'new' && (c === 'setup' || c === 'publish' || c === 'done') && !segments[4]) return { name: 'host', page: c, offerId: b };
       if (a === 'offers' && b === 'new') return c ? { name: 'unknown', path } : { name: 'host', page: 'new', offerId: null };
       if (a === 'offers' && b && !c) return { name: 'host', page: 'offer', offerId: b };
@@ -793,6 +796,7 @@ export function hrefOf(route: Route): string {
                   : route.page === 'start' ? '/host/start'
                     : route.page === 'video' ? '/host/video'
                       : route.page === 'lanes' ? '/host/new'
+                      : route.page === 'manage' ? '/host/offers'
                       : route.page === 'lane' ? buildHref(['host', 'new', route.param])
                       : route.page === 'compose' ? buildHref(['host', 'new', route.param, 'what'])
                       : route.page === 'setup' || route.page === 'publish' || route.page === 'done' ? buildHref(['host', 'offers', route.offerId, route.page])
@@ -919,6 +923,8 @@ export const paths = {
   openMatchChatBell: (id: string) => buildHref(['open', 'matches', id, 'chat', 'bell']),
   /** Four ways to host: the four lanes, one lane, step 1 of a new one, a draft's set-up, its checklist, its ending. */
   hostLanes: () => '/host/new',
+  /** A host's offers and drafts. */
+  hostManage: () => '/host/offers',
   hostLane: (lane: HostLane) => buildHref(['host', 'new', lane]),
   hostCompose: (lane: HostLane, mode?: 'say' | 'upload' | null) => buildHref(['host', 'new', lane, 'what'], { mode: mode ?? null }),
   hostSetup: (id: string, step?: string | null, mode?: string | null) => buildHref(['host', 'offers', id, 'setup'], { step: step && step !== 'what' ? step : null, mode: mode ?? null }),
@@ -1138,7 +1144,7 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // dashboard and a booking are one thing each. The tab itself keeps the bar.
   // The learn layer keeps the bar (it is still the tab); the set-up, the
   // profile and the recorder take the phone whole.
-  if (route.name === 'host') return !['home', 'shape', 'examples', 'example', 'who', 'lanes'].includes(route.page);
+  if (route.name === 'host') return !['home', 'shape', 'examples', 'example', 'who', 'lanes', 'manage'].includes(route.page);
   if (route.name === 'open') return true;
   if (route.name === 'booking') return true;
   // The booking sheet is a form under a keyboard: it takes the phone whole. So is asking the host something.
@@ -1205,7 +1211,7 @@ export function isTabHome(route: Route): boolean {
   if (route.name === 'trips') return !route.tripId && !route.creating && !route.searching;
   // A person is a record, not the list: Settings is left pointing at itself.
   if (route.name === 'household') return false;
-  if (route.name === 'host') return ['home', 'shape', 'examples', 'example', 'who', 'lanes'].includes(route.page);
+  if (route.name === 'host') return ['home', 'shape', 'examples', 'example', 'who', 'lanes', 'manage'].includes(route.page);
   if (route.name === 'booking' || route.name === 'people' || route.name === 'collections') return false;
   return true;
 }

@@ -247,6 +247,9 @@ export function asksParentsOnWho(offer, cfg = DEFAULT_CONFIG) {
 /** Children are dropped off: the Course's step 7, or the sub-question on Who can come. */
 export function dropsOff(offer, cfg = DEFAULT_CONFIG) {
   if ((offer.parents ?? null) !== 'drop_off') return false;
+  // An adults' event has no children to drop off, whatever an old answer says (owner, 2 Oct 2026:
+  // "the default should be adults, so the checks don't kick in unless they select Anyone").
+  if (adultOnly(offer, cfg)) return false;
   return offer.lane === 'course' || asksParentsOnWho(offer, cfg);
 }
 
@@ -487,10 +490,8 @@ export function checklist(offer, { host, account } = {}, cfg = DEFAULT_CONFIG) {
   push('phone', 'send', has(account?.mobile));
   push('profile', 'send', profileDone);
   if (pub) push('verified', 'send', host?.identity_state === 'verified');
-  // Public needs a video a person can watch in review and a guest on the page: a take of the
-  // host's own (Let Epic make it uses the ten-second hello as it). Private may ask Epic for one.
-  const epicAsked = offer.video_made_by === 'epic' && (offer.video_photo_ids ?? []).length >= cfg.epicVideoPhotos.min;
-  push('video', pub ? 'send' : null, pub ? Boolean(offer.video_id) : Boolean(offer.video_id || epicAsked), { optional: !pub });
+  // The host makes their own video (owner, 2 Oct 2026: "They need to make their own video").
+  push('video', pub ? 'send' : null, Boolean(offer.video_id), { optional: !pub });
   if (needsChecked(offer, cfg)) push('checked', 'live', host?.checked_state === 'passed', { submitted: host?.checked_state === 'submitted' });
   if (epic) push('payouts', 'send', host?.payouts_state === 'ready', { pending: host?.payouts_state === 'pending' });
   if (epic) push('tax', 'payout', has(host?.tax_reference));

@@ -153,7 +153,6 @@ export function Publish({ offerId }: { offerId: string }) {
     if (it.key === 'video') {
       const t = pub ? it.t : 'Offer video · optional';
       if (!it.done) return { t, s: pub ? it.s : 'Guests see it on the invite' };
-      if (offer.video.madeBy === 'epic') return { t, s: pub ? `Made by Epic · with ${mmss(offer.video.helloSeconds ?? cfg.videoSeconds.hello)} of you` : 'Made by Epic' };
       return { t, s: offer.video.seconds ? `Recorded · ${mmss(offer.video.seconds)}` : 'Recorded' };
     }
     if (it.key === 'email' && !it.done) return { t: it.t, s: 'Add your email · in Settings' };

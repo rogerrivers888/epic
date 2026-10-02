@@ -842,7 +842,7 @@ test('the Host tab, and every page inside it', () => {
   assert.equal(tabOf(parseRoute('/invited/tok')), null);
   assert.equal(parseRoute('/invited').name, 'unknown');
   assert.equal(paths.hostVideo('o1'), '/host/video?offer=o1');
-  assert.equal(parseRoute('/host/offers').name, 'unknown');
+  assert.deepEqual(roundTrip('/host/offers'), { name: 'host', page: 'manage', offerId: null });
   assert.equal(parseRoute('/host/offers/o1/nonsense').name, 'unknown');
   for (const href of ['/host', '/host/start', '/host/offers/o1']) assert.equal(tabOf(parseRoute(href)), 'host');
   // The tab keeps the bar; the forms inside it take the phone whole, and every page draws its own head.

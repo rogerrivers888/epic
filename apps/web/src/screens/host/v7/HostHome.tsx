@@ -32,7 +32,7 @@ const pre = (web ? { whiteSpace: 'pre' } : {}) as TextStyle;
 const nowrap = (web ? { whiteSpace: 'nowrap' } : {}) as TextStyle;
 const CARD_KEY: Record<HostLane, 'one-off' | 'weekly' | 'course' | 'on-request'> = { oneoff: 'one-off', weekly: 'weekly', course: 'course', onrequest: 'on-request' };
 
-export function HostLanes() {
+export function HostLanes({ yours = 0 }: { yours?: number }) {
   const { navigate } = useRouter();
   const { width } = useViewport();
   const wide = width >= 900;
@@ -46,6 +46,12 @@ export function HostLanes() {
             <Text key={n} style={i != null && i === hover ? { backgroundColor: INK, color: LIME } : null}>{t}</Text>
           ))}
         </Text>
+        {yours ? (
+          <Press onPress={() => navigate(paths.hostManage())} accessibilityRole="button" style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 2 }, pointer]}>
+            <Text style={tx(13.5, '700')}>Your offers and drafts · {yours}</Text>
+            <Icon name="more" size={16} color={INK} strokeWidth={2.2} />
+          </Press>
+        ) : null}
       </View>
       <View style={styles.grid}>
         {[0, 2].map((row) => (
@@ -81,6 +87,10 @@ export function LaneScreen({ lane }: { lane: HostLane }) {
   const look = LANES[lane];
   const page = HOST_PAGE['en-gb'];
   const card = page.kinds.find((k) => k.key === CARD_KEY[lane]);
+  // Inside the app the On request strip speaks of the rated share (hosting v7 RULINGS: earned by
+  // rating, not by event count). The public host page keeps its own words (owner, 2 Oct 2026).
+  // The strip counts 22→23; shown here as 9→10 rated events.
+  const strip = { ...page.strip, onRequest: { ...page.strip.onRequest, progress: (n: number) => `${n - 13} of 10 rated events at 4.8+`, result: 'Epic’s share 15% → 10%' } };
   return (
     <View style={[styles.page, wide && styles.wide]}>
       <View style={{ backgroundColor: look.bg, paddingTop: 10, paddingHorizontal: 20, paddingBottom: 18, gap: 12 }}>
@@ -95,7 +105,7 @@ export function LaneScreen({ lane }: { lane: HostLane }) {
         <Text style={tx(15, '400', look.sub, { lineHeight: 21.75 })}>{look.line}</Text>
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: 18, paddingHorizontal: 20, gap: 16 }}>
-        {card ? <View style={{ height: 430 }}><KindCard k={card} strip={page.strip} delay={0} /></View> : null}
+        {card ? <View style={{ height: 430 }}><KindCard k={card} strip={strip} delay={0} /></View> : null}
         <View>
           <Text style={[tx(12, '700', INK, { letterSpacing: 0.72, textTransform: 'uppercase', paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: HAIRLINE }), { fontFamily: fonts.heading }]}>Hosts are running</Text>
           {look.eg.map((e) => <Text key={e} style={tx(15, '600', INK, { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: HAIRLINE })}>{e}</Text>)}

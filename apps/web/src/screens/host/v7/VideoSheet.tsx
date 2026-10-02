@@ -2,7 +2,7 @@
  * The offer video (hosting v7, README › "Offer video"; prototype lines 355–392
  * and 637–651): the intro with the prompts to cover, then one of three ways —
  * record it now (the prompts advance as you talk and the take stops itself
- * after the last one), upload one, or let Epic make it from 3–6 photos (plus,
+ * after the last one), or upload one — hosts make their own video (owner, 2 Oct 2026) (plus,
  * for a public event, a ten-second hello). A take lands on the same
  * "recorded" screen: playback, Retake, a cover picture, "Also show on my host
  * profile", then Use this video. The length the checklist shows is the take's.
@@ -110,7 +110,7 @@ const PUBLIC_PROMPTS = ['Who you are', 'What you’ll do with people', 'Why you,
 const PRIVATE_PROMPTS = ['Hello, and what the day is', 'What to expect', 'Anything to bring'];
 const HELLO_PROMPTS = ['Say hello and who you are'];
 
-type Step = 'intro' | 'record' | 'epic';
+type Step = 'intro' | 'record';
 type Take = { blob: Blob; seconds: number; url: string; from: 'camera' | 'upload' };
 
 // ---------------------------------------------------------------------------
@@ -243,24 +243,6 @@ export function VideoSheet({ offer, home, onClose, onChanged }: {
     setTake({ blob: file, seconds: Math.max(1, Math.round(d ?? 0)), url: URL.createObjectURL(file), from: 'upload' });
   };
 
-  // --- let Epic make it -------------------------------------------------------
-  const [pics, setPics] = useState<{ id: string; url: string }[]>(offer.photos ?? []);
-  const [picked, setPicked] = useState<string[]>(() => (offer.video.photoIds ?? []).filter((id) => (offer.photos ?? []).some((p) => p.id === id)));
-  const [adding, setAdding] = useState(false);
-  const flip = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length < cfg.epicVideoPhotos.max ? [...p, id] : p));
-  const addPhotos = async () => {
-    const files = await pickFiles('image/*', true);
-    if (!files.length) return;
-    setAdding(true);
-    try {
-      for (const f of files) {
-        const m = await api.uploadHostMedia(await shrinkPhoto(f), 'photo', null, 'listing');
-        setPics((p) => [...p, { id: m.id, url: m.url }]);
-        setPicked((p) => (p.length < cfg.epicVideoPhotos.max ? [...p, m.id] : p));
-      }
-    } catch (e: any) { showToast(e.message); } finally { setAdding(false); }
-  };
-
   // --- finishing --------------------------------------------------------------
   const finish = async (body: Parameters<typeof api.laneVideo>[1]) => {
     const r = await api.laneVideo(offer.id, body);
@@ -272,24 +254,17 @@ export function VideoSheet({ offer, home, onClose, onChanged }: {
     setBusy(true);
     try {
       const m = await api.uploadHostMedia(take.blob, 'video', take.seconds, 'listing');
-      if (hello) await finish({ madeBy: 'epic', photoIds: picked, helloId: m.id, onProfile });
-      else await finish({ videoId: m.id, madeBy: 'self', coverS: covers ? Math.round(COVER_AT[cover] * take.seconds * 10) / 10 : null, onProfile });
+      await finish({ videoId: m.id, coverS: covers ? Math.round(COVER_AT[cover] * take.seconds * 10) / 10 : null, onProfile });
     } catch (e: any) { showToast(e.message); } finally { setBusy(false); }
   };
-  const epicNext = async () => {
-    if (picked.length < cfg.epicVideoPhotos.min) return;
-    if (pub) { setHello(true); setTake(null); setCamera('off'); setStep('record'); return; }
-    setBusy(true);
-    try { await finish({ madeBy: 'epic', photoIds: picked }); } catch (e: any) { showToast(e.message); } finally { setBusy(false); }
-  };
+
 
   const close = () => { stop(); stopStream(); onClose(); };
 
   // --- drawing ----------------------------------------------------------------
   const recorded = step === 'record' && !!take;
   const footer = step === 'record' && take ? <ActionBar label="Use this video" onPress={() => { void useThis(); }} busy={busy} />
-    : step === 'epic' ? <ActionBar label={pub ? 'Next · 10 seconds of you' : 'Make my video'} onPress={() => { void epicNext(); }} disabled={picked.length < cfg.epicVideoPhotos.min || adding} busy={busy} />
-      : null;
+    : null;
 
   return (
     <Overlay title={pub ? 'Offer video' : 'Add a video'} onClose={close} footer={footer}>
@@ -309,8 +284,6 @@ export function VideoSheet({ offer, home, onClose, onChanged }: {
             mark={<View style={{ width: 36, height: 36, borderRadius: 999, backgroundColor: RECORD_RED }} />} />
           <Way onPress={() => { void upload(); }} title="Upload one" sub="From your camera roll"
             mark={<View style={[s.wayTile, { backgroundColor: CREAM }]}><Icon name="upload" size={18} color={INK} strokeWidth={2.2} /></View>} />
-          <Way onPress={() => setStep('epic')} title="Let Epic make it" sub={pub ? 'From your photos, plus 10 seconds of you' : 'From your photos and details'}
-            mark={<View style={[s.wayTile, { backgroundColor: LIME }]}><Icon name="sparkle" size={18} color={INK} strokeWidth={2.2} /></View>} />
         </>
       ) : null}
 
@@ -323,7 +296,7 @@ export function VideoSheet({ offer, home, onClose, onChanged }: {
               autoPlay: true, muted: true, playsInline: true,
               style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', opacity: camera === 'ready' ? 1 : 0 },
             }) : null}
-            {take ? <Playback take={take} hello={hello} pics={picked.length} onRetake={retake} /> : (
+            {take ? <Playback take={take} hello={hello} pics={0} onRetake={retake} /> : (
               <>
                 {/* one segment per prompt across the top */}
                 <View style={s.segs}>
@@ -400,35 +373,6 @@ export function VideoSheet({ offer, home, onClose, onChanged }: {
         </>
       ) : null}
 
-      {step === 'epic' ? (
-        <>
-          <Text style={tx(13, '400', INK_MUTED, { lineHeight: 18 })}>Pick {cfg.epicVideoPhotos.min} to {cfg.epicVideoPhotos.max} photos. Epic adds your title, the when and where, and music.</Text>
-          <View style={s.grid}>
-            {pics.map((p) => {
-              const n = picked.indexOf(p.id);
-              return (
-                <View key={p.id} style={s.cell}>
-                  <Press onPress={() => flip(p.id)} accessibilityRole="checkbox" accessibilityState={{ checked: n >= 0 }} accessibilityLabel={n >= 0 ? `Photo ${n + 1}` : 'Photo'}
-                    style={[{ flex: 1, backgroundColor: HAIRLINE }, pointer]}>
-                    <Image source={{ uri: p.url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                    <View style={[s.picTick, { backgroundColor: n >= 0 ? LIME : CREAM, borderColor: n >= 0 ? LIME : TICK_EDGE }]}>
-                      {n >= 0 ? <Text style={tx(12, '800')}>{n + 1}</Text> : null}
-                    </View>
-                  </Press>
-                </View>
-              );
-            })}
-            <View style={s.cell}>
-              <Press onPress={() => { void addPhotos(); }} disabled={adding} accessibilityRole="button" accessibilityLabel="Add photos"
-                style={[{ flex: 1, backgroundColor: INACTIVE, alignItems: 'center', justifyContent: 'center', gap: 6 }, pointer]}>
-                <Icon name="picture" size={22} color={INK} strokeWidth={2} />
-                <Text style={tx(12.5, '700')}>{adding ? 'Adding…' : 'Add photos'}</Text>
-              </Press>
-            </View>
-          </View>
-          {pub ? <Note>Public events also need 10 seconds of you on camera · Epic opens with it</Note> : null}
-        </>
-      ) : null}
     </Overlay>
   );
 }
