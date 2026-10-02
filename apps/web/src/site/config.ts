@@ -9,6 +9,14 @@ import type { HomeDesign } from '../routes';
  */
 export const HOMEPAGE: HomeDesign = 'sorted';
 
+/**
+ * The website is published on its own, ahead of the app (owner, 2 Oct 2026:
+ * "publish it as soon as you're ready"): drawn for everybody whatever the launch
+ * gate says. The server reads the same switch from seo.json › public, and
+ * test/site.test.ts keeps the two in step. false puts it back behind a sign-in.
+ */
+export const SITE_PUBLIC = true;
+
 /** The footer's small print (owner, 1 Oct 2026). */
 export const COMPANY = {
   name: 'MAKE IT EPIC LIMITED',

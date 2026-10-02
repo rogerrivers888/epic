@@ -34,15 +34,24 @@ async function serve(env: Record<string, string>, fn: (base: string) => Promise<
 }
 const page = (base: string, path: string) => fetch(`${base}${path}`, { redirect: 'manual', headers: { accept: 'text/html' } });
 
-test('gate up: pages come with no password dialog, noindex, and say the gate is on; no sitemap; / is the app', async () => {
+test('published, with the launch gate still up: the site is public and indexable, the app is not', async () => {
+  // seo.json › public is true (owner, 2 Oct 2026: "publish it as soon as you're ready").
   await serve({ SITE_GATE: 'on' }, async (base) => {
     const host = await page(base, '/en-gb/host');
     assert.equal(host.status, 200);
     assert.equal(host.headers.get('www-authenticate'), null, 'never a browser password dialog');
-    assert.equal(host.headers.get('x-robots-tag'), 'noindex');
-    assert.match(await host.text(), /<meta name="epic-gate" content="on" \/>/);
-    assert.equal((await page(base, '/sitemap.xml')).status, 404);
-    assert.equal((await page(base, '/')).status, 200, 'no redirect to the site while the gate is up');
+    assert.equal(host.headers.get('x-robots-tag'), null, 'an open page may be indexed');
+    assert.match(await host.text(), /<meta name="epic-gate" content="off" \/>/);
+    assert.equal((await page(base, '/en-gb/go/crew')).headers.get('x-robots-tag'), 'noindex', 'a campaign page never is');
+    const sitemap = await page(base, '/sitemap.xml');
+    assert.equal(sitemap.status, 200);
+    assert.equal(sitemap.headers.get('x-robots-tag'), null);
+    const root = await page(base, '/');
+    assert.equal(root.status, 302);
+    assert.equal(root.headers.get('location'), '/en-gb/');
+    // The app itself stays behind the gate: still noindex.
+    assert.equal((await page(base, '/inspire')).headers.get('x-robots-tag'), 'noindex');
+    assert.equal((await page(base, '/login')).headers.get('x-robots-tag'), 'noindex');
   });
 });
 

@@ -1,28 +1,94 @@
 {
   "//": "What the web server writes into the HTML of every public page (server.mjs) — title, description, canonical, hreflang — so nothing SEO-relevant waits on JavaScript (Technical Foundations › SEO). test/site.test.ts holds it in step with routes.ts. Titles ≤ 60 characters, brand first (J7); descriptions 140–155.",
-  "locales": ["en-gb", "en-us"],
-  "liveLocales": ["en-gb"],
-  "pages": ["host", "privacy", "terms", "cookies", "accessibility", "contact"],
-  "designs": ["postcards", "sorted", "story", "phone", "poster", "crew"],
-  "htmlLang": { "en-gb": "en-GB", "en-us": "en-US" },
+  "public": true,
+  "//public": "Whether the website is open to everybody, whatever the launch gate (SITE_GATE) says about the app (owner, 2 Oct 2026: \"publish it as soon as you're ready\"). The gate still guards the app, /admin, /login and the API; this opens only /{locale}/… and the sitemap, and lets them be indexed. false puts the site back behind a sign-in.",
+  "locales": [
+    "en-gb",
+    "en-us"
+  ],
+  "liveLocales": [
+    "en-gb"
+  ],
+  "pages": [
+    "host",
+    "privacy",
+    "terms",
+    "cookies",
+    "accessibility",
+    "contact"
+  ],
+  "designs": [
+    "postcards",
+    "sorted",
+    "story",
+    "phone",
+    "poster",
+    "crew"
+  ],
+  "htmlLang": {
+    "en-gb": "en-GB",
+    "en-us": "en-US"
+  },
   "copy": {
     "en-gb": {
-      "home": { "title": "Epic – Days out and trips away, planned around your crew", "description": "Epic plans days out and trips away around everyone who's coming, from toddlers to grandparents. Coming soon to iPhone and Android. Register your interest." },
-      "host": { "title": "Epic Hosting – Run events, classes, tours and homeschool", "description": "Run one-off events, activities, weekly classes or a term of homeschool on Epic: invite only or open to all, free or paid. Register to host before launch." },
-      "privacy": { "title": "Epic – Privacy notice", "description": "How Epic handles your details when you register your interest in the app: what we keep, what we use it for, and how to have it deleted at any time." },
-      "terms": { "title": "Epic – Terms", "description": "The terms for using Epic, the app that plans days out and trips away around your crew. Epic is not open yet; the full terms are published before launch." },
-      "cookies": { "title": "Epic – Cookies", "description": "The cookies epic.day uses: only essential ones today. Analytics or advertising cookies would only ever be set after you choose Accept all in our banner." },
-      "accessibility": { "title": "Epic – Accessibility", "description": "Epic is built to meet WCAG 2.2 AA so everyone can plan days out and trips away. Tell us if anything on epic.day stops you, and we will put it right." },
-      "contact": { "title": "Epic – Contact", "description": "Get in touch with Epic, the app that plans days out and trips away around your crew: email hello@epic.day or write to us at 124 City Road, London." }
+      "home": {
+        "title": "Epic – Days out and trips away, planned around your crew",
+        "description": "Epic plans days out and trips away around everyone who's coming, from toddlers to grandparents. Coming soon to iPhone and Android. Register your interest."
+      },
+      "host": {
+        "title": "Epic Hosting – Run events, classes, tours and homeschool",
+        "description": "Run one-off events, activities, weekly classes or a term of homeschool on Epic: invite only or open to all, free or paid. Register to host before launch."
+      },
+      "privacy": {
+        "title": "Epic – Privacy notice",
+        "description": "How Epic handles your details when you register your interest in the app: what we keep, what we use it for, and how to have it deleted at any time."
+      },
+      "terms": {
+        "title": "Epic – Terms",
+        "description": "The terms for using Epic, the app that plans days out and trips away around your crew. Epic is not open yet; the full terms are published before launch."
+      },
+      "cookies": {
+        "title": "Epic – Cookies",
+        "description": "The cookies epic.day uses: only essential ones today. Analytics or advertising cookies would only ever be set after you choose Accept all in our banner."
+      },
+      "accessibility": {
+        "title": "Epic – Accessibility",
+        "description": "Epic is built to meet WCAG 2.2 AA so everyone can plan days out and trips away. Tell us if anything on epic.day stops you, and we will put it right."
+      },
+      "contact": {
+        "title": "Epic – Contact",
+        "description": "Get in touch with Epic, the app that plans days out and trips away around your crew: email hello@epic.day or write to us at 124 City Road, London."
+      }
     },
     "en-us": {
-      "home": { "title": "Epic – Days out and trips away, planned around your crew", "description": "Epic plans days out and trips away around everyone who's coming, from toddlers to grandparents. Coming soon to iPhone and Android. Register your interest." },
-      "host": { "title": "Epic Hosting – Run events, classes, tours and homeschool", "description": "Run one-off events, activities, weekly classes or a semester of homeschool on Epic: invite only or open to all, free or paid. Sign up to host before launch" },
-      "privacy": { "title": "Epic – Privacy notice", "description": "How Epic handles your details when you register your interest in the app: what we keep, what we use it for, and how to have it deleted at any time." },
-      "terms": { "title": "Epic – Terms", "description": "The terms for using Epic, the app that plans days out and trips away around your crew. Epic is not open yet; the full terms are published before launch." },
-      "cookies": { "title": "Epic – Cookies", "description": "The cookies epic.day uses: only essential ones today. Analytics or advertising cookies would only ever be set after you choose Accept all in our banner." },
-      "accessibility": { "title": "Epic – Accessibility", "description": "Epic is built to meet WCAG 2.2 AA so everyone can plan days out and trips away. Tell us if anything on epic.day stops you, and we will put it right." },
-      "contact": { "title": "Epic – Contact", "description": "Get in touch with Epic, the app that plans days out and trips away around your crew: email hello@epic.day or write to us at 124 City Road, London." }
+      "home": {
+        "title": "Epic – Days out and trips away, planned around your crew",
+        "description": "Epic plans days out and trips away around everyone who's coming, from toddlers to grandparents. Coming soon to iPhone and Android. Register your interest."
+      },
+      "host": {
+        "title": "Epic Hosting – Run events, classes, tours and homeschool",
+        "description": "Run one-off events, activities, weekly classes or a semester of homeschool on Epic: invite only or open to all, free or paid. Sign up to host before launch"
+      },
+      "privacy": {
+        "title": "Epic – Privacy notice",
+        "description": "How Epic handles your details when you register your interest in the app: what we keep, what we use it for, and how to have it deleted at any time."
+      },
+      "terms": {
+        "title": "Epic – Terms",
+        "description": "The terms for using Epic, the app that plans days out and trips away around your crew. Epic is not open yet; the full terms are published before launch."
+      },
+      "cookies": {
+        "title": "Epic – Cookies",
+        "description": "The cookies epic.day uses: only essential ones today. Analytics or advertising cookies would only ever be set after you choose Accept all in our banner."
+      },
+      "accessibility": {
+        "title": "Epic – Accessibility",
+        "description": "Epic is built to meet WCAG 2.2 AA so everyone can plan days out and trips away. Tell us if anything on epic.day stops you, and we will put it right."
+      },
+      "contact": {
+        "title": "Epic – Contact",
+        "description": "Get in touch with Epic, the app that plans days out and trips away around your crew: email hello@epic.day or write to us at 124 City Road, London."
+      }
     }
   }
 }

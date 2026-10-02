@@ -119,6 +119,8 @@ const PRIVATE_FIRST = new Set(['login', 'account', 'admin', 'in']);
 // Which locale and page an address is, and where epic.day/ sends a visitor, live
 // in site.mjs beside its tests; the head written into the shell is here.
 const SITE = await loadSite();
+/** The website is closed while the launch gate is up, unless it has been published on its own (seo.json › public). */
+const siteClosed = () => siteGateOn() && SITE.public !== true;
 /** The query keys the app itself reads at `/` (App.tsx › Routed, routes.ts › legacyHref). */
 const APP_ROOT_PARAMS = ['signin', 'join', 'tab'];
 
@@ -151,7 +153,7 @@ function withSiteHead(html, site) {
   extra.push('<meta name="twitter:card" content="summary" />');
   // Whether the launch gate is up, so the app can draw the page at once when it
   // is down and ask for a sign-in only while it is up (src/site/SiteScreen.tsx).
-  extra.push(`<meta name="epic-gate" content="${siteGateOn() ? 'on' : 'off'}" />`);
+  extra.push(`<meta name="epic-gate" content="${siteClosed() ? 'on' : 'off'}" />`);
   return html
     .replace(/<html lang="[^"]*"/, `<html lang="${SITE.htmlLang[site.locale]}"`)
     .replace(/<title>[\s\S]*?<\/title>/, `<title>${attr(copy.title)}</title>`)
@@ -221,7 +223,7 @@ const server = http.createServer(guarded(async (req, res) => {
   // left for the app to answer (Codex, 1 Oct 2026).
   // While the gate is up the website is behind it (gate.mjs › siteLock): `/` stays
   // the app it has been, and the site's own pages ask for the gate's password.
-  if (!siteGateOn() && pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
+  if (!siteClosed() && pathname === '/' && !APP_ROOT_PARAMS.some((k) => new URLSearchParams(search).has(k))) {
     res.writeHead(302, { location: `/${localeOf(SITE, req)}/${search}`, 'cache-control': 'no-store', vary: 'Accept-Language, Cookie' });
     res.end();
     return;
@@ -230,12 +232,13 @@ const server = http.createServer(guarded(async (req, res) => {
   // While the gate is up there is no public sitemap; the pages themselves are
   // served (noindex, above) and the app draws them only for somebody signed in.
   // No password dialog: a signed-in person must never see one (owner, 2 Oct 2026).
-  if (siteGateOn() && pathname === '/sitemap.xml') {
+  if (siteClosed() && pathname === '/sitemap.xml') {
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
     res.end('Not found');
     return;
   }
   if (pathname === '/sitemap.xml') {
+    res.removeHeader('x-robots-tag');
     await shellHtml().catch(() => null);
     const body = sitemapXml();
     res.writeHead(200, { 'content-type': TYPES['.xml'], 'content-length': Buffer.byteLength(body), 'cache-control': 'public, max-age=3600' });
@@ -252,8 +255,11 @@ const server = http.createServer(guarded(async (req, res) => {
       'content-type': TYPES['.html'], 'content-length': Buffer.byteLength(body), 'cache-control': 'no-cache',
       'x-content-type-options': 'nosniff', 'x-frame-options': 'SAMEORIGIN', 'referrer-policy': 'strict-origin-when-cross-origin',
     };
-    // A page that is not there, and a campaign landing page, are never indexed.
-    if (status !== 200 || site.landing) headers['x-robots-tag'] = 'noindex';
+    // A page that is not there, and a campaign landing page, are never indexed;
+    // nor is anything while the site is closed. An open page lifts the launch
+    // gate's blanket noindex set above.
+    if (status !== 200 || site.landing || siteClosed()) headers['x-robots-tag'] = 'noindex';
+    else res.removeHeader('x-robots-tag');
     res.writeHead(status, headers);
     res.end(req.method === 'HEAD' ? undefined : body);
     return;

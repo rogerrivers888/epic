@@ -36,3 +36,8 @@ test('every public page has a title the app and the server agree on, inside the 
 test('every built locale has its own words, even while it is switched off', () => {
   for (const locale of SITE_LOCALES) for (const page of ['home', ...SITE_PAGES]) assert.ok(seo.copy[locale]?.[page]?.title, `${locale} ${page}`);
 });
+
+test('the server and the app agree whether the website is published', async () => {
+  const { SITE_PUBLIC } = await import('../src/site/config.ts');
+  assert.equal(seo.public, SITE_PUBLIC);
+});

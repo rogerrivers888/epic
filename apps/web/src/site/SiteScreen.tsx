@@ -11,7 +11,7 @@ import { useRouter } from '../router';
 import { paths } from '../routes';
 import type { HomeDesign, Route } from '../routes';
 import type { SitePageProps } from './page';
-import { HOMEPAGE } from './config';
+import { HOMEPAGE, SITE_PUBLIC } from './config';
 import { SiteLayout, type HeaderStyle } from './SiteLayout';
 import { W1Postcards } from './pages/home/W1Postcards';
 import { W2Sorted } from './pages/home/W2Sorted';
@@ -42,8 +42,8 @@ export function SiteScreen({ route }: { route: Extract<Route, { name: 'site' }> 
   // The server writes the gate into the page it sends; the API's answer wins once it arrives.
   const gate = asked ?? gateFromPage();
   const { href, navigate } = useRouter();
-  const open = gate === false || state === 'in' || state === 'unreachable';
-  const refused = gate === true && state === 'out';
+  const open = SITE_PUBLIC || gate === false || state === 'in' || state === 'unreachable';
+  const refused = !SITE_PUBLIC && gate === true && state === 'out';
   useEffect(() => {
     if (refused) navigate(`${paths.login()}?next=${encodeURIComponent(href)}`, { replace: true });
   }, [refused, href, navigate]);
