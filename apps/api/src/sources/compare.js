@@ -79,27 +79,23 @@ export function detailHeld(provider, id) {
   return Boolean(held) && Date.now() - held.at < DETAIL_TTL_MS;
 }
 
-// The (place, detail) pairs review-spotting has already seen, so a detail served
-// from the six-hour cache is still spotted for a ref that fetched it later — but
-// only once per (place, detail), not on every read. The fresh-fetch path warmed
-// the cache without a ref (demand.js) or for a different ref, so without this a
-// later compare with a real ref would return the cache and never spot it (Codex,
-// 2 Oct 2026). Bounded like the detail cache.
-const spotted = new Set();
-function maybeSpot(provider, id, venueRef, detail) {
-  if (provider !== 'google' || !venueRef || !detail) return;
-  const k = `${provider}:${id}:${venueRef}`;
-  if (spotted.has(k)) return;
-  spotted.add(k);
-  while (spotted.size > 2000) spotted.delete(spotted.keys().next().value);
-  spotInBackground({ venueRef, detail });
+// A detail served from the six-hour cache is still spotted for a ref that fetched
+// it later, but only once per ref per *cached detail* — the dedup is a Set ON the
+// cache entry (`held.spotted`), not a standing one. So when the entry expires and
+// a fresh response replaces it, its dedup resets and the new reviews are spotted
+// again (Codex, 2 Oct 2026); without this a warm cache would hide every refresh.
+function maybeSpot(entry, provider, venueRef) {
+  if (provider !== 'google' || !venueRef || !entry?.detail) return;
+  if (entry.spotted.has(venueRef)) return;
+  entry.spotted.add(venueRef);
+  spotInBackground({ venueRef, detail: entry.detail });
 }
 
 export async function detailFor(provider, id, householdId, { venueRef = null } = {}) {
   const key = `${provider}:${id}`;
   const held = details.get(key);
-  if (held && Date.now() - held.at < DETAIL_TTL_MS) { maybeSpot(provider, id, venueRef, held.detail); return held.detail; }
-  if (detailsInFlight.has(key)) return detailsInFlight.get(key).then((d) => { maybeSpot(provider, id, venueRef, d); return d; });
+  if (held && Date.now() - held.at < DETAIL_TTL_MS) { maybeSpot(held, provider, venueRef); return held.detail; }
+  if (detailsInFlight.has(key)) return detailsInFlight.get(key).then((d) => { maybeSpot(details.get(key), provider, venueRef); return d; });
   const run = (async () => {
     const meter = {};
     try {
@@ -107,12 +103,13 @@ export async function detailFor(provider, id, householdId, { venueRef = null } =
       // A photo is a signed proxy reference here, not a picture: what the
       // comparison wants is that there are three and who took them.
       const detail = { ...raw, photos: (raw.photos ?? []).map((ph) => ({ attribution: ph.attribution ?? null })) };
-      details.set(key, { at: Date.now(), detail });
+      const entry = { at: Date.now(), detail, spotted: new Set() };
+      details.set(key, entry);
       while (details.size > 300) details.delete(details.keys().next().value);
       // Review-spotting (C30/C61): the reviews are in memory now, for free, on a
       // search the back office asked for. Spot the concrete features and queue
       // them in the background — it never blocks or breaks this fetch.
-      maybeSpot(provider, id, venueRef, detail);
+      maybeSpot(entry, provider, venueRef);
       return detail;
     } finally {
       // Which place it was about: the provider's own reference is the one

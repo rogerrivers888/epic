@@ -219,6 +219,10 @@ test('ignoring a feature drops it from the queue for good', async () => {
   assert.ok(!(await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'climbing wall'), 'gone from the queue');
   assert.equal((await query("select status from harvest_candidates where subcategory = $1 and norm = 'climbing wall'", [sub])).rows[0].status, 'ignored');
   assert.equal((await query("select 1 from review_sightings where norm = 'climbing wall'")).rowCount, 0, 'sightings cleared');
+  // Re-spotting an ignored feature does not resurrect it: the sighting may be
+  // re-inserted, but there is no undecided candidate, so the queue leaves it out.
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A climbing wall.' } });
+  assert.ok(!(await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'climbing wall'), 'an ignored feature does not come back');
 });
 
 test.after(async () => { await pool.end(); });

@@ -706,22 +706,25 @@ export async function promote(id, { gate = false, kind = 'yesno', label = null, 
 
 /** Never ask about this word here again. The examples go with the decision. */
 export async function ignoreCandidate(id, { actor = null, reason = null } = {}) {
-  const { rows } = await query(
-    // The examples go — they are the word-to-place scaffolding the brief says
-    // to drop on a decision. The quote stays: it is owned text, and under C21
-    // it is the only thing that can make a restored word promotable again.
-    // Clearing it here left an ignored-then-restored word an unresolved
-    // feature nothing could ever pick up (Codex, 26 Sep 2026).
-    // The reason is the owner's sentence for why (migration 265, C27).
-    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
-            decision_reason = coalesce($3, decision_reason)
-      where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor, reason ? String(reason).slice(0, 300) : null],
-  );
-  if (!rows[0]) throw bad('That word has already been decided.');
-  // The review-spotting sightings are place-level scaffolding too: they go with
-  // the decision, like the examples (C30, Codex 2 Oct 2026).
-  await query('delete from review_sightings where norm = $1', [rows[0].norm]);
-  return rows[0];
+  return withTransaction(async (client) => {
+    const { rows } = await client.query(
+      // The examples go — they are the word-to-place scaffolding the brief says
+      // to drop on a decision. The quote stays: it is owned text, and under C21
+      // it is the only thing that can make a restored word promotable again.
+      // Clearing it here left an ignored-then-restored word an unresolved
+      // feature nothing could ever pick up (Codex, 26 Sep 2026).
+      // The reason is the owner's sentence for why (migration 265, C27).
+      `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
+              decision_reason = coalesce($3, decision_reason)
+        where id = $1 and status in ('new', 'unresolved') returning *`, [id, actor, reason ? String(reason).slice(0, 300) : null],
+    );
+    if (!rows[0]) throw bad('That word has already been decided.');
+    // The review-spotting sightings are place-level scaffolding too: they go with
+    // the decision, like the examples, and in one transaction so the queue can
+    // never hold an actionable sighting for an already-decided word (C30, Codex 2 Oct).
+    await client.query('delete from review_sightings where norm = $1', [rows[0].norm]);
+    return rows[0];
+  });
 }
 
 /**
@@ -762,16 +765,22 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         'insert into attribute_aliases (norm, target_key, raw) values ($1, $2, $3) on conflict (norm) do nothing',
         [norm, key, cands[0].raw_forms?.[0] ?? null]);
     }
-    // Ask it in every drawer it was seen in that uses a set. A drawer with no set
-    // is not a failure — the fact exists and can be asked there once a set is
-    // attached; a set already asking it (or asking it globally) is left as it is.
-    const subs = [...new Set(cands.map((c) => c.subcategory))];
+    // Ask it in every drawer it was seen in that uses a set — the CURRENT drawer of
+    // each place, derived from the sightings joined to place_index, not the drawer a
+    // candidate was filed under when it was spotted (a place may have moved since;
+    // Codex, 2 Oct 2026). A drawer with no set is not a failure — the fact exists and
+    // can be asked there once a set is attached; a set already asking it (or asking
+    // it globally) is left as it is.
+    const { rows: drawerRows } = await client.query(
+      'select distinct p.subcategory from review_sightings s join place_index p on p.venue_ref = s.venue_ref where s.norm = $1 and p.subcategory is not null',
+      [norm]);
+    const subs = drawerRows.map((r) => r.subcategory);
     let asked = 0;
     for (const sub of subs) {
       const { rows: [set] } = await client.query('select set_key from question_set_subcategories where subcategory_key = $1', [sub]);
       if (!set?.set_key) continue;
       try {
-        const q = await addQuestion({ attributeKey: key, setKey: set.set_key, scope: 'set', fromCandidate: cands.find((c) => c.subcategory === sub)?.id ?? null }, client);
+        const q = await addQuestion({ attributeKey: key, setKey: set.set_key, scope: 'set', fromCandidate: cands[0]?.id ?? null }, client);
         if (q) asked += 1;
       } catch { /* already asked here, or asked globally — the fact stands */ }
     }
@@ -790,14 +799,18 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
  * ignore is permanent, so it never raises again) and its sightings are dropped.
  */
 export async function ignoreFeature(norm, { actor = null, reason = null } = {}) {
-  const { rowCount } = await query(
-    `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
-            decision_reason = coalesce($3, decision_reason)
-      where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'`,
-    [norm, actor, reason ? String(reason).slice(0, 300) : null]);
-  if (!rowCount) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
-  await query('delete from review_sightings where norm = $1', [norm]);
-  return { feature: norm, ignored: rowCount };
+  return withTransaction(async (client) => {
+    const { rowCount } = await client.query(
+      `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
+              decision_reason = coalesce($3, decision_reason)
+        where norm = $1 and status in ('new', 'unresolved') and sources ? 'google'`,
+      [norm, actor, reason ? String(reason).slice(0, 300) : null]);
+    if (!rowCount) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
+    // One transaction: the queue can never be left holding an actionable sighting
+    // for a word whose candidate is already ignored (Codex, 2 Oct 2026).
+    await client.query('delete from review_sightings where norm = $1', [norm]);
+    return { feature: norm, ignored: rowCount };
+  });
 }
 
 /** The alias table says this wording means `key`, or the decision is refused rather than recorded against another. */

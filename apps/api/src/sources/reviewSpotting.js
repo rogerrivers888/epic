@@ -261,7 +261,12 @@ export function spotInBackground(args) {
  */
 export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
   const known = await knownFeatureKeys();
-  const where = subcategory ? 'where p.subcategory = $2' : '';
+  // Only features still awaiting a decision: a norm whose candidate was ignored or
+  // promoted is gone from the queue even if a later search re-spots it (its sighting
+  // may be re-inserted, but recordCandidates never reopens an ignored word, so there
+  // is no undecided candidate to act on) — Codex, 2 Oct 2026.
+  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
+  const where = subcategory ? `where p.subcategory = $2 and ${undecided}` : `where ${undecided}`;
   const params = subcategory ? [limit, subcategory] : [limit];
   const { rows } = await query(
     `select s.norm,
