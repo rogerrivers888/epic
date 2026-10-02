@@ -35,6 +35,14 @@ test('concrete features pass the filter; opinions, adjectives and service words 
   // … but the two-word feature that contains one still stands.
   assert.equal(looksLikeFeature('steam room'), true);
   assert.equal(looksLikeFeature('race track'), true);
+  // A bare age word is not a facility — it must not ride in on the age signal; the
+  // facility phrase that names one does.
+  for (const w of ['toddler', 'family', 'families', 'baby', 'babies']) {
+    assert.equal(looksLikeFeature(w), false, `bare ${w} is not a feature`);
+  }
+  for (const f of ['baby changing', 'soft play', 'step free access', 'wheelchair access']) {
+    assert.equal(looksLikeFeature(f), true, `${f} names a facility`);
+  }
 });
 
 test('spotFeatures reads reviews in memory and keeps only the features, with polarity', () => {

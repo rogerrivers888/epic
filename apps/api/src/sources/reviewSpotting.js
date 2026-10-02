@@ -116,8 +116,12 @@ export function looksLikeFeature(norm) {
   const words = w.split(/\s+/).filter(Boolean);
   // An opinion anywhere disqualifies — "lovely garden", "friendly staff".
   if (words.some(isOpinionWord)) return false;
-  // Gate and age signals are features that matter at any frequency.
-  if (gateWord(w) || ageWord(w)) return true;
+  // A gate or age signal is a feature when it names a facility — "baby changing",
+  // "step free access", "soft play", "wheelchair access". A bare age word on its
+  // own ("toddler", "family", "baby" from "our toddlers loved it") is not a
+  // facility and must not ride in on the signal alone (Codex, 2 Oct 2026), so the
+  // shortcut needs a second word.
+  if ((gateWord(w) || ageWord(w)) && words.length > 1) return true;
   if (words.length === 1) return FEATURE_SOLO.has(w);
   return FEATURE_HEADS.has(words[words.length - 1]);
 }
