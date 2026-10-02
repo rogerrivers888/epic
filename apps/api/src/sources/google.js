@@ -1386,6 +1386,7 @@ export async function benchArea({ center, radiusKm = 2.5, queries = [], pages = 
         break;
       }
       for (const p of data.places || []) {
+        noteLiveName(`google:${p.id}`, p.displayName?.text ?? null, { lat: p.location?.latitude, lng: p.location?.longitude });
         if (LODGING.has(p.primaryType)) continue;
         if (!Number.isFinite(p.rating)) continue;
         const id = `google:${p.id}`;

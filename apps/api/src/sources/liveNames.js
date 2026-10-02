@@ -18,13 +18,22 @@ const MAX = 2000;
 const queue = new Map(); // ref -> { name, lat, lng }
 
 /** Note a live name (and the point it came with, if any) for the next drain. */
-export function noteLiveName(ref, name, point = null) {
+export function noteLiveName(ref, name, point = null, { tries = 0 } = {}) {
   if (!ref || typeof name !== 'string' || !name.trim()) return;
   // Only Google's references carry a Google name; another provider's id is not checked here.
   if (!String(ref).startsWith('google:')) return;
   if (!queue.has(ref) && queue.size >= MAX) return;
+  const had = queue.get(ref);
   const lat = Number(point?.lat), lng = Number(point?.lng);
-  queue.set(ref, { name: name.trim(), lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null });
+  const has = Number.isFinite(lat) && Number.isFinite(lng) && point?.lat != null && point?.lng != null;
+  // A later sighting that came without a point keeps the point an earlier one
+  // brought: the re-match needs it (Codex, 2 Oct 2026).
+  queue.set(ref, {
+    name: name.trim(),
+    lat: has ? lat : had?.lat ?? null,
+    lng: has ? lng : had?.lng ?? null,
+    tries: Math.max(tries, had?.tries ?? 0),
+  });
 }
 
 /** Take up to `n` noted names off the queue, oldest first. */

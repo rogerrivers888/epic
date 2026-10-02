@@ -186,7 +186,7 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
     } catch (err) {
       // The batch goes back on the queue for the next minute rather than
       // being lost to one failed read (Codex, 2 Oct 2026).
-      for (const x of batch) noteLiveName(x.ref, x.name, x);
+      for (const x of batch) if ((x.tries ?? 0) < 2) noteLiveName(x.ref, x.name, x, { tries: (x.tries ?? 0) + 1 });
       throw err;
     }
     // Ninety days of outcomes is plenty for a weekly figure.
@@ -234,6 +234,10 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
       } catch (err) {
         out.failed += 1;
         recently.delete(x.ref);
+        // Back on the queue for the next minute, three tries in all: a
+        // transient fault is retried, a lasting one is not retried for ever
+        // (Codex, 2 Oct 2026).
+        if ((x.tries ?? 0) < 2) noteLiveName(x.ref, x.name, x, { tries: (x.tries ?? 0) + 1 });
         // The reference and the fault only — never the name.
         console.error(`epic-api: name-check — ${x.ref}: ${String(err?.message ?? err).slice(0, 160)}`);
       }

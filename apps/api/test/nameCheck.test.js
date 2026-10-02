@@ -50,7 +50,12 @@ test('only a Google reference with a real name is noted, and a Places answer not
   assert.equal(live.pendingLiveNames(), 0);
   toVenue({ id: 'PLACE1', displayName: { text: 'Harbour Café' }, location: { latitude: LAT, longitude: LNG } });
   const [x] = live.takeLiveNames();
-  assert.deepEqual(x, { ref: 'google:PLACE1', name: 'Harbour Café', lat: LAT, lng: LNG });
+  assert.deepEqual(x, { ref: 'google:PLACE1', name: 'Harbour Café', lat: LAT, lng: LNG, tries: 0 });
+  // A later sighting with no point keeps the point an earlier one brought.
+  live.noteLiveName('google:PLACE2', 'Harbour Café', { lat: LAT, lng: LNG });
+  live.noteLiveName('google:PLACE2', 'Harbour Café');
+  const [y] = live.takeLiveNames();
+  assert.deepEqual([y.lat, y.lng], [LAT, LNG]);
 });
 
 test('a live name that agrees stamps the match as checked', async () => {
