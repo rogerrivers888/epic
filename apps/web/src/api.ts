@@ -3118,10 +3118,10 @@ export const api = {
    * or ignore. Read-only; no Google text, only our derived counts.
    */
   adminReviewQueue: (p: { sub?: string | null; limit?: number } = {}) =>
-    request<{ features: ReviewFeature[]; newCount: number; knownCount: number }>(`/api/admin/place-index/review-queue${qs(p)}`),
+    request<{ features: ReviewFeature[]; newCount: number; knownCount: number; spotting?: { spots: number; places: number; raised: number | null; filtered: number | null; tombstoned: number | null; queued: number | null; since: string | null; latest: string | null } }>(`/api/admin/place-index/review-queue${qs(p)}`),
   /** Approve a feature into our fact list; it is then verified from owned sources. */
   adminApproveFeature: (norm: string) =>
-    post<{ feature: string; attributeKey: string; asked: number; subcategories: string[] }>(`/api/admin/place-index/review-queue/${encodeURIComponent(norm)}/approve`, {}),
+    post<{ feature: string; attributeKey: string; asked: number; subcategories: string[]; waiting?: string[] }>(`/api/admin/place-index/review-queue/${encodeURIComponent(norm)}/approve`, {}),
   /** Ignore a feature for good — it never raises again. */
   adminIgnoreFeature: (norm: string, reason?: string) =>
     post<{ feature: string; ignored: number }>(`/api/admin/place-index/review-queue/${encodeURIComponent(norm)}/ignore`, reason ? { reason } : {}),

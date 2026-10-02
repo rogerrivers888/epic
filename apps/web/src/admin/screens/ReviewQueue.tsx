@@ -34,13 +34,18 @@ export function ReviewQueue({ canManage }: { canManage: boolean }) {
   const decide = (f: ReviewFeature, how: 'approve' | 'ignore') => {
     if (!canManage || busy) return;
     setBusy(f.norm); setSaid(null);
-    const run = how === 'approve' ? api.adminApproveFeature(f.norm) : api.adminIgnoreFeature(f.norm);
+    const run: Promise<{ waiting?: string[] }> = how === 'approve'
+      ? api.adminApproveFeature(f.norm)
+      : api.adminIgnoreFeature(f.norm).then(() => ({}));
     Promise.resolve(run)
-      .then(() => setSaid(how === 'approve'
-        ? (f.known
-          ? `Asked “${f.raw}” in this drawer — it is verified from owned sources.`
-          : `Approved “${f.raw}” — now a fact, and it will be verified from owned sources.`)
-        : `Ignored “${f.raw}”.`))
+      .then((res) => {
+        if (how === 'ignore') { setSaid(`Ignored “${f.raw}”.`); return; }
+        // A drawer with no question set yet is asked once a set is attached to it.
+        const later = res?.waiting?.length ? ` Asked in ${res.waiting.map(drawerWord).join(', ')} once a set is attached.` : '';
+        setSaid(f.known
+          ? `Asked “${f.raw}” here — verified from owned sources.${later}`
+          : `Approved “${f.raw}” — now a fact, verified from owned sources.${later}`);
+      })
       .catch((e: any) => setSaid(e?.body?.message ?? 'That could not be done.'))
       .finally(() => { setBusy(null); load(); });
   };

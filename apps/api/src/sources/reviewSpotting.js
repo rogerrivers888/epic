@@ -198,7 +198,16 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
   });
   const features = new Map([...raisedAll].filter(([norm]) => looksLikeFeature(norm)));
   const filtered = raisedAll.size - features.size;
-  if (!features.size) return empty(filtered);
+  // Counts only — what was raised, what the filter dropped, what was queued — so the
+  // owner's report can say how many opinions and fragments were filtered out beside
+  // the features kept. Never any of the text (migration 367).
+  const tally = (run, { tombstoned = 0, queued = 0 } = {}) => run(
+    'insert into review_spotting_tallies (venue_ref, raised, filtered, tombstoned, queued) values ($1, $2, $3, $4, $5)',
+    [venueRef, raisedAll.size, filtered, tombstoned, queued]);
+  if (!features.size) {
+    if (raisedAll.size) await tally((t, p) => (client ? client.query(t, p) : query(t, p)));
+    return empty(filtered);
+  }
 
   // The tombstone read and the sighting/candidate writes run in one transaction,
   // serialized per-norm against ignoreFeature by a transaction-scoped advisory lock
@@ -218,10 +227,10 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
     // anything is written, so a fresh drawer can never reopen an ignored feature.
     const { rows: tombstoned } = await run('select norm from feature_tombstones where norm = any($1)', [locked]);
     for (const t of tombstoned) features.delete(t.norm);
-    if (!features.size) return empty(filtered);
+    if (!features.size) { await tally(run, { tombstoned: tombstoned.length }); return empty(filtered); }
 
     const subcategory = await subcategoryOf(venueRef, tx);
-    if (!subcategory) return empty(filtered);
+    if (!subcategory) { await tally(run, { tombstoned: tombstoned.length }); return empty(filtered); }
 
     const known = await knownFeatureKeys(tx);
     const entries = [];
@@ -270,6 +279,7 @@ export async function spotFromDetail({ venueRef, detail, client = null } = {}) {
       const c = byNorm[norm] ?? {};
       return { norm, known: known.has(norm), places: Number(c.places ?? 1), asserts: Number(c.asserts ?? 0), denies: Number(c.denies ?? 0), asks: Number(c.asks ?? 0) };
     });
+    await tally(run, { tombstoned: tombstoned.length, queued: entries.length });
     return { subcategory, queued: entries.length, filtered, known: report.filter((r) => r.known).length, features: report };
   };
 
@@ -356,4 +366,23 @@ export async function reviewQueueCounts({ subcategory = null } = {}) {
     subcategory ? [subcategory] : []);
   const knownCount = rows.filter((r) => known.has(r.norm)).length;
   return { newCount: rows.length - knownCount, knownCount };
+}
+
+/**
+ * What review-spotting has done since it started counting (migration 367): how many
+ * passes over how many places, how many phrases the reviews raised, how many the
+ * concrete-feature filter dropped (opinions, service words, fragments), how many it
+ * found already ignored for good, and how many it queued. Counts only. Passes before
+ * the tallies existed are not in it — `since` says where the count begins, and a
+ * count with no passes behind it is null rather than a nought (CLAUDE.md, can't speak).
+ */
+export async function spottingTally() {
+  const { rows: [t] } = await query(
+    `select count(*)::int as spots, count(distinct venue_ref)::int as places,
+            coalesce(sum(raised), 0)::int as raised, coalesce(sum(filtered), 0)::int as filtered,
+            coalesce(sum(tombstoned), 0)::int as tombstoned, coalesce(sum(queued), 0)::int as queued,
+            min(spotted_at) as since, max(spotted_at) as latest
+       from review_spotting_tallies`);
+  if (!t.spots) return { spots: 0, places: 0, raised: null, filtered: null, tombstoned: null, queued: null, since: null, latest: null };
+  return t;
 }

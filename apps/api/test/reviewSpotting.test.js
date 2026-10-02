@@ -17,7 +17,7 @@ import { testDatabase } from './helpers/db.js';
 // imports `db.js` loads — `reviewSpotting.js` imports it, so it comes in here,
 // dynamically, after the switch (the same reason questions.test.js does).
 const { query, pool } = await testDatabase();
-const { looksLikeFeature, spotFeatures, spotFromDetail, reviewQueue, reviewQueueCounts } = await import('../src/sources/reviewSpotting.js');
+const { looksLikeFeature, spotFeatures, spotFromDetail, reviewQueue, reviewQueueCounts, spottingTally } = await import('../src/sources/reviewSpotting.js');
 const sets = await import('../src/repositories/questionSets.js');
 
 test('concrete features pass the filter; opinions, adjectives and service words do not', () => {
@@ -633,27 +633,58 @@ test('a review-queue ignore waits for a harvest already writing, so it cannot be
   assert.equal((await query("select count(*)::int n from feature_tombstones where norm = 'music room'")).rows[0].n, 1, 'the tombstone stands');
 });
 
-test('approval is refused while none of the feature’s drawers uses a question set, and the item stays', async () => {
-  // Codex, 2 Oct 2026: approving with nothing to ask it in would clear the queue
-  // item and report it asked while nothing verifies it. Refused, like promote().
+test('with no question set yet, approval makes the fact now and asks it once a set is attached', async () => {
+  // Owner, 2 Oct 2026: "create the fact anyway and start asking once a set is
+  // attached. Don't refuse."
   const sub = 'c30-noset-parks';
   const ref = 'google:ChIJ_c30_noset';
   await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
   await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 noset parks', 'c30-test-cat') on conflict do nothing", [sub]);
   await query('delete from question_set_subcategories where subcategory_key = $1', [sub]);
+  await query("insert into question_sets (key, name) values ('c30-later-set', 'C30 later set') on conflict do nothing");
   await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
   await query('delete from harvest_candidates where subcategory = $1', [sub]);
   await query('delete from review_sightings where venue_ref = $1', [ref]);
   await query("delete from attribute_aliases where norm = 'game room'").catch(() => {});
-  await query("delete from place_attributes where key = 'game-room'").catch(() => {});
+  await query("delete from questions where attribute_key = any($1)", [['game-room', 'games-room']]).catch(() => {});
+  await query("delete from place_attributes where key = any($1)", [['game-room', 'games-room']]).catch(() => {});
 
   await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A games room.' } });
-  await assert.rejects(
-    () => sets.approveFeature('game room', { actor: 'tester' }),
-    (err) => err.status === 400 && /uses a question set/.test(err.message),
-  );
-  assert.equal((await query("select count(*)::int n from place_attributes where key = 'game-room'")).rows[0].n, 0, 'no fact was left behind');
-  assert.ok((await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'game room'), 'still in the queue, to approve once a set is attached');
+  const res = await sets.approveFeature('game room', { actor: 'tester' });
+  assert.equal((await query('select count(*)::int n from place_attributes where key = $1 and active', [res.attributeKey])).rows[0].n, 1, 'the fact is made at once');
+  assert.equal(res.asked, 0, 'nothing to ask it in yet');
+  assert.deepEqual(res.waiting, [sub], 'the drawer is owed the question');
+  assert.ok(!(await reviewQueue({ subcategory: sub })).some((f) => f.norm === 'game room'), 'decided, so out of the queue');
+
+  // Attaching a set to the drawer asks it.
+  await sets.attach('c30-later-set', sub);
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-later-set' and active", [res.attributeKey])).rows[0].n, 1, 'asked in the set just attached');
+  assert.equal((await query('select count(*)::int n from feature_pending_asks where attribute_key = $1', [res.attributeKey])).rows[0].n, 0, 'and no longer owed');
+});
+
+test('each spotting pass is tallied as counts only: raised, filtered, queued', async () => {
+  // The owner's report needs "opinions filtered out", which nothing else records.
+  const sub = 'c30-tally-parks';
+  const ref = 'google:ChIJ_c30_tally';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 tally parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from review_spotting_tallies where venue_ref = $1', [ref]);
+
+  const r = await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'Friendly staff and delicious food. A study room.' } });
+  const { rows: [t] } = await query('select raised, filtered, queued from review_spotting_tallies where venue_ref = $1', [ref]);
+  assert.equal(t.filtered, r.filtered, 'the dropped phrases are counted');
+  assert.ok(t.filtered > 0, 'opinions were dropped');
+  assert.equal(t.queued, r.queued, 'and the queued features');
+  assert.equal(t.raised, t.filtered + t.queued, 'raised = filtered + queued here (nothing tombstoned)');
+  // An opinions-only pass is tallied too — that is most of what the filter is for.
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'Friendly staff. Delicious.' } });
+  assert.equal((await query('select count(*)::int n from review_spotting_tallies where venue_ref = $1 and queued = 0 and filtered > 0', [ref])).rows[0].n, 1, 'an all-opinion pass is counted');
+  const all = await spottingTally();
+  assert.ok(all.spots >= 2 && all.filtered >= t.filtered, 'the tally sums the passes');
+  // No text anywhere in the table.
+  const cols = (await query("select column_name from information_schema.columns where table_name = 'review_spotting_tallies'")).rows.map((c) => c.column_name).sort();
+  assert.deepEqual(cols, ['filtered', 'id', 'queued', 'raised', 'spotted_at', 'tombstoned', 'venue_ref'], 'counts and the place id only');
 });
 
 test('the queue counts are over the whole queue, not the page', async () => {

@@ -96,7 +96,30 @@ export async function attach(setKey, subcategoryKey) {
      returning *`,
     [subcategoryKey, setKey],
   );
+  await askWaiting(subcategoryKey, setKey);
   return rows[0];
+}
+
+/**
+ * Ask the facts that were approved for this drawer before it had a set (owner,
+ * 2 Oct 2026). Each becomes a question in the set now attached — or is switched
+ * back on if the set already holds it, off — and the drawer stops owing it. A fact
+ * asked everywhere already, or since retired, needs nothing and is just cleared.
+ */
+async function askWaiting(subcategoryKey, setKey) {
+  const { rows: waiting } = await query(
+    `select w.attribute_key, a.active
+       from feature_pending_asks w join place_attributes a on a.key = w.attribute_key
+      where w.subcategory_key = $1`, [subcategoryKey]);
+  for (const w of waiting) {
+    if (w.active) {
+      try {
+        const q = await addQuestion({ attributeKey: w.attribute_key, setKey, scope: 'set' });
+        if (q && q.active === false) await query('update questions set active = true, updated_at = now() where id = $1', [q.id]);
+      } catch { /* asked everywhere already — nothing more to ask here */ }
+    }
+    await query('delete from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [w.attribute_key, subcategoryKey]);
+  }
 }
 
 export async function detach(subcategoryKey) {
@@ -856,6 +879,7 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     // approving must reactivate rather than silently leave it off (Codex, 2 Oct 2026).
     const reactivate = async (id) => { await client.query('update questions set active = true, updated_at = now() where id = $1 and not active', [id]); };
     const { rows: [globalQ] } = await client.query("select id, active from questions where attribute_key = $1 and scope = 'global' limit 1", [key]);
+    const waiting = [];
     if (globalQ) {
       // Asked everywhere already: no set asks it, just make sure the global is on.
       if (!globalQ.active) { await reactivate(globalQ.id); asked += 1; }
@@ -863,8 +887,12 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
       const seenSets = new Set();
       for (const sub of subs) {
         const { rows: [set] } = await client.query('select set_key from question_set_subcategories where subcategory_key = $1', [sub]);
+        // A drawer with no set yet still gets the question: the fact is made now and
+        // the drawer is remembered, so attaching a set to it asks it (owner, 2 Oct
+        // 2026: "create the fact anyway and start asking once a set is attached").
+        if (!set?.set_key) { waiting.push(sub); continue; }
         // A set shared across several of these drawers is asked once, not per drawer.
-        if (!set?.set_key || seenSets.has(set.set_key)) continue;
+        if (seenSets.has(set.set_key)) continue;
         seenSets.add(set.set_key);
         const { rows: [existing] } = await client.query(
           "select id, active from questions where attribute_key = $1 and scope = 'set' and set_key = $2 limit 1", [key, set.set_key]);
@@ -877,13 +905,10 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
           if (q) asked += 1;
         } catch { /* a global was added in a race — the fact stands */ }
       }
-      // Nothing to ask it in: none of the drawers it was seen in uses a question set,
-      // and it is not asked everywhere. Approving now would clear the queue item and
-      // report it asked while nothing verifies it — so refuse, as promote() does, and
-      // the transaction takes back the fact and alias made above. The item stays in
-      // the queue until a set is attached (Codex, 2 Oct 2026).
-      if (!seenSets.size) {
-        throw bad(`None of the drawers "${norm}" was seen in uses a question set yet. Attach one, then approve it.`);
+      for (const sub of waiting) {
+        await client.query(
+          'insert into feature_pending_asks (attribute_key, subcategory_key) values ($1, $2) on conflict do nothing',
+          [key, sub]);
       }
     }
     await client.query(
@@ -898,7 +923,8 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     // decision reads consistently (Codex, 2 Oct 2026).
     await client.query('delete from feature_tombstones where norm = $1', [norm]);
     attrs.forget();
-    return { feature: norm, attributeKey: key, asked, subcategories: subs };
+    // `waiting`: drawers owed the question once a set is attached to them.
+    return { feature: norm, attributeKey: key, asked, subcategories: subs, waiting };
   });
 }
 
