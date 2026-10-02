@@ -85,7 +85,8 @@ export function useStoryboard(node: { current: unknown }, { loop, end, loops, de
     const el = node.current as Element | null;
     if (still || !el) return;
     if (typeof IntersectionObserver === 'undefined') { setInView(true); return; }
-    const io = new IntersectionObserver((entries) => setInView(entries.some((e) => e.isIntersecting)), { threshold: 0.4 });
+    // 40% in view, measured — isIntersecting is true for any overlap at all (Codex).
+    const io = new IntersectionObserver((entries) => setInView(entries.some((e) => e.intersectionRatio >= 0.4)), { threshold: [0, 0.4] });
     io.observe(el);
     return () => io.disconnect();
   }, [node, still]);
