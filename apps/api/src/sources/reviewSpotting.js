@@ -26,7 +26,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
-import { candidatesFor, plainKindOf, gateWord, ageWord } from '../domain/questions.js';
+import { candidatesFor, plainKindOf, gateWord, ageWord, normalise } from '../domain/questions.js';
 import { recordCandidates } from '../repositories/questionSets.js';
 
 /**
@@ -158,9 +158,11 @@ async function knownFeatureKeys(client = null) {
   const run = client ? (t, p) => client.query(t, p) : query;
   const { rows } = await run("select key, label from place_attributes where active");
   const keys = new Set();
+  // Through the same normaliser a spotted word goes through — a fact named "Water
+  // slides" is known to the spotted norm "water slide" (Codex, 2 Oct 2026).
   for (const r of rows) {
-    keys.add(String(r.key).replace(/[_-]+/g, ' ').trim().toLowerCase());
-    keys.add(String(r.label).trim().toLowerCase());
+    keys.add(normalise(r.key));
+    keys.add(normalise(r.label));
   }
   // A wording deliberately aliased onto an active fact is known too — otherwise a
   // spotted synonym reads as new and offers Approve, though approveFeature would
@@ -333,7 +335,7 @@ export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
  */
 function queueWhere(subParam) {
   const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
-  const notIgnoredHere = "not exists (select 1 from harvest_candidates ci where ci.norm = s.norm and ci.subcategory = p.subcategory and ci.sources ? 'google' and ci.status = 'ignored')";
+  const notIgnoredHere = "not exists (select 1 from harvest_candidates ci where ci.norm = s.norm and ci.subcategory = p.subcategory and ci.status = 'ignored')";
   return subParam
     ? `where p.subcategory = ${subParam} and ${undecided} and ${notIgnoredHere}`
     : `where ${undecided} and ${notIgnoredHere}`;

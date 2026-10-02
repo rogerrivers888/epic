@@ -674,4 +674,58 @@ test('the queue counts are over the whole queue, not the page', async () => {
   assert.equal(counts.newCount + counts.knownCount, 3, 'the counts cover all three waiting features');
 });
 
+test('an owned-only candidate ignored in a drawer still vetoes that drawer', async () => {
+  // Codex, 2 Oct 2026: a per-drawer ignore is "never ask here again" whatever raised
+  // the word. An owned-harvest candidate ignored in drawer A must keep approval from
+  // asking A, and keep A's later Google sighting out of the count.
+  const subA = 'c30-ov-a'; const subB = 'c30-ov-b';
+  const a = 'google:ChIJ_c30_ov_a'; const b = 'google:ChIJ_c30_ov_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 ov A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 ov B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query("insert into question_sets (key, name) values ('c30-ov-set-a', 'A'), ('c30-ov-set-b', 'B') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-ov-set-a'), ($2, 'c30-ov-set-b') on conflict do nothing", [subA, subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await query("delete from attribute_aliases where norm = 'tack room'").catch(() => {});
+  await query("delete from place_attributes where key = 'tack-room'").catch(() => {});
+
+  // Raised in A by the owned harvest only, then ignored there.
+  await sets.recordCandidates(subA, [{ norm: 'tack room', raw: 'tack room', rawForms: ['tack room'], sources: ['venue'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }], { placesTotal: 1 });
+  const { rows: [candA] } = await query("select id from harvest_candidates where norm = 'tack room' and subcategory = $1", [subA]);
+  await sets.ignoreCandidate(candA.id, { actor: 'tester' });
+  // Google then mentions it at places in both drawers.
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A tack room.' } });
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A tack room.' } });
+
+  assert.equal((await reviewQueue()).find((f) => f.norm === 'tack room')?.places, 1, 'drawer A’s sighting is not counted');
+  const res = await sets.approveFeature('tack room', { actor: 'tester' });
+  assert.deepEqual(res.subcategories, [subB], 'drawer A, which ignored it, is not asked');
+});
+
+test('a fact named in the plural is known to the singular spotted word, and reused on approval', async () => {
+  // Codex, 2 Oct 2026: matching facts without the vocabulary normaliser missed
+  // "Party rooms" for the norm "party room" and approved a duplicate.
+  const sub = 'c30-plural-parks';
+  const ref = 'google:ChIJ_c30_plural';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 plural parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query("insert into question_sets (key, name) values ('c30-plural-set', 'C30 plural set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-plural-set') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  await query("delete from attribute_aliases where norm = 'party room'").catch(() => {});
+  await query("delete from place_attributes where key = 'party-room'").catch(() => {});
+  await query("insert into place_attributes (key, label, kind) values ('party-rooms', 'Party rooms', 'yesno') on conflict (key) do update set active = true");
+
+  const report = await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A party room.' } });
+  assert.equal(report.features.find((f) => f.norm === 'party room')?.known, true, 'known through the normaliser');
+  const res = await sets.approveFeature('party room', { actor: 'tester' });
+  assert.equal(res.attributeKey, 'party-rooms', 'reused the plural fact');
+  assert.equal((await query("select count(*)::int n from place_attributes where key = 'party-room'")).rows[0].n, 0, 'no singular duplicate');
+});
+
 test.after(async () => { await pool.end(); });

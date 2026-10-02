@@ -775,13 +775,13 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
       // Reuse the exact fact that made this word "known" — matched the same way
       // knownFeatureKeys matches it (its de-slugged key or its label), so a renamed
       // or otherwise noncanonical key is asked, not duplicated (Codex, 2 Oct 2026).
-      const { rows: knownRow } = await client.query(
-        `select key from place_attributes where active
-           and (replace(replace(lower(key), '_', ' '), '-', ' ') = $1 or lower(label) = $1)
-         limit 1`,
-        [norm]);
-      if (knownRow[0]) {
-        key = knownRow[0].key;
+      // Through the vocabulary normaliser, so "Water slides" is the fact for the norm
+      // "water slide" — a plain lower() missed plurals and approved a duplicate
+      // (Codex, 2 Oct 2026). A key match is preferred over a label match.
+      const { rows: facts } = await client.query('select key, label from place_attributes where active order by key');
+      const knownRow = facts.find((f) => normalise(f.key) === norm) ?? facts.find((f) => normalise(f.label) === norm);
+      if (knownRow) {
+        key = knownRow.key;
       } else {
         const text = label ?? cands[0].raw_forms?.[0] ?? norm;
         const wanted = slug(text);
@@ -836,7 +836,7 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         where s.norm = $1 and p.subcategory is not null
           and not exists (select 1 from harvest_candidates ci
                            where ci.norm = s.norm and ci.subcategory = p.subcategory
-                             and ci.sources ? 'google' and ci.status = 'ignored')`,
+                             and ci.status = 'ignored')`,
       [norm]);
     const subs = drawerRows.map((r) => r.subcategory);
     let asked = 0;
