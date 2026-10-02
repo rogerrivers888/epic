@@ -147,7 +147,8 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
   const paused = offer.state === 'paused';
   const today = new Date().toISOString().slice(0, 10);
   // Nothing in the past is bookable, whatever state the host left it in.
-  const past = offer.shape === 'oneoff' ? Boolean(offer.startsOn && offer.startsOn < today) : offer.shape === 'series' ? offer.dates.length > 0 && !offer.dates.some((d) => d >= today) : false;
+  // Over several days, it has happened only once its last day has gone (Codex, 2 Oct 2026).
+  const past = offer.shape === 'oneoff' ? Boolean(offer.startsOn && ((offer.multiDay && offer.endsOn) || offer.startsOn) < today) : offer.shape === 'series' ? offer.dates.length > 0 && !offer.dates.some((d) => d >= today) : false;
   const ended = offer.state === 'ended' || past;
   const full = offer.standing.full;
   // An offer from the four lanes (hosting v7) is booked by its own rules, which are the guest
