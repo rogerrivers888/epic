@@ -35,7 +35,7 @@ export function wallClock(date, tz) {
 export const DEFAULT_TZ = 'Europe/London';
 
 /**
- * A whole hour (households.day_start/day_end, smallint since migration 344) as
+ * A whole hour (households.day_start/day_end, smallint since migration 353) as
  * a SQL time string — 7 → '07:00'. The trips columns are real times, and a
  * bare 10 handed to a ::time cast is an invalid input, not ten o'clock
  * (Codex, 1 Oct 2026).

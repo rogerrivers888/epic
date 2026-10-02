@@ -311,7 +311,7 @@ function AllergiesRow({ member, refresh, canEdit }: { member: Member; refresh: (
     await api.updateMember(member.id, { allergenNote: trimmed });
     await refresh();
   };
-  // An allergy kept only as a private note (migration 343, or said aloud and
+  // An allergy kept only as a private note (migration 352, or said aloud and
   // unmatched) is still an allergy: it counts and it shows, or there is no way
   // to see or clear what was preserved (Codex, 1 Oct 2026).
   const hasAny = member.allergens.length > 0 || Boolean(member.allergenNote);

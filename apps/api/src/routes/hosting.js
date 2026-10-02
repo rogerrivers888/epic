@@ -176,7 +176,7 @@ export function publishFeeEstimate(o, host, usedSoFar) {
 
 /**
  * How many of the host's first-ten intro places are used: the highest stamped
- * `intro_ordinal`, which a cancellation never takes back (migration 347). A row
+ * `intro_ordinal`, which a cancellation never takes back (migration 356). A row
  * read before the stamp existed counts by state, so nothing reads as unused.
  */
 export function introPositionsUsed(bookings) {
@@ -517,7 +517,7 @@ router.get('/host/money', async (req, res, next) => {
       introById.set(b.id, introState({ hostStartedAt: host.created_at, bookingsSoFar: introPositionsBefore(b, bookings), now: new Date(b.created_at) }));
     }
     // The level in force when the booking first held a place (fee_level,
-    // migration 347), so a host moving up never re-prices what they earned
+    // migration 356), so a host moving up never re-prices what they earned
     // before (Codex, 2 Oct 2026); a row stamped before that column falls back
     // to the host's level today.
     const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: b.fee_level ?? host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });

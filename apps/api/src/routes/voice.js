@@ -682,7 +682,7 @@ router.post('/intake/:id/remember', async (req, res, next) => {
     if (making && members.length + making > limit.cap) throw households.planCapRefusal(limit);
     for (const item of offer?.items ?? []) {
       if (item.kind === 'diet') {
-        // Diet is a member column now (migration 342), never a constraint row —
+        // Diet is a member column now (migration 351), never a constraint row —
         // the same mapping the apply path uses, or the remembered word would
         // vanish from the profile on the next read (Codex, 1 Oct 2026).
         // Only people the caller may edit: a joined adult's diet is theirs
@@ -704,7 +704,7 @@ router.post('/intake/:id/remember', async (req, res, next) => {
             continue;
           }
           // Neither a main diet, a faith nor a mappable preference: kept in the
-          // private note, as migration 342 kept the old ones (Codex, 2 Oct 2026).
+          // private note, as migration 351 kept the old ones (Codex, 2 Oct 2026).
           const note = withNote(noteOf.get(m.id) ?? m.allergenNote, d);
           noteOf.set(m.id, note);
           await households.updateMember(m.id, { allergenNote: note }, household.id);

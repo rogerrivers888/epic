@@ -1,6 +1,6 @@
 /**
  * The Host tab's Money screen: the server pieces behind SX9/SX14/SX16–SX20
- * (Settings revised v2, Lane 3). Migrations 345–347 added the host's pay
+ * (Settings revised v2, Lane 3). Migrations 354–356 added the host's pay
  * schedule, company tax fields and the banks it is paid into, and a booking's
  * own-link flag. The rules worth pinning:
  *
@@ -220,9 +220,9 @@ test("a host moving up a level never re-prices what they already earned", async 
   } finally { await srv.close(); }
 });
 
-test("migration 347's back-fill counts a paid-then-cancelled booking, so nobody after it slides into the 0%", async () => {
+test("migration 356's back-fill counts a paid-then-cancelled booking, so nobody after it slides into the 0%", async () => {
   const { readFileSync } = await import('node:fs');
-  const sql = readFileSync(new URL('../migrations/347_a_booking_through_the_hosts_own_link.sql', import.meta.url), 'utf8');
+  const sql = readFileSync(new URL('../migrations/356_a_booking_through_the_hosts_own_link.sql', import.meta.url), 'utf8');
   const backfill = sql.slice(sql.lastIndexOf('update experience_bookings b set intro_ordinal'));
   const { household } = await aHousehold(query, 'the back-fill');
   const host = await repo.insertHost(household.id, { name: 'Bo', type: 'skill' });

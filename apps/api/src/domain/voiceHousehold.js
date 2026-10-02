@@ -37,7 +37,7 @@ export const dietPatch = (raw) => {
 /**
  * Add a spoken word to a person's private note once, keeping what is there.
  * A diet or allergy that maps to nothing still lands somewhere a person can
- * read — the same place migration 342/343 put the historical free text.
+ * read — the same place migration 351/352 put the historical free text.
  */
 export const withNote = (current, said) => {
   const now = current ?? '';
@@ -56,7 +56,7 @@ export const dietSpill = (raw) => {
 };
 // Allergen words resolve through the ONE canonical mapping in concepts.js —
 // the same one the migration and the ranking comparison use — so a spoken
-// 'shellfish' stores BOTH crustaceans and molluscs, exactly as migration 343
+// 'shellfish' stores BOTH crustaceans and molluscs, exactly as migration 352
 // expands it (Codex, 1 Oct 2026).
 
 const nullable = (type, extra = {}) => ({ type: [type, 'null'], ...extra });
@@ -231,7 +231,7 @@ export async function applyFood(items, { members, households, everyone, househol
         continue;
       }
       // Neither a diet, a faith nor a mappable preference ("low FODMAP"): kept
-      // in the private note, as migration 342 kept the old ones — never a chip
+      // in the private note, as migration 351 kept the old ones — never a chip
       // that reports success and stores nothing (Codex, 2 Oct 2026).
       for (const m of targets) {
         const note = withNote(noteOf.get(m.id) ?? m.allergenNote, it.value);

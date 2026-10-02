@@ -40,6 +40,6 @@ alter table households add  constraint households_day_window_check
 
 -- How many households had the old household-level access-needs toggle on — the
 -- people in them now start with an empty per-person list and see the change on
--- their profile next open (migration 341). Recorded for the post-deploy report.
+-- their profile next open (migration 350). Recorded for the post-deploy report.
 insert into settings_v2_migration_report (migration, metric, value)
   values ('access', 'access.households_had_toggle_on', (select count(*) from households where access_needs is true));
