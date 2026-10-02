@@ -59,7 +59,7 @@ const isAsset = (url) =>
  * one small request on a cold start and nothing at all offline.
  */
 const isMutable = (url) => url.origin === self.location.origin
-  && (/^\/(favicon|apple-touch-icon)/.test(url.pathname) || url.pathname === '/manifest.json');
+  && (/^\/(favicon|apple-touch-icon|app-icon)/.test(url.pathname) || url.pathname === '/manifest.json');
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;

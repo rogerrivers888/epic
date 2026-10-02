@@ -175,8 +175,13 @@ for (const [out, size] of [['apps/web/public/favicon-16.png', 16], ['apps/web/pu
   ['apps/web/public/favicon-512.png', 512], ['apps/web/assets/favicon.png', 48]]) favicon(out, size);
 // The dark-tab alternative, offered to Chrome by `media` in index.html.
 square('epic-favicon-ink.svg')('apps/web/public/favicon-dark-32.png', 32);
-// The home-screen icon keeps its hole: it is never seen at 16px.
-square('epic-app-icon.svg')('apps/web/public/apple-touch-icon.png', 180);
+// The home-screen icon keeps its hole: it is never seen at 16px. On a phone's home
+// screen the pin is the maskable tile's — under half the tile — not the tab tile's
+// 0.82, which filled the icon edge to edge beside every other app (owner, 2 Oct
+// 2026: "the app icon is way too big"). The manifest's install icons are the same.
+square('epic-icon-maskable.svg')('apps/web/public/apple-touch-icon.png', 180);
+square('epic-icon-maskable.svg')('apps/web/public/app-icon-192.png', 192);
+square('epic-icon-maskable.svg')('apps/web/public/app-icon-512.png', 512);
 square('epic-app-icon.svg')('apps/web/assets/icon.png', 1024);
 square('epic-icon-maskable.svg')('apps/web/public/favicon-maskable-512.png', 512);
 raster(S('epic-symbol-ink.svg'), join(ROOT, 'apps/web/assets/splash-icon.png'), Math.round(512 * ASPECT), 512, true);
