@@ -133,6 +133,13 @@ async function askWaiting(client, subcategoryKey, setKey) {
       if ((await setIgnores(client, setKey, words.map((r) => r.norm))).length) continue;
       const q = await addQuestion({ attributeKey: w.attribute_key, setKey, scope: 'set' }, client);
       if (q && q.active === false) await client.query('update questions set active = true, updated_at = now() where id = $1', [q.id]);
+      // The drawer's approved candidates now have a question to point at.
+      if (q) {
+        await client.query(
+          `update harvest_candidates set question_id = $1
+            where subcategory = $2 and status = 'promoted' and question_id is null
+              and norm = any($3)`, [q.id, subcategoryKey, words.map((r) => r.norm)]);
+      }
     }
     await client.query('delete from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [w.attribute_key, subcategoryKey]);
   }
@@ -934,6 +941,8 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     const { rows: [globalQ] } = await client.query("select id, active from questions where attribute_key = $1 and scope = 'global' limit 1", [key]);
     const waiting = [];
     const blocked = [];
+    const { rows: aliasRows2 } = await client.query('select norm from attribute_aliases where target_key = $1', [key]);
+    const wordings = [...new Set([norm, ...aliasRows2.map((r) => r.norm)])];
     if (globalQ) {
       // Asked everywhere already: no set asks it, just make sure the global is on.
       if (!globalQ.active) { await reactivate(globalQ.id); asked += 1; }
@@ -952,7 +961,9 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
         // asks every drawer on the set. If any of them ignored the word ("never ask
         // here again"), the ignore stands and this set is not asked — reported back,
         // never silently overridden (Codex, 2 Oct 2026).
-        const vetoes = await setIgnores(client, set.set_key, [norm]);
+        // Every wording of the fact, not just this spelling: a drawer that ignored
+        // another alias of it has refused the same fact (Codex, 2 Oct 2026).
+        const vetoes = await setIgnores(client, set.set_key, wordings);
         if (vetoes.length) { blocked.push({ setKey: set.set_key, ignoredIn: vetoes }); continue; }
         const { rows: [existing] } = await client.query(
           "select id, active from questions where attribute_key = $1 and scope = 'set' and set_key = $2 limit 1", [key, set.set_key]);
@@ -976,8 +987,19 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
       // the word, like ignoreFeature, so none is left to be promoted a second time on
       // the ordinary candidate screen (Codex, 2 Oct 2026). Each one's drawer was asked
       // above.
-      "update harvest_candidates set status = 'promoted', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null where norm = $1 and status in ('new', 'unresolved')",
-      [norm, actor]);
+      // Each is linked to the question it is now asked by — its drawer's set question,
+      // or the global one — so the decision trail does not read "never checked
+      // anywhere" for a word that was (Codex, 2 Oct 2026). A drawer still waiting for
+      // a set is linked when attach() asks it.
+      `update harvest_candidates c
+          set status = 'promoted', decided_by = $2, decided_at = now(), examples = '{}', evidence = null, evidence_ref = null,
+              question_id = (select q.id from questions q
+                              where q.attribute_key = $3 and q.active
+                                and (q.scope = 'global'
+                                     or q.set_key = (select qs.set_key from question_set_subcategories qs where qs.subcategory_key = c.subcategory))
+                              order by (q.scope = 'global') desc limit 1)
+        where c.norm = $1 and c.status in ('new', 'unresolved')`,
+      [norm, actor, key]);
     await client.query('delete from review_sightings where norm = $1', [norm]);
     // A word approved into a fact is no longer ignored: lift any tombstone so the
     // decision reads consistently (Codex, 2 Oct 2026).

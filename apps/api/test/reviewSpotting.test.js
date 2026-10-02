@@ -994,4 +994,64 @@ test('an ordinary promotion waits for the word’s locks, like the review decisi
   }
 });
 
+test('approved candidates point at the question that now asks them, including once a set arrives', async () => {
+  // Codex, 2 Oct 2026: promoted with no question_id, the decision trail read "never
+  // checked anywhere" for a word that was being asked.
+  const subA = 'c30-qid-a'; const subB = 'c30-qid-b';
+  const a = 'google:ChIJ_c30_qid_a'; const b = 'google:ChIJ_c30_qid_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 qid A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 qid B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query('delete from question_set_subcategories where subcategory_key = $1', [subB]);
+  await query("insert into question_sets (key, name) values ('c30-qid-set-a', 'A'), ('c30-qid-set-b', 'B') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-qid-set-a') on conflict do nothing", [subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await query("delete from attribute_aliases where norm = 'gun room'").catch(() => {});
+
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A gun room.' } });
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A gun room.' } });
+  const res = await sets.approveFeature('gun room', { actor: 'tester' });
+  const qidOf = async (sub) => (await query("select question_id from harvest_candidates where norm = 'gun room' and subcategory = $1", [sub])).rows[0].question_id;
+  const { rows: [qa] } = await query("select id from questions where attribute_key = $1 and set_key = 'c30-qid-set-a'", [res.attributeKey]);
+  assert.equal(await qidOf(subA), qa.id, 'the candidate in A points at A’s question');
+  assert.equal(await qidOf(subB), null, 'B has no set yet, so nothing to point at');
+  await sets.attach('c30-qid-set-b', subB);
+  const { rows: [qb] } = await query("select id from questions where attribute_key = $1 and set_key = 'c30-qid-set-b'", [res.attributeKey]);
+  assert.equal(await qidOf(subB), qb.id, 'and points at B’s question once the set is attached');
+});
+
+test('a drawer that ignored another wording of the fact still holds back its shared set', async () => {
+  // Codex, 2 Oct 2026: the shared-set check looked at the approved spelling only;
+  // an ignore of another alias of the same fact is the same refusal.
+  const subA = 'c30-alias-ign-a'; const subB = 'c30-alias-ign-b';
+  const a = 'google:ChIJ_c30_ai_a'; const b = 'google:ChIJ_c30_ai_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 ai A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 ai B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query("insert into question_sets (key, name) values ('c30-ai-set', 'C30 ai set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-ai-set'), ($2, 'c30-ai-set') on conflict do nothing", [subA, subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  // One fact, two wordings: "mud room" and "boot area".
+  await query("insert into place_attributes (key, label, kind) values ('mud-room', 'Mud room', 'yesno') on conflict (key) do update set active = true");
+  await query("delete from questions where attribute_key = 'mud-room'");
+  await query("insert into attribute_aliases (norm, target_key, raw) values ('boot area', 'mud-room', 'boot area') on conflict (norm) do update set target_key = 'mud-room'");
+
+  // Drawer A ignored the other wording.
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A boot area.' } });
+  const { rows: [candA] } = await query("select id from harvest_candidates where norm = 'boot area' and subcategory = $1", [subA]);
+  await sets.ignoreCandidate(candA.id, { actor: 'tester' });
+
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A mud room.' } });
+  const res = await sets.approveFeature('mud room', { actor: 'tester' });
+  assert.equal(res.attributeKey, 'mud-room');
+  assert.deepEqual(res.blocked, [{ setKey: 'c30-ai-set', ignoredIn: [subA] }], 'the shared set is held back for the other wording');
+  assert.equal((await query("select count(*)::int n from questions where attribute_key = 'mud-room' and set_key = 'c30-ai-set'")).rows[0].n, 0, 'no question over the ignore');
+});
+
 test.after(async () => { await pool.end(); });
