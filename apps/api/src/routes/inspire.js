@@ -655,12 +655,10 @@ inspire.get('/around', async (req, res, next) => {
   try {
     const started = Date.now();
     const household = await currentHousehold();
-    // The reach matrix is built to 90 minutes, so 90 is the honest ceiling: a
-    // "2 h" request cannot include a place the matrix never measured at 100–120
-    // min. Clamp to what can actually be answered rather than return minutes:120
-    // over a 90-minute reach (owner wants 30 → 1 h → 2 h to rise; 2 h is the
-    // full 90-min matrix, which is more than 1 h, so it does — Codex). Extending
-    // to a real two hours is rebuilding the matrix with a higher cap.
+    // Up to two hours (CAP_MINUTES, 1 Oct 2026). Until the wider driving build
+    // has run, a ring past what its origin was built to says `shortOfHorizon`
+    // and every count drawn from it is a floor — never a shorter reach's count
+    // passed off as two hours.
     const minutes = Math.min(CAP_MINUTES, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const mode = travelMode(req.query.mode);
     const wanted = String(req.query.cat ?? '').trim();
@@ -695,6 +693,9 @@ inspire.get('/around', async (req, res, next) => {
         counts, unresolved: census.unresolved ?? {},
         categoryMemberships: Object.values(counts).reduce((a, n) => a + (Number(n) || 0), 0),
         cells: ring.cells.length, outcodes: ring.outcodes.length, notCensused: census.missing.length,
+        // Asked past what the origin's matrix was built to: every count here is
+        // at least, not exactly (Codex).
+        shortOfHorizon: Boolean(ring.shortOfHorizon),
         // 'matrix' = real (estimated) journey times; 'straight-line' = a
         // distance-and-speed estimate because this mode has no matrix yet.
         method: ring.method ?? 'matrix', estimated: (ring.method ?? 'matrix') === 'straight-line',
@@ -847,12 +848,10 @@ inspire.get('/near', async (req, res, next) => {
     // Everything below it — the atlas pool, the sweep's food, the look-around —
     // is what happens outside that: abroad, or in a country whose matrix has
     // not been built. It is kept for exactly that, and for nothing else.
-    // The reach matrix is built to 90 minutes, so 90 is the honest ceiling: a
-    // "2 h" request cannot include a place the matrix never measured at 100–120
-    // min. Clamp to what can actually be answered rather than return minutes:120
-    // over a 90-minute reach (owner wants 30 → 1 h → 2 h to rise; 2 h is the
-    // full 90-min matrix, which is more than 1 h, so it does — Codex). Extending
-    // to a real two hours is rebuilding the matrix with a higher cap.
+    // Up to two hours (CAP_MINUTES, 1 Oct 2026). Until the wider driving build
+    // has run, a ring past what its origin was built to says `shortOfHorizon`
+    // and every count drawn from it is a floor — never a shorter reach's count
+    // passed off as two hours.
     const minutes = Math.min(CAP_MINUTES, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const ring = await ringFrom({ ...req.query, lat: centre.lat, lng: centre.lng, label }, { minutes, mode });
     if (ring) {

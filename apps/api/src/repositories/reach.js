@@ -588,7 +588,9 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // A driving ring asked past what its origin has been built to — two hours,
   // before the wider build is approved and run — reads only the rows that exist.
   // Said out loud so the count is drawn as a floor, never passed off as whole.
-  const shortOfHorizon = travelMode(mode) === 'driving' && !(await originBuilt(cell, 'driving', wantHorizon));
+  // Built, but not that far — a never-built origin is a different state and is
+  // left to the handling it already has.
+  const shortOfHorizon = travelMode(mode) === 'driving' && (await builtShort(cell, 'driving', wantHorizon));
   if (travelMode(mode) !== 'driving' && !marker) {
     method = 'straight-line';
     // Centre the estimate on the requested point when there is one, so the count
@@ -760,6 +762,15 @@ export async function setApprovedHorizon(mode, minutes, { by = null } = {}) {
       where g.scheme = 'sector' and (b.from_cell is null or b.cap_minutes < $2)`,
     [canonical, minutes]);
   return { mode: canonical, minutes, was, cellsToRebuild: todo.n };
+}
+
+/** Whether the origin has a build for this mode that stops short of `wantMinutes`. */
+async function builtShort(cell, mode, wantMinutes) {
+  const { rows } = await query(
+    'select max(cap_minutes)::int as cap from cell_builds where from_cell = $1 and mode = $2',
+    [cell, travelMode(mode)]);
+  const cap = rows[0]?.cap;
+  return cap != null && cap < wantMinutes;
 }
 
 /** The method the origin's marker was built by — 'estimate' or 'osrm' — or null

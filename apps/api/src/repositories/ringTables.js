@@ -54,7 +54,7 @@ import { travelMode } from '../domain/travel.js';
  * the Inspire route both cap a band. Keep in step with HOW_FAR by hand; a band
  * the app can ask for that is not here is a band that reads "no depth yet".
  */
-export const BANDS = [20, 30, 60, 90];
+export const BANDS = [20, 30, 60, 90, 120];
 /** The census's own cycle. */
 export const CYCLE_DAYS = 30;
 /** Enough of an order to page through; nobody scrolls past this. */
@@ -165,11 +165,14 @@ async function countRing({ cell, lat = null, lng = null, kind, minutes }) {
       // A district nobody has looked at contributes nought, and nought is not
       // an answer — so it makes the count a floor, exactly as an unresolved box
       // does.
-      floor: unresolved > 0 || notCensused > 0,
+      // Two hours before the wider driving build has run reads only the rows
+      // that exist, so it is stored as a floor; the rebuild's ring recount
+      // (refreshAllBefore) replaces it once the matrix reaches it.
+      floor: unresolved > 0 || notCensused > 0 || Boolean(ring.shortOfHorizon),
     });
   }
   // The ring's own row, always: what makes an empty ring a counted one.
-  counts.push({ category: MARKER, places: 0, unresolved: 0, floor: notCensused > 0 });
+  counts.push({ category: MARKER, places: 0, unresolved: 0, floor: notCensused > 0 || Boolean(ring.shortOfHorizon) });
 
   // The order: the places the count is made of, joined to the freshest score
   // we hold for each — the same rule `household()` ranks by, so a shelf and a
