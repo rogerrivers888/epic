@@ -134,8 +134,8 @@ export async function payoutsDue({ now = new Date(), limit = 100 } = {}) {
        join hosts h on h.id = p.host_id
        left join offer_sessions s on s.id = p.session_id
        left join host_offers o on o.id = p.offer_id
-      where p.state in ('scheduled', 'held')
-        and (p.state = 'held' or p.release_at <= $1
+      where (p.state in ('scheduled', 'held') or (p.state = 'released' and p.updated_at < $1::timestamptz - interval '10 minutes'))
+        and (p.state in ('held', 'released') or p.release_at <= $1
              or exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                          where bs.session_id = p.session_id and b.confirmed_happened = 'yes')
              or exists (select 1 from booking_sessions bs join host_reviews r on r.booking_id = bs.booking_id

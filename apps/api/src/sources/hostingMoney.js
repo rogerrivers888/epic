@@ -52,7 +52,7 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
   const s = await settings.current();
   for (const p of await ledger.payoutsDue({ now })) {
-    const d = payoutDecision({
+    const d = p.state === 'released' ? { state: 'release', by: p.released_by ?? 'time' } : payoutDecision({
       endsAt: p.session_ends_at ?? p.release_at, now,
       complaintOpen: p.complaint_open, guestConfirmed: p.guest_confirmed, reviewed: p.reviewed,
       taxMissing: !p.tax_reference, stripeReady: p.payouts_state === 'ready' && Boolean(p.stripe_account_id),
@@ -69,7 +69,9 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
       }
       continue;
     }
-    const claimed = await ledger.claimPayout(p.id, { by: d.by });
+    // A payout claimed by a run that died before it finished is picked up again: the transfer carries the
+    // payout's own idempotency key, so Stripe answers with the same transfer, never a second one (Codex, 2 Oct 2026).
+    const claimed = p.state === 'released' ? p : await ledger.claimPayout(p.id, { by: d.by });
     if (!claimed) continue; // another run has it
     const amount = claimed.amount_pence + claimed.tips_pence;
     try {

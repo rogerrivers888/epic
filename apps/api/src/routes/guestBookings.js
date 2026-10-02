@@ -320,7 +320,16 @@ async function book({ offerId, body, household, account, invite = null }) {
       else await notifications.notify({ householdId: host.household_id, kind: 'ask_to_book_request', title: `Ask to book: ${o.title ?? 'your offer'}`, link: hostLink(o.id), dedupeKey: `ask:${b.id}` }).catch(() => null);
       return { booking: { id: b.id, state: asked ? 'requested' : 'confirmed' }, pay: null };
     }
-    const pi = await stripe.paymentIntent({ amountPence: b.value_pence, bookingId: b.id, offerId: o.id, householdId: b.household_id, hold: asked, email: account?.email ?? null, idempotencyKey: `booking-${b.id}` });
+    let pi;
+    try {
+      pi = await stripe.paymentIntent({ amountPence: b.value_pence, bookingId: b.id, offerId: o.id, householdId: b.household_id, hold: asked, email: account?.email ?? null, idempotencyKey: `booking-${b.id}` });
+    } catch (err) {
+      // Stripe said no or couldn't be reached: the places go back at once rather than waiting on a payment that can't start (Codex, 2 Oct 2026).
+      await query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'payment_setup_failed' where id = $1 and state = 'pending'`, [b.id]);
+      await query(`update booking_sessions set state = 'cancelled' where booking_id = $1`, [b.id]);
+      if (invite) await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where id = $1 and booking_id = $2`, [invite.id, b.id]);
+      throw err;
+    }
     await query('update experience_bookings set stripe_payment_intent = $2 where id = $1', [b.id, pi.id]);
     await ledger.record({ kind: asked ? 'hold' : 'charge', bookingId: b.id, offerId: o.id, hostId: host.id, householdId: b.household_id, amountPence: b.value_pence, epicPence: b.fee_pence, hostPence: b.host_pence, bookingValuePence: b.value_pence, ratePct: b.fee_rate_pct, state: 'pending', stripeRef: pi.id, mode: 'test', reason: b.fee_reason });
     return { booking: { id: b.id, state: 'pending_payment' }, pay: { clientSecret: pi.client_secret ?? null, paymentIntent: pi.id, amountPence: b.value_pence, hold: asked } };
@@ -407,11 +416,20 @@ router.post('/experiences/:id/waitlist', async (req, res, next) => {
       sessionId = req.body?.sessionId;
       if (!ahead(sessions, o).some((x) => x.id === sessionId)) throw refuse(400, 'bad_session', 'Pick the session.');
     }
-    const { rows: [w] } = await query(
-      `insert into offer_waitlist (offer_id, session_id, household_id, party) values ($1, $2, $3, $4)
-       on conflict do nothing returning *`,
-      [o.id, sessionId, household.id, party],
-    );
+    // Only when it is full, counted under the event's lock (Codex, 2 Oct 2026): a free place is booked, not queued for.
+    const w = await withTransaction(async (c) => {
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${o.id}`]);
+      const now = await eventWithSessions(o.id, c);
+      const targets = sessionId ? now.sessions.filter((x) => x.id === sessionId) : ahead(now.sessions, now.offer);
+      const left = Math.min(...targets.map((x) => (placesLeft(x, now.offer) ?? Infinity) - x.reserved));
+      if (left >= party) throw refuse(409, 'not_full', 'There’s room — book it instead.');
+      const { rows: [row] } = await c.query(
+        `insert into offer_waitlist (offer_id, session_id, household_id, party) values ($1, $2, $3, $4)
+         on conflict do nothing returning *`,
+        [o.id, sessionId, household.id, party],
+      );
+      return row;
+    });
     if (!w) throw refuse(409, 'already_waiting', 'You’re on the waiting list already.');
     const { rows: [pos] } = await query(
       `select count(*)::int as n from offer_waitlist where offer_id = $1 and session_id is not distinct from $2 and state in ('waiting', 'offered')
@@ -754,7 +772,13 @@ router.post('/booked/:id/tip', async (req, res, next) => {
       `insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence) values ($1, $2, $3, $4, $5, $6) returning *`,
       [b.id, b.offer_id, b.host_id, household.id, amount, fee],
     );
-    const pi = await stripe.paymentIntent({ amountPence: amount + fee, bookingId: b.id, offerId: b.offer_id, householdId: household.id, idempotencyKey: `tip-${t.id}`, kind: 'tip', tipId: t.id });
+    let pi;
+    try { pi = await stripe.paymentIntent({ amountPence: amount + fee, bookingId: b.id, offerId: b.offer_id, householdId: household.id, idempotencyKey: `tip-${t.id}`, kind: 'tip', tipId: t.id }); }
+    catch (err) {
+      // A tip that never reached Stripe is not a tip: the guest may try again (Codex, 2 Oct 2026).
+      await query(`update booking_tips set state = 'failed' where id = $1 and stripe_ref is null`, [t.id]);
+      throw err;
+    }
     await query('update booking_tips set stripe_ref = $2 where id = $1', [t.id, pi.id]);
     res.status(201).json({ tip: { id: t.id, amountPence: amount, feePence: fee, totalPence: amount + fee }, pay: { clientSecret: pi.client_secret ?? null, paymentIntent: pi.id } });
   } catch (err) { next(err); }
@@ -806,22 +830,24 @@ router.post('/invited/:token/book', async (req, res, next) => {
 // the host's answer to an Ask to book
 // ---------------------------------------------------------------------------
 
-async function myRequest(id) {
+async function myRequest(id, { retryCapture = false } = {}) {
   const household = await currentHousehold();
   const host = await repo.hostByHousehold(household.id);
   if (!host || !UUID.test(String(id))) throw refuse(404, 'not_found', 'That request isn’t yours.');
   const { rows: [b] } = await query(`select * from experience_bookings where id = $1 and host_id = $2`, [id, host.id]);
   if (!b) throw refuse(404, 'not_found', 'That request isn’t yours.');
-  if (b.request_state !== 'asked') throw refuse(409, 'answered', 'This request has been answered.');
-  return { host, b, o: await repo.offerById(b.offer_id) };
+  // Accepted with the card still only held: the capture failed last time, so it may be tried again (Codex, 2 Oct 2026).
+  const retry = retryCapture && b.request_state === 'accepted' && b.payment_state === 'held';
+  if (b.request_state !== 'asked' && !retry) throw refuse(409, 'answered', 'This request has been answered.');
+  return { host, b, o: await repo.offerById(b.offer_id), retry };
 }
 
 router.post('/host/lanes/requests/:id/accept', async (req, res, next) => {
   try {
-    const { host, b, o } = await myRequest(req.params.id);
-    if (b.respond_by && new Date(b.respond_by) < new Date()) throw refuse(409, 'lapsed', 'This request has lapsed.');
+    const { host, b, o, retry } = await myRequest(req.params.id, { retryCapture: true });
+    if (!retry && b.respond_by && new Date(b.respond_by) < new Date()) throw refuse(409, 'lapsed', 'This request has lapsed.');
     // The session is made now, from the slot the guest asked for.
-    const sessionId = await withTransaction(async (c) => {
+    const sessionId = retry ? b.session_id : await withTransaction(async (c) => {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${o.id}`]);
       const { rows: [again] } = await c.query('select request_state from experience_bookings where id = $1 for update', [b.id]);
       if (again.request_state !== 'asked') throw refuse(409, 'answered', 'This request has been answered.');
@@ -836,7 +862,10 @@ router.post('/host/lanes/requests/:id/accept', async (req, res, next) => {
       return s.id;
     });
     if (b.payment_state === 'held' && b.stripe_payment_intent) {
-      const pi = await stripe.capturePayment(b.stripe_payment_intent, { householdId: b.household_id, idempotencyKey: `capture-${b.id}` });
+      // The same idempotency key every time: a retry after a failed or lost answer is the same capture.
+      let pi;
+      try { pi = await stripe.capturePayment(b.stripe_payment_intent, { householdId: b.household_id, idempotencyKey: `capture-${b.id}` }); }
+      catch (err) { throw refuse(502, 'capture_failed', 'Accepted, but the card couldn’t be charged just now. Try Accept again in a moment.'); }
       await applyPaymentIntent(pi);
     } else {
       await query(`update experience_bookings set state = 'confirmed' where id = $1 and state = 'pending'`, [b.id]);
@@ -876,7 +905,7 @@ export async function lapseRequests({ now = new Date() } = {}) {
 export async function dropUnpaid({ now = new Date() } = {}) {
   const { rows } = await query(
     `update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'unpaid'
-      where state = 'pending' and payment_state = 'none' and request_state is null and stripe_payment_intent is not null and created_at < $1 - interval '30 minutes'
+      where state = 'pending' and payment_state = 'none' and request_state is null and value_pence > 0 and created_at < $1 - interval '30 minutes'
       returning id`,
     [now],
   );

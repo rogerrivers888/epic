@@ -13,6 +13,7 @@ import express from 'express';
 
 // --- a fake Stripe: PaymentIntents whose state the test sets ---------------
 const intents = new Map();
+let failIntents = false;
 const calls = [];
 let n = 0;
 const fake = http.createServer((req, res) => {
@@ -23,6 +24,7 @@ const fake = http.createServer((req, res) => {
     const json = (o, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     const form = new URLSearchParams(body);
     if (req.url === '/v1/payment_intents' && req.method === 'POST') {
+      if (failIntents) return json({ error: { code: 'api_error' } }, 500);
       n += 1;
       const meta = {}; for (const [k, v] of form) { const m = /^metadata\[(.+)\]$/.exec(k); if (m) meta[m[1]] = v; }
       const pi = { id: `pi_${n}`, object: 'payment_intent', client_secret: `pi_${n}_secret`, amount: Number(form.get('amount')), amount_received: 0, status: form.get('capture_method') === 'manual' ? 'requires_payment_method' : 'requires_payment_method', manual: form.get('capture_method') === 'manual', metadata: meta };
@@ -380,4 +382,32 @@ test('the refund queue sends a guest cancellation through Stripe once', async ()
   assert.ok(out.sent >= 1);
   assert.equal((await engine.processRefunds()).sent, 0);
   assert.ok(calls.filter((c) => c.url === '/v1/refunds').length > before);
+});
+
+test('Codex: Stripe failing mid-way never strands a booking, a tip, an accepted request or a waiting-list place', async () => {
+  settings.forget();
+  // A waiting list only when it is full.
+  const roomy = await anEvent({ max: 5, waitlist: true });
+  const a = await aPerson();
+  const sa = await server(a.account);
+  try {
+    assert.equal((await sa.send('POST', `/api/experiences/${roomy.o.id}/waitlist`, { party: 1 })).body.error, 'not_full');
+  } finally { await sa.close(); }
+
+  // PaymentIntent creation fails: the places go back.
+  const paid = await anEvent({ price: 2000, priceMode: 'same_each', max: 2 });
+  const b = await aPerson();
+  const sb = await server(b.account);
+  try {
+    failIntents = true;
+    const r = await sb.send('POST', `/api/experiences/${paid.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 2 } });
+    assert.ok(r.status >= 500);
+    const { rows: [bk] } = await query('select state, cancel_cause from experience_bookings where offer_id = $1', [paid.o.id]);
+    assert.deepEqual([bk.state, bk.cancel_cause], ['cancelled', 'payment_setup_failed']);
+  } finally { failIntents = false; await sb.close(); }
+  const c = await aPerson();
+  const sc = await server(c.account);
+  try {
+    assert.equal((await sc.send('POST', `/api/experiences/${paid.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 2 } })).status, 201, 'the two places came back');
+  } finally { await sc.close(); }
 });

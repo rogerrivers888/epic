@@ -254,3 +254,15 @@ test('an incident can’t be deleted', async () => {
   const { rows: [i] } = await query(`insert into session_incidents (reporter, body) values ('host', 'A child fell') returning id`);
   await assert.rejects(() => query('delete from session_incidents where id = $1', [i.id]), /never deleted/);
 });
+
+test('Codex: a payout claimed by a run that died is picked up again, with the same transfer key', async () => {
+  settings.forget();
+  const { sessions: [s] } = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  const { rows: [p] } = await query('select * from host_payouts where session_id = $1', [s.id]);
+  await query(`update host_payouts set state = 'released', released_by = 'time', updated_at = now() - interval '20 minutes' where id = $1`, [p.id]);
+  const keys = [];
+  await money.releasePayouts({ transfer: async (t) => { keys.push(t.idempotencyKey); return { id: 'tr_resumed' }; }, status: () => ({ ready: true }) });
+  assert.equal(keys.filter((k) => k === `payout-${p.id}`).length, 1, 'once, with its own key');
+  assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'paid');
+});
