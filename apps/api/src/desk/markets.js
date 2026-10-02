@@ -219,7 +219,7 @@ export async function countryContradictions() {
   for (;;) {
     const { rows } = await query(`
       select pi.venue_ref, upper(pi.country_code) as country, r.name, r.phone, r.website, r.price_range,
-             coalesce(jsonb_agg(distinct jsonb_build_object('source', f.source, 'value', f.value #>> '{}'))
+             coalesce(jsonb_agg(jsonb_build_object('source', f.source, 'value', f.value #>> '{}') order by f.source)
                         filter (where f.venue_ref is not null), '[]'::jsonb)
                -- And the record's own address, which a back-office edit writes only
                -- there (Codex), labelled as the record's.
@@ -240,14 +240,16 @@ export async function countryContradictions() {
       const d = disagreements({ country: r.country, addresses: r.addresses ?? [], phone: r.phone, website: r.website, priceRange: r.price_range }, currencyOf);
       if (!d.length) continue;
       flagged += 1;
-      if (d.length >= 2) twoOrMore += 1;
-      for (const x of d) bySignal[x.signal] += 1;
+      const kinds = new Set(d.map((x) => x.signal)); // a signal counts once a place
+      if (kinds.size >= 2) twoOrMore += 1;
+      for (const k of kinds) bySignal[k] += 1;
       byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + 1);
       list.push({ venue_ref: r.venue_ref, name: r.name, stamped: r.country, signals: d });
     }
     after = rows[rows.length - 1].venue_ref;
   }
-  list.sort((a, b) => b.signals.length - a.signals.length || a.venue_ref.localeCompare(b.venue_ref));
+  const kindsOf = (p) => new Set(p.signals.map((x) => x.signal)).size;
+  list.sort((a, b) => kindsOf(b) - kindsOf(a) || a.venue_ref.localeCompare(b.venue_ref));
   return {
     checkedAt: new Date().toISOString(),
     checked, flagged, twoOrMore, bySignal,

@@ -91,7 +91,9 @@ export function disagreements({ country, addresses = [], phone, website, priceRa
     const source = typeof a === 'string' ? 'nominatim' : a?.source;
     if (!value) continue;
     const named = source === 'nominatim' ? countryNamedIn(value) : strictLastCountry(value);
-    if (named && named !== stamp) { out.push({ signal: 'address', says: named, evidence: value, source }); break; }
+    // Every contradicting address, not the first found: which one came first is the
+    // database's row order, and the operator should see them all (Codex).
+    if (named && named !== stamp) out.push({ signal: 'address', says: named, evidence: value, source });
   }
   // Only a conclusive phone objects: the stamp must have a calling code this table
   // holds, and the number a recognised prefix that is not one of its countries'.
