@@ -135,8 +135,8 @@ export async function scorePicture({ venueRef, imageId = null, imageUrl = null, 
     ? await query(
       `insert into photo_fitness (venue_ref, image_id, image_url, verdict, checks, model, cost_usd)
        values ($1, $2, $3, $4, $5, $6, $7)
-       on conflict (image_id) where image_id is not null do update set
-         venue_ref = excluded.venue_ref, verdict = excluded.verdict, checks = excluded.checks,
+       on conflict (venue_ref, image_id) where image_id is not null do update set
+         verdict = excluded.verdict, checks = excluded.checks,
          model = excluded.model, cost_usd = excluded.cost_usd, checked_at = now()
        returning *`, args)
     : await query(
@@ -160,7 +160,7 @@ export async function unscored({ venueRef = null, limit = 1000 } = {}) {
          from image_links l join image_assets i on i.id = l.image_id
          left join place_records r on r.venue_ref = l.subject_id
         where l.subject_type = 'place' and i.moderation <> 'rejected'
-          and not exists (select 1 from photo_fitness f where f.image_id = i.id)
+          and not exists (select 1 from photo_fitness f where f.image_id = i.id and f.venue_ref = l.subject_id)
        union all
        select v.venue_ref, null::uuid, v.image_url, r.name, r.category
          from venue_site_images v left join place_records r on r.venue_ref = v.venue_ref
@@ -176,11 +176,32 @@ export async function unscored({ venueRef = null, limit = 1000 } = {}) {
  * Look at every unscored picture of one place, one after another. Never
  * throws: a picture that fails is left unscored for the next look.
  */
-export async function scorePlace(venueRef, { householdId = null } = {}, deps = {}) {
+// One look at a time, across every caller — a press in the back office, a
+// saved place's research finishing — so two of them can never pay for the
+// same picture at once (Codex, 2 Oct 2026). Each picture is checked again
+// just before it is looked at, inside the line.
+let line = Promise.resolve();
+const inLine = (fn) => { const run = line.then(fn, fn); line = run.catch(() => null); return run; };
+let bulkRunning = false;
+export const scoringBusy = () => bulkRunning;
+
+async function stillUnscored(p) {
+  const { rows } = p.image_id
+    ? await query('select 1 from photo_fitness where venue_ref = $1 and image_id = $2', [p.venue_ref, p.image_id])
+    : await query('select 1 from photo_fitness where venue_ref = $1 and image_id is null and image_url = $2', [p.venue_ref, p.image_url]);
+  return !rows.length;
+}
+
+export function scorePlace(venueRef, opts = {}, deps = {}) {
+  return inLine(() => scorePlaceNow(venueRef, opts, deps));
+}
+
+async function scorePlaceNow(venueRef, { householdId = null } = {}, deps = {}) {
   const todo = await unscored({ venueRef, limit: 12 });
   let scored = 0; let failed = 0;
   for (const p of todo) {
     try {
+      if (!(await stillUnscored(p))) continue;
       const out = await scorePicture({ venueRef, imageId: p.image_id, imageUrl: p.image_url, name: p.name, category: p.category, householdId }, deps);
       if (!out.skipped) scored += 1;
     } catch { failed += 1; }
@@ -193,14 +214,21 @@ export async function scorePlace(venueRef, { householdId = null } = {}, deps = {
  * press. Refused unless handed the count its quote showed.
  */
 export async function scoreAll({ householdId, expectPictures }, deps = {}) {
+  // A second press while one run is going is refused, not queued behind it.
+  if (bulkRunning) return { started: false, why: 'already_running' };
   const todo = await unscored({ limit: 5000 });
   if (Number(expectPictures) !== todo.length) return { started: false, why: 'quote_changed', pictures: todo.length };
-  (async () => {
+  bulkRunning = true;
+  const done = inLine(async () => {
     for (const p of todo) {
-      try { await scorePicture({ venueRef: p.venue_ref, imageId: p.image_id, imageUrl: p.image_url, name: p.name, category: p.category, householdId }, deps); } catch { /* left for the next look */ }
+      try {
+        if (!(await stillUnscored(p))) continue;
+        await scorePicture({ venueRef: p.venue_ref, imageId: p.image_id, imageUrl: p.image_url, name: p.name, category: p.category, householdId }, deps);
+      } catch { /* left for the next look */ }
     }
-  })().catch(() => null);
-  return { started: true, pictures: todo.length };
+  }).finally(() => { bulkRunning = false; });
+  done.catch(() => null);
+  return { started: true, pictures: todo.length, done };
 }
 
 const RANK = { fit: 0, borderline: 1, not_fit: 2 };

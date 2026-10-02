@@ -66,7 +66,7 @@ async function ownedPicturesOf(venueRef) {
             i.attribution_required, i.moderation, i.width, i.height, i.lqip, l.role, l.position,
             f.verdict as fitness, f.checks as fitness_checks
        from image_links l join image_assets i on i.id = l.image_id
-       left join photo_fitness f on f.image_id = i.id
+       left join photo_fitness f on f.image_id = i.id and f.venue_ref = l.subject_id
       where l.subject_type = 'place' and l.subject_id = $1
       -- Turned-down pictures too: a place judged not fit stays in the review so
       -- its verdict can be changed, and the owner must see what he is
@@ -197,7 +197,11 @@ const REVIEWED = `(pr.venue_ref is not null and not exists (
                      where v.venue_ref = r.venue_ref and v.found_at > pr.reviewed_at))`;
 
 // A place's best machine verdict over its pictures (sources/photoFitness.js).
-const MACHINE = `(select f.verdict from photo_fitness f where f.venue_ref = r.venue_ref
+// Only pictures the place still holds: a verdict on one since removed from the
+// venue's page, or unlinked, says nothing about the place now (Codex, 2 Oct 2026).
+const HELD_FITNESS = `(f.image_id is not null and exists (select 1 from image_links l where l.image_id = f.image_id and l.subject_type = 'place' and l.subject_id = f.venue_ref))
+                      or (f.image_id is null and exists (select 1 from venue_site_images v where v.venue_ref = f.venue_ref and v.image_url = f.image_url))`;
+const MACHINE = `(select f.verdict from photo_fitness f where f.venue_ref = r.venue_ref and (${HELD_FITNESS})
                    order by case f.verdict when 'fit' then 0 when 'borderline' then 1 else 2 end limit 1)`;
 
 photoReviewRouter.get('/', requires('view_library'), async (req, res, next) => {
@@ -352,7 +356,7 @@ photoReviewRouter.get('/board', requires('view_library'), async (_req, res, next
                 (exists (select 1 from image_links l join image_assets i on i.id = l.image_id
                           where l.subject_type = 'place' and l.subject_id = pi.venue_ref and i.moderation <> 'rejected')
                  or exists (select 1 from venue_site_images v where v.venue_ref = pi.venue_ref)) as pictured,
-                (select f.verdict from photo_fitness f where f.venue_ref = pi.venue_ref
+                (select f.verdict from photo_fitness f where f.venue_ref = pi.venue_ref and (${HELD_FITNESS})
                   order by case f.verdict when 'fit' then 0 when 'borderline' then 1 else 2 end limit 1) as best
            from place_index pi where pi.ownership in ('owned', 'claimed')
        )
@@ -393,6 +397,7 @@ photoReviewRouter.post('/score', requires('manage_library'), requireOwnerSignedI
     const household = await currentHousehold();
     const out = await scoreAll({ householdId: household.id, expectPictures: req.body?.expectPictures });
     if (out.why === 'quote_changed') return res.status(409).json({ error: 'quote_changed', message: `There are ${out.pictures} pictures now — price it again.`, pictures: out.pictures });
-    res.status(202).json(out);
+    if (out.why === 'already_running') return res.status(409).json({ error: 'already_running', message: 'The pictures are being looked at now.' });
+    res.status(202).json({ started: out.started, pictures: out.pictures });
   } catch (err) { next(err); }
 });

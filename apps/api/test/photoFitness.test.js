@@ -112,9 +112,36 @@ test('the queue puts the machine\'s Not fit last, shows agreement, and the board
     assert.equal(list.places[1].machine, 'not_fit');
     assert.ok(list.summary.both >= 2);
     assert.equal(typeof list.summary.agreementPct, 'number');
+    // A verdict on a picture the place no longer holds says nothing about it now.
+    await query(`delete from image_links where subject_type = 'place' and subject_id = $1`, [good]);
+    const after = await (await fetch(`${base}/review?q=${encodeURIComponent(`Qtest ${tag}`)}&reviewed=no`)).json();
+    assert.equal(after.places.find((p) => p.venueRef === good), undefined, 'no pictures held, no longer in the review');
     const board = await (await fetch(`${base}/review/board`)).json();
     const funRow = board.rows.find((r) => r.category === 'fun' && !r.subcategory);
     assert.ok(funRow && funRow.places >= 4);
     assert.ok(funRow.fitPct > 0);
   } finally { await new Promise((d) => s.close(d)); }
+});
+
+test('two presses never pay twice; one picture on two places is judged for each; a removed picture\'s verdict no longer counts', async () => {
+  const a = `google:two-a-${randomUUID()}`; const b = `google:two-b-${randomUUID()}`;
+  const id = await picture(a);
+  await query(`insert into image_links (image_id, subject_type, subject_id, role, position) values ($1, 'place', $2, 'gallery', 10)`, [id, b]);
+  let calls = 0;
+  const deps = {
+    pictureOf: async () => ({ body: Buffer.from([0xff, 0xd8, 0xff]), mime: 'image/jpeg', longEdge: 1600 }),
+    parseStructured: async (args) => { calls += 1; await new Promise((r) => setTimeout(r, 20)); args.meta.costUsd = 0.003; return all('yes'); },
+  };
+  // Both places' pictures, by two callers at once.
+  await Promise.all([fit.scorePlace(a, {}, deps), fit.scorePlace(a, {}, deps), fit.scorePlace(b, {}, deps)]);
+  assert.equal(calls, 2, 'once for each place, never twice for the same one');
+  const { rows } = await query('select venue_ref from photo_fitness where image_id = $1 order by venue_ref', [id]);
+  assert.deepEqual(rows.map((r) => r.venue_ref).sort(), [a, b].sort());
+
+  const quote = (await fit.unscored({ limit: 5000 })).length;
+  const first = await fit.scoreAll({ householdId: null, expectPictures: quote }, deps);
+  const second = await fit.scoreAll({ householdId: null, expectPictures: quote }, deps);
+  assert.equal(first.started, true);
+  assert.equal(second.why, 'already_running', 'a second press while one runs is refused');
+  await first.done;
 });

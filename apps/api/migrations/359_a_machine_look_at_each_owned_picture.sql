@@ -20,6 +20,8 @@ create table if not exists photo_fitness (
   checked_at   timestamptz not null default now(),
   check (image_id is not null or image_url is not null)
 );
-create unique index if not exists photo_fitness_image_idx on photo_fitness (image_id) where image_id is not null;
+-- Per place and picture: "is it the actual place?" is asked of one venue, and a
+-- library picture can be linked to more than one.
+create unique index if not exists photo_fitness_image_idx on photo_fitness (venue_ref, image_id) where image_id is not null;
 create unique index if not exists photo_fitness_url_idx on photo_fitness (venue_ref, image_url) where image_id is null;
 create index if not exists photo_fitness_place_idx on photo_fitness (venue_ref);
