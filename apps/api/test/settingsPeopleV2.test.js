@@ -806,3 +806,24 @@ test('forgetting is permanent: a stale save adds to the never-learn list and nev
     assert.deepEqual([...got.neverLearn].sort(), ['italian', 'sushi'], 'nor does an empty list clear it');
   } finally { await srv.close(); }
 });
+
+test('leaving now with no length said still ends with the day window (at least an hour out)', async () => {
+  const { household: h, member } = await aHousehold(query); // 10:00–18:00
+  const { rows: [household] } = await query('select * from households where id = $1', [h.id]);
+  const out = await createTripFromIntent({
+    household, members: [{ ...member, isMinor: false }], intent: { attending: [] },
+    origin: { label: 'Home', lat: 51.5, lng: -0.1 },
+    destination: { label: 'Kew', lat: 51.48, lng: -0.29, countryCode: 'GB', locality: 'Kew' },
+    anchorPlace: null, title: 'Kew · now',
+  });
+  const { rows: [t] } = await query('select depart_at, return_at from trips where id = $1', [out.id ?? out.trip?.id]);
+  const minutes = (new Date(t.return_at) - new Date(t.depart_at)) / 60000;
+  // Whatever time the suite runs: never the whole 8-hour window tacked onto
+  // "now" past the window's end, and never less than an hour.
+  const { wallToUtc, wallClock } = await import('../src/domain/time.js');
+  const today = wallClock(new Date(), 'Europe/London').dateStr;
+  const winEnd = wallToUtc(today, '18:00', 'Europe/London').getTime();
+  assert.ok(minutes >= 60, `at least an hour out (${minutes} min)`);
+  assert.ok(new Date(t.return_at).getTime() <= Math.max(winEnd, new Date(t.depart_at).getTime() + 3600000),
+    'ends by the window close, or an hour after leaving if that is later');
+});

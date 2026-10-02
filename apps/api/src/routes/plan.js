@@ -493,6 +493,13 @@ export async function createTripFromIntent({ household, members, intent, origin,
   } else {
     depart = intent.date ? at(hourToTime(windowStart)) : roundUpToQuarter(new Date());
     returnAt = new Date(depart.getTime() + duration * 60_000);
+    // Leaving now with no length said: the day still ends when the household's
+    // window does — at 5pm with a 10–6 window that is an hour out, never
+    // 5pm–1am — and never less than an hour (Codex, 2 Oct 2026).
+    if (!intent.date && intent.duration_minutes == null) {
+      const winEnd = at(hourToTime(household.day_end ?? 18)).getTime();
+      returnAt = new Date(Math.max(depart.getTime() + 60 * 60_000, Math.min(returnAt.getTime(), winEnd)));
+    }
   }
   const wc = (d) => wallClock(d, tz).hhmm;
   // Unsaid, the household's own "Getting there" decides (Codex, 2 Oct 2026).

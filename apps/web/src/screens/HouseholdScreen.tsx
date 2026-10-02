@@ -542,18 +542,22 @@ function EditSheet({ data, member, refresh, canEdit, onClose }: { data: Househol
         birthDate: birth ?? (member.birthDate ? '' : undefined),
         mobile: thirteenPlus ? mobile.trim() : undefined,
       });
-      if (login && thirteenPlus && member.access?.status === 'none' && mobile.trim()) {
-        await api.inviteMember(member.id, { mobile: mobile.trim(), channels: ['sms'] }).catch(() => null);
-      }
-      // SE6b: a pending invite whose number changed, with the resend box on,
-      // re-sends to the new number on save.
-      if (isPending && numberChanged && resend && mobile.trim()) {
-        await api.inviteMember(member.id, { mobile: mobile.trim(), channels: ['sms'] }).catch(() => null);
-        await refresh(); onClose();
-        showToast(`Saved · invite sent to ${mobile.trim()}`);
-        return;
-      }
+      // The invite says what actually happened: sent, saved but not sent (no
+      // texting set up, or the send failed), or refused with the server's own
+      // words — never "sent" regardless (Codex, 2 Oct 2026).
+      const invite = async (): Promise<string> => {
+        try {
+          const r = await api.inviteMember(member.id, { mobile: mobile.trim(), channels: ['sms'] });
+          return r.invitation?.sent ? `invite sent to ${mobile.trim()}` : 'invite not sent — copy the link from their profile';
+        } catch (e: any) { return e?.body?.message || 'invite not sent'; }
+      };
+      // A new sign-in, or SE6b: a pending invite whose number changed, with
+      // the resend box on, re-sends to the new number on save.
+      const sending = (login && thirteenPlus && member.access?.status === 'none' && mobile.trim())
+        || (isPending && numberChanged && resend && mobile.trim());
+      const said = sending ? await invite() : null;
       await refresh(); onClose();
+      if (said) showToast(`Saved · ${said}`);
     } catch (e: any) { showToast(e?.body?.message || 'Could not save'); } finally { setBusy(false); }
   };
 
