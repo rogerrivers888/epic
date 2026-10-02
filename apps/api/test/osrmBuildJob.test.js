@@ -71,6 +71,7 @@ test('an approved build runs walking then cycling, deletes each graph, recounts 
   assert.deepEqual(Object.keys(out.result.modes), ['walking', 'cycling']);
   const order = calls.filter((c) => /^(osrm-extract|build|rm|recount)/.test(c));
   assert.deepEqual(order, [
+    'rm gb.osm.pbf',
     'rm foot', 'osrm-extract /opt/foot.lua', 'build walking', 'rm foot',
     'rm bike', 'osrm-extract /opt/bicycle.lua', 'build cycling', 'rm bike',
     'recount',
@@ -96,4 +97,45 @@ test('a build that fails is recorded failed with its reason, and can be approved
   assert.match(st.why, /osrm table 500/);
   assert.equal((await job.approveOsrmBuild({ by: 'owner@test' })).state, 'approved');
   await reset();
+});
+
+test('a rebuild after a finished build starts fresh; a retry after a failure resumes', async () => {
+  await reset();
+  const seen = [];
+  const deps = (calls) => mocks(calls, { buildOsrmMode: async ({ mode, resume }) => { seen.push(`${mode}:${resume}`); return { built: 1, skipped: 0, pairs: 1, runId: 'r' }; } });
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  assert.equal((await job.osrmBuildState()).resume, false, 'the first build is fresh');
+  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: deps([]) });
+  // Approved again after it finished: a rebuild, so no origin is skipped.
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  assert.equal((await job.osrmBuildState()).resume, false);
+  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: deps([]) });
+  assert.deepEqual(seen, ['walking:false', 'cycling:false', 'walking:false', 'cycling:false']);
+  // A failure, then approval: a retry, which resumes and keeps its extract.
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: mocks([], { buildOsrmMode: async () => { throw new Error('boom'); } }) }).catch(() => {});
+  await job.approveOsrmBuild({ by: 'owner@test' });
+  assert.equal((await job.osrmBuildState()).resume, true);
+  const calls = [];
+  seen.length = 0;
+  await job.runOsrmBuildJob({ dataDir: '/tmp/osrm-job-test', deps: { ...deps(calls) } });
+  assert.deepEqual(seen, ['walking:true', 'cycling:true']);
+  assert.ok(!calls.includes('rm gb.osm.pbf'), 'a retry keeps the extract it fetched');
+  await reset();
+});
+
+test('an interrupted download leaves neither the extract nor a partial file', async () => {
+  const { mkdtemp, readdir } = await import('node:fs/promises');
+  const os = await import('node:os');
+  const dir = await mkdtemp(`${os.tmpdir()}/osrm-dl-`);
+  const dest = `${dir}/gb.osm.pbf`;
+  const broken = async () => ({
+    ok: true,
+    body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2, 3])); c.error(new Error('connection reset')); } }),
+  });
+  await assert.rejects(() => job.download('http://x', dest, { fetchImpl: broken }), /connection reset/);
+  assert.deepEqual(await readdir(dir), [], 'nothing left for a retry to mistake for an extract');
+  const whole = async () => ({ ok: true, body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2, 3])); c.close(); } }) });
+  await job.download('http://x', dest, { fetchImpl: whole });
+  assert.deepEqual(await readdir(dir), ['gb.osm.pbf']);
 });

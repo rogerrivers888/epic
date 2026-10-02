@@ -29,7 +29,7 @@
 
 import { spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
@@ -67,7 +67,7 @@ async function writeState(next, { who, expect = null } = {}) {
       await client.query('rollback');
       return { changed: false, was };
     }
-    const value = { ...was, ...next };
+    const value = { ...was, ...(typeof next === 'function' ? next(was) : next) };
     const { rows: [row] } = await client.query(
       `insert into bo_settings (key, value, version, updated_by, updated_at) values ($1, $2::jsonb, 1, $3, now())
        on conflict (key) do update set value = excluded.value, version = bo_settings.version + 1,
@@ -94,8 +94,13 @@ async function writeState(next, { who, expect = null } = {}) {
  */
 export async function approveOsrmBuild({ by = null } = {}) {
   const who = String(by ?? '').trim() || 'unnamed caller';
+  // A retry of a failed build resumes where it stopped; anything else — the
+  // first build, or a rebuild after one finished — starts fresh, or every origin
+  // would be skipped over its old marker and the rebuild would do nothing
+  // (Codex). Read under the same lock the write takes.
   const out = await writeState(
-    { state: 'approved', approvedBy: who, approvedAt: new Date().toISOString(), startedAt: null, finishedAt: null, why: null, result: null },
+    (was) => ({ state: 'approved', approvedBy: who, approvedAt: new Date().toISOString(), startedAt: null,
+      finishedAt: null, why: null, result: null, resume: was.state === 'failed' }),
     { who, expect: (was) => was.state !== 'running' && was.state !== 'approved' },
   );
   if (!out.changed) {
@@ -157,9 +162,19 @@ export async function startRouted(graph, { port = 5055, fetchImpl = fetch, sampl
 export async function download(url, dest, { fetchImpl = fetch } = {}) {
   const have = await stat(dest).catch(() => null);
   if (have && have.size > 0) return;
+  // Into a temporary file, renamed only once it is whole: an interrupted
+  // download must never leave a partial extract that a retry then trusts (Codex).
+  const part = `${dest}.part`;
+  await rm(part, { force: true });
   const res = await fetchImpl(url);
   if (!res.ok || !res.body) throw new Error(`extract download ${res.status}`);
-  await pipeline(Readable.fromWeb(res.body), createWriteStream(dest));
+  try {
+    await pipeline(Readable.fromWeb(res.body), createWriteStream(part));
+  } catch (err) {
+    await rm(part, { force: true }).catch(() => {});
+    throw err;
+  }
+  await rename(part, dest);
 }
 
 /**
@@ -194,7 +209,10 @@ export async function runOsrmBuildJob({
   try {
     await mkdir(dataDir, { recursive: true });
     const pbf = path.join(dataDir, 'gb.osm.pbf');
-    d.log('downloading', extractUrl);
+    const resume = claimed.resume === true;
+    // A fresh build takes today's extract; a retry may reuse the one it fetched.
+    if (!resume) await d.rmrf(pbf);
+    d.log(resume ? 'resuming a failed build' : 'fresh build', '— extract', extractUrl);
     await d.download(extractUrl, pbf);
 
     let cells = await d.allCells({ scheme: 'sector' });
@@ -228,7 +246,7 @@ export async function runOsrmBuildJob({
       try {
         const out = await d.buildOsrmMode({
           mode: p.mode, cells, origins, table: d.osrmTable(routed.url, { profile: p.label }), horizon,
-          resume: true, chunk: 300,
+          resume, chunk: 300,
           onProgress: ({ done, of, pairs }) => d.log(p.mode, `${done}/${of}`, `${pairs} pairs`),
         });
         result.modes[p.mode] = { built: out.built, skipped: out.skipped, pairs: out.pairs, runId: out.runId };
