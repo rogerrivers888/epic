@@ -51,16 +51,19 @@ export const PRICE_BANDS: { key: string; label: string }[] = [
 export const PRICE_KEYS = PRICE_BANDS.map((b) => b.key);
 
 /**
- * The How far boxes. The reach matrix is built to 90 minutes, so the ceiling is
- * "90 min+", not "2 hours" — an option must never quietly return another's
- * result (owner, 30 Sep 2026). A true two hours returns when the matrix is
- * extended (OSRM/GTFS build).
+ * The How far boxes. Two hours is a real option again (owner, 1 Oct 2026: "extend the driving
+ * matrix to 120 minutes so '2 hours' comes back as a real option"). Until the
+ * wider driving build the owner approves has run, a two-hour count is a floor
+ * ("N+", the API's `floor`), never a ninety-minute answer passed off as two
+ * hours — the rule of 30 Sep stands: an option never quietly returns another's
+ * result.
  */
 export const HOW_FAR: { minutes: number; label: string; short: string }[] = [
   { minutes: 20, label: '20 minutes', short: '20 min' },
   { minutes: 30, label: '30 minutes', short: '30 min' },
   { minutes: 60, label: '1 hour', short: '1 hr' },
-  { minutes: 90, label: '90 min+', short: '90 min+' },
+  { minutes: 90, label: '90 minutes', short: '90 min' },
+  { minutes: 120, label: '2 hours', short: '2 hr' },
 ];
 
 /** "1 hr", "20 min" — how the Where control reads a ceiling back. */

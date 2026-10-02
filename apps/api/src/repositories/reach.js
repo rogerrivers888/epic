@@ -24,7 +24,7 @@
  */
 
 import { pool, query } from '../db.js';
-import { CAP_MINUTES, EDGE_MINUTES, HORIZON_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
+import { CAP_MINUTES, DRIVING_BUILT_HORIZON, EDGE_MINUTES, HORIZON_MINUTES, cellCode, labelOf, nearestCell, outcodeOf, reachFrom, recentre, sectorOf } from '../domain/reach.js';
 import { kmBetween, travelMode, straightLineReachKm } from '../domain/travel.js';
 import { outcodesFor } from '../sources/localities.js';
 import { outcodeOfCell } from '../domain/ring.js';
@@ -390,6 +390,10 @@ const LOCK = 'epic.reach.refresh';
 
 async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
   const stamped = await stampPlaces({ limit: stampLimit });
+  // Built out to the approved horizon, not the furthest anybody may ask: a wider
+  // driving build is millions of rows, so it starts only when the owner approves
+  // it (approvedHorizon), and then this same resumable refresh carries it.
+  const horizon = await approvedHorizon(canonical);
 
   const { rows: todo } = await query(
     `select g.code, g.label, g.lat, g.lng
@@ -399,14 +403,14 @@ async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
         and (b.from_cell is null or b.cap_minutes < $2)
       order by g.places desc, g.code
       limit $3`,
-    [canonical, HORIZON_MINUTES, cellLimit],
+    [canonical, horizon, cellLimit],
   );
   if (!todo.length) return { stamped, cells: 0, pairs: 0, mode: canonical };
 
   const all = await allCells({ scheme: 'sector' });
   let pairs = 0;
   for (const cell of todo) {
-    const rows = reachFrom(cell, all, { mode: canonical, capMinutes: HORIZON_MINUTES });
+    const rows = reachFrom(cell, all, { mode: canonical, capMinutes: horizon });
     // Both directions are deleted, not just this cell's own rows. If the cell
     // has moved, a neighbour it has moved away from would otherwise keep a row
     // pointing at it for ever — the write below replaces every edge that
@@ -433,7 +437,7 @@ async function refreshWhileLocked({ canonical, stampLimit, cellLimit }) {
        on conflict (from_cell, mode) do update
          set cap_minutes = excluded.cap_minutes, pairs = excluded.pairs, method = excluded.method,
              built_lat = excluded.built_lat, built_lng = excluded.built_lng, at = excluded.at`,
-      [cell.code, canonical, HORIZON_MINUTES, rows.length, cell.lat, cell.lng],
+      [cell.code, canonical, horizon, rows.length, cell.lat, cell.lng],
     );
     });
     pairs += rows.length;
@@ -581,6 +585,10 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
   // its routed minutes — the straight-line estimate overstates a footpath walk
   // and would drop a place the matrix (and so the count) holds (Codex).
   const marker = travelMode(mode) !== 'driving' ? await builtMethod(cell, travelMode(mode), wantHorizon) : null;
+  // A driving ring asked past what its origin has been built to — two hours,
+  // before the wider build is approved and run — reads only the rows that exist.
+  // Said out loud so the count is drawn as a floor, never passed off as whole.
+  const shortOfHorizon = travelMode(mode) === 'driving' && !(await originBuilt(cell, 'driving', wantHorizon));
   if (travelMode(mode) !== 'driving' && !marker) {
     method = 'straight-line';
     // Centre the estimate on the requested point when there is one, so the count
@@ -683,6 +691,7 @@ export async function ringFor({ where = null, lat = null, lng = null, label = nu
     // and the card's minute then come from `minutesByCell` (sector → routed
     // minutes from this origin) rather than the straight-line estimator, so the
     // list agrees with the count drawn from `band`.
+    shortOfHorizon,
     routed: marker === 'osrm',
     minutesByCell: marker === 'osrm' ? Object.fromEntries(within.map((c) => [c.to_cell, c.minutes])) : null,
     at,
@@ -712,6 +721,45 @@ export async function routedMinutesFrom(cell, { minutes = 30, mode = 'walking' }
   if ((await builtMethod(cell, mode, Math.min(HORIZON_MINUTES, minutes + EDGE_MINUTES))) !== 'osrm') return null;
   const rows = await reachableCells(cell, { minutes, mode });
   return Object.fromEntries(rows.map((r) => [r.to_cell, r.minutes]));
+}
+
+const horizonKey = (mode) => `reach:horizon:${travelMode(mode)}`;
+
+/**
+ * How far this mode's estimator matrix is to be built: the owner's approved
+ * horizon if one is set, else where it stands — driving at
+ * `DRIVING_BUILT_HORIZON`, every other mode at the full horizon (walking and
+ * cycling are OSRM's to build, transit has no matrix). Never past
+ * `HORIZON_MINUTES`.
+ */
+export async function approvedHorizon(mode) {
+  const canonical = travelMode(mode);
+  const { rows: [row] } = await query('select value from bo_settings where key = $1', [horizonKey(canonical)]);
+  const n = Math.trunc(Number(row?.value?.minutes));
+  if (Number.isFinite(n) && n > 0) return Math.min(HORIZON_MINUTES, n);
+  return canonical === 'driving' ? DRIVING_BUILT_HORIZON : HORIZON_MINUTES;
+}
+
+/** Set the approved horizon (the Approval card's action). Logged like every setting. */
+export async function setApprovedHorizon(mode, minutes, { by = null } = {}) {
+  const canonical = travelMode(mode);
+  const was = await approvedHorizon(canonical);
+  const value = { minutes, approvedBy: by, at: new Date().toISOString() };
+  const { rows: [row] } = await query(
+    `insert into bo_settings (key, value, version, updated_by, updated_at) values ($1, $2::jsonb, 1, $3, now())
+     on conflict (key) do update set value = excluded.value, version = bo_settings.version + 1,
+       updated_by = excluded.updated_by, updated_at = now()
+     returning version`,
+    [horizonKey(canonical), JSON.stringify(value), by]);
+  await query(
+    'insert into bo_settings_log (key, version, before, after, who) values ($1, $2, $3::jsonb, $4::jsonb, $5)',
+    [horizonKey(canonical), row.version, JSON.stringify({ minutes: was }), JSON.stringify(value), by]).catch(() => null);
+  const { rows: [todo] } = await query(
+    `select count(*)::int as n from geo_cells g
+       left join cell_builds b on b.from_cell = g.code and b.mode = $1
+      where g.scheme = 'sector' and (b.from_cell is null or b.cap_minutes < $2)`,
+    [canonical, minutes]);
+  return { mode: canonical, minutes, was, cellsToRebuild: todo.n };
 }
 
 /** The method the origin's marker was built by — 'estimate' or 'osrm' — or null
@@ -887,6 +935,7 @@ export async function state({ scheme = 'sector', country = 'GB' } = {}) {
       group by r.mode order by r.mode`,
     [scheme, country],
   );
+  const horizons = Object.fromEntries(await Promise.all(built.map(async (m) => [m.mode, await approvedHorizon(m.mode)])));
   const modes = built.map((m) => {
     const run = lastRun[m.mode] ?? null;
     return {
@@ -897,7 +946,8 @@ export async function state({ scheme = 'sector', country = 'GB' } = {}) {
       partWayThrough: m.lowest_cap !== m.highest_cap,
       pairs: Number(m.pairs),
       fromCells: m.built_cells,
-      shortOfHorizon: m.lowest_cap < HORIZON_MINUTES,
+      shortOfHorizon: m.lowest_cap < horizons[m.mode],
+      approvedHorizon: horizons[m.mode],
       missingCells: Math.max(0, cellCount.n - m.built_cells),
       // A build that never reached the end, however current its markers look.
       interrupted: Boolean(run && run.state !== 'done'),

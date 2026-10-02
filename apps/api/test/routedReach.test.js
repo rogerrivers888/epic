@@ -123,3 +123,39 @@ test('a non-driving estimator write still lands through the per-mode lock (no de
   await query(`delete from reach where mode = 'cycling' and method = 'estimate'`);
   await query(`delete from cell_builds where mode = 'cycling' and method = 'estimate'`);
 });
+
+test('two hours: the driving horizon is the approved one, and a ring past it is a floor', async () => {
+  await query(`delete from bo_settings where key = 'reach:horizon:driving'`);
+  // Unapproved, the driving matrix stays where it was built.
+  assert.equal(await reach.approvedHorizon('driving'), 100);
+  // An origin built to 100: an hour is whole, two hours is short of it.
+  await clean(); await seed();
+  await query(`insert into reach (from_cell, to_cell, mode, minutes, km, method) values ($1,$1,'driving',0,0,'estimate'),($1,$2,'driving',20,5,'estimate')`, [O.code, A.code]);
+  await query(`insert into cell_builds (from_cell, mode, cap_minutes, pairs, method) values ($1,'driving',100,2,'estimate')`, [O.code]);
+  assert.equal((await reach.ringFor({ cell: O.code, minutes: 60, mode: 'driving' })).shortOfHorizon, false);
+  assert.equal((await reach.ringFor({ cell: O.code, minutes: 120, mode: 'driving' })).shortOfHorizon, true);
+  // Approving the wider build moves the target and says how much is left to do.
+  const set = await reach.setApprovedHorizon('driving', 130, { by: 'test' });
+  assert.equal(set.minutes, 130);
+  assert.equal(set.was, 100);
+  assert.ok(set.cellsToRebuild >= 1);
+  assert.equal(await reach.approvedHorizon('driving'), 130);
+  await query(`delete from bo_settings where key = 'reach:horizon:driving'`);
+  await clean();
+});
+
+test('the refresh builds driving to the approved horizon, no further', async () => {
+  await query(`delete from bo_settings where key = 'reach:horizon:driving'`);
+  await query(`delete from reach where mode = 'driving'`);
+  await query(`delete from cell_builds where mode = 'driving'`);
+  await reach.refresh({ mode: 'driving', stampLimit: 0, cellLimit: 1 });
+  let { rows } = await query(`select cap_minutes from cell_builds where mode = 'driving'`);
+  assert.deepEqual(rows.map((r) => r.cap_minutes), [100]);
+  await reach.setApprovedHorizon('driving', 130, { by: 'test' });
+  await reach.refresh({ mode: 'driving', stampLimit: 0, cellLimit: 1 });
+  ({ rows } = await query(`select max(cap_minutes)::int as cap from cell_builds where mode = 'driving'`));
+  assert.equal(rows[0].cap, 130);
+  await query(`delete from bo_settings where key = 'reach:horizon:driving'`);
+  await query(`delete from reach where mode = 'driving'`);
+  await query(`delete from cell_builds where mode = 'driving'`);
+});

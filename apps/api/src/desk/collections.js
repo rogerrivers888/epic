@@ -814,7 +814,7 @@ export async function householdReach(h) {
     capped: asked > CAP_MINUTES,
     refs: new Set([...Object.values(placed?.refs ?? {}).flat(), ...within.map((p) => p.venue_ref)]),
     speaks, uncovered, unresolved, unplaceable,
-    atLeast: asked > CAP_MINUTES || !speaks || uncovered.length > 0 || unresolved > 0 || unplaceable > 0,
+    atLeast: asked > CAP_MINUTES || Boolean(ring.shortOfHorizon) || !speaks || uncovered.length > 0 || unresolved > 0 || unplaceable > 0,
   };
 }
 

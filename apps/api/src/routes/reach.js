@@ -187,4 +187,24 @@ router.post('/build', requires('manage_library'), async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * POST /horizon — how far the estimator builds a mode's matrix.
+ *
+ * The Approval card's action for two hours (owner, 1 Oct 2026). Setting it moves
+ * the target; the hourly refresh then rebuilds every origin short of it, a
+ * batch at a time and resumably, so a deploy mid-way loses nothing. Driving
+ * only: walking and cycling are routed by OSRM and transit has no matrix.
+ */
+router.post('/horizon', requires('manage_library'), async (req, res, next) => {
+  try {
+    const mode = travelMode(req.body?.mode ?? 'driving');
+    if (mode !== 'driving') return res.status(400).json({ error: `Only driving is built by the estimator; ${mode} is not.` });
+    const minutes = Math.trunc(Number(req.body?.minutes));
+    if (!Number.isFinite(minutes) || minutes < 5 || minutes > HORIZON_MINUTES) {
+      throw bad(`minutes must be between 5 and ${HORIZON_MINUTES}.`);
+    }
+    res.json(await reach.setApprovedHorizon(mode, minutes, { by: req.account?.email ?? req.session?.label ?? req.session?.id ?? null }));
+  } catch (err) { next(err); }
+});
+
 export default router;

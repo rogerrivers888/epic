@@ -121,7 +121,10 @@ export async function resolveLocation({ where, minutes = 30, mode = 'car' } = {}
     capped,
     refs,
     speaks,
-    atLeast: capped || !speaks || uncovered.length > 0 || unresolved > 0 || unplaceable > 0,
+    // Two hours asked before the wider driving build has run reads only the rows
+    // that exist: a floor until it lands.
+    shortOfHorizon: Boolean(ring.shortOfHorizon),
+    atLeast: capped || Boolean(ring.shortOfHorizon) || !speaks || uncovered.length > 0 || unresolved > 0 || unplaceable > 0,
     unresolved,
     unresolvedBy,
     unplaceable,
@@ -168,7 +171,7 @@ export function countOf(n, loc, { category = null } = {}) {
   const edge = category
     ? Number(loc.unresolvedBy?.[category] ?? 0) > 0
     : Number(loc.unresolved ?? 0) > 0;
-  const atLeast = Boolean(loc.capped) || !speaks || (loc.uncovered?.length ?? 0) > 0 || edge || Number(loc.unplaceable ?? 0) > 0;
+  const atLeast = Boolean(loc.capped) || Boolean(loc.shortOfHorizon) || !speaks || (loc.uncovered?.length ?? 0) > 0 || edge || Number(loc.unplaceable ?? 0) > 0;
   return { n: !speaks && !n ? null : n, atLeast, approx: Boolean(loc.approx), speaks };
 }
 

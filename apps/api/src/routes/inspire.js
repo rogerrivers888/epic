@@ -78,7 +78,7 @@ import { censusForRing, categoryPage, peek, pageKey, ASKED } from '../sources/ri
 import { annotateClosed, hiddenAmong, markedAmong } from '../repositories/placeStatus.js';
 import { boxAround, boxKm, outcodeOfCell } from '../domain/ring.js';
 import * as reach from '../repositories/reach.js';
-import { nearestCell, sectorOf } from '../domain/reach.js';
+import { CAP_MINUTES, nearestCell, sectorOf } from '../domain/reach.js';
 
 /**
  * A stored picture, in the shape a card draws.
@@ -661,7 +661,7 @@ inspire.get('/around', async (req, res, next) => {
     // over a 90-minute reach (owner wants 30 → 1 h → 2 h to rise; 2 h is the
     // full 90-min matrix, which is more than 1 h, so it does — Codex). Extending
     // to a real two hours is rebuilding the matrix with a higher cap.
-    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    const minutes = Math.min(CAP_MINUTES, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const mode = travelMode(req.query.mode);
     const wanted = String(req.query.cat ?? '').trim();
 
@@ -734,7 +734,7 @@ inspire.get('/around', async (req, res, next) => {
         // stopped part-way across (Codex, 28 Sep 2026).
         count: census.counts[key] ?? 0,
         unresolved: census.unresolved[key] ?? 0,
-        floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0 || (census.partial?.length ?? 0) > 0 || Boolean(census.floors?.[key]),
+        floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0 || (census.partial?.length ?? 0) > 0 || Boolean(census.floors?.[key]) || Boolean(ring.shortOfHorizon),
         censused: census.missing.length === 0,
         items: got.items.slice(0, shows).map((it) => asCard(it, {
           centre: { lat: ring.at?.lat ?? it.lat, lng: ring.at?.lng ?? it.lng },
@@ -853,7 +853,7 @@ inspire.get('/near', async (req, res, next) => {
     // over a 90-minute reach (owner wants 30 → 1 h → 2 h to rise; 2 h is the
     // full 90-min matrix, which is more than 1 h, so it does — Codex). Extending
     // to a real two hours is rebuilding the matrix with a higher cap.
-    const minutes = Math.min(90, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
+    const minutes = Math.min(CAP_MINUTES, Math.max(5, Math.trunc(Number(req.query.minutes)) || 30));
     const ring = await ringFrom({ ...req.query, lat: centre.lat, lng: centre.lng, label }, { minutes, mode });
     if (ring) {
       ring.bandBox = boxAround(ring.bandPoints ?? ring.points);
@@ -897,7 +897,7 @@ inspire.get('/near', async (req, res, next) => {
            */
           count: census.counts[key] ?? 0,
           unresolved: census.unresolved[key] ?? 0,
-          floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0 || (census.partial?.length ?? 0) > 0 || Boolean(census.floors?.[key]),
+          floor: (census.unresolved[key] ?? 0) > 0 || census.missing.length > 0 || (census.partial?.length ?? 0) > 0 || Boolean(census.floors?.[key]) || Boolean(ring.shortOfHorizon),
           icon: tax.vocab?.categories?.[key]?.icon ?? null,
           // Food is a shelf again, not a door: it is bought the same way as
           // everything else now.

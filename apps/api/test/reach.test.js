@@ -122,14 +122,15 @@ test('a point snaps to the nearest cell, and to nothing when there are none', ()
 });
 
 test('the bands a count is rolled up into cover everything up to the cap', () => {
-  assert.deepEqual(BANDS, [15, 30, 45, 60, 90]);
+  assert.deepEqual(BANDS, [15, 30, 45, 60, 90, 120]);
   assert.equal(bandFor(1), 15);
   assert.equal(bandFor(15), 15);
   assert.equal(bandFor(16), 30);
   assert.equal(bandFor(90), 90);
+  assert.equal(bandFor(91), 120);
   // Past the cap there is no wider band, so the widest answers rather than
-  // undefined — a catchment beyond ninety minutes is not a day out anyway.
-  assert.equal(bandFor(1000), 90);
+  // undefined — a catchment beyond two hours is not a day out anyway.
+  assert.equal(bandFor(1000), 120);
   assert.equal(BANDS[BANDS.length - 1], CAP_MINUTES);
 });
 

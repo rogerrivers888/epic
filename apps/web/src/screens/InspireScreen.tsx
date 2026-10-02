@@ -65,10 +65,9 @@ const ACROSS = 12;
 const BATCH = 24;
 /** The How far the screen opens on. */
 const HOW_FAR_DEFAULT = INSPIRE_DEFAULT_MINUTES;
-// The reach ceiling the picker offers (90 now that "2 hours" is gone). A wider
-// value left in the address — a bookmark from when 120 existed — is clamped to
-// it on read, so the picker, the "how far" label and the request all agree
-// rather than showing "2 hr" while the API answers 90 (Codex, 30 Sep 2026).
+// The reach ceiling the picker offers — two hours again (1 Oct 2026). A wider
+// value left in the address is clamped to it on read, so the picker, the "how
+// far" label and the request all agree (Codex, 30 Sep 2026).
 const MAX_FAR = Math.max(...HOW_FAR.map((h) => h.minutes));
 const travelCodec = {
   read: (raw: string): number | null => { const n = Math.trunc(Number(raw)); return Number.isFinite(n) && n > 0 ? Math.min(n, MAX_FAR) : null; },

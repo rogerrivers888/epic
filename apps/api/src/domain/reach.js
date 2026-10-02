@@ -36,8 +36,17 @@
 
 import { estimateTravelMinutes, kmBetween, travelMode } from './travel.js';
 
-/** The furthest anybody may ask for. Beyond this a catchment is not a day out. */
-export const CAP_MINUTES = 90;
+/**
+ * The furthest anybody may ask for. Beyond this a catchment is not a day out.
+ *
+ * Two hours again (owner, 1 Oct 2026: "extend the driving matrix to 120 minutes
+ * so '2 hours' comes back as a real option"). What may be *asked* is not what
+ * has been *built*: the driving matrix stands at `DRIVING_BUILT_HORIZON` until
+ * the owner approves the wider build, and until then a ring past it says it is
+ * a floor (`ringFor`'s `shortOfHorizon`) rather than passing a short count off
+ * as a whole one.
+ */
+export const CAP_MINUTES = 120;
 
 /**
  * How much further than asked the matrix looks, in minutes.
@@ -102,8 +111,18 @@ export const EDGE_MINUTES = 10;
  */
 export const HORIZON_MINUTES = CAP_MINUTES + EDGE_MINUTES;
 
+/**
+ * How far the driving matrix was built when the cap was ninety: ninety plus the
+ * edge. The refresh builds no further than the *approved* horizon
+ * (repositories/reach.js#approvedHorizon), which starts here and moves to
+ * `HORIZON_MINUTES` only when the owner approves the wider build — it is about
+ * eleven million more rows, so it is priced on an Approval card rather than
+ * started by a deploy.
+ */
+export const DRIVING_BUILT_HORIZON = 100;
+
 /** The bands the counts are rolled up into. A search picks the band above its minutes. */
-export const BANDS = [15, 30, 45, 60, 90];
+export const BANDS = [15, 30, 45, 60, 90, 120];
 
 /** The band a request of this many minutes is answered from. */
 export const bandFor = (minutes) => BANDS.find((b) => b >= minutes) ?? BANDS[BANDS.length - 1];
