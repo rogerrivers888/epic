@@ -35,6 +35,11 @@ test('the country an address names, and only a country', () => {
   for (const [name, code] of [['Germany', 'DE'], ['Serbia', 'RS'], ['Vietnam', 'VN'], ['Curaçao', 'CW'], ['Vanuatu', 'VU'], ['Yemen', 'YE'], ['Kosovo', 'XK']]) {
     assert.equal(countryNamedIn(`Somewhere, ${name}`), code, name);
   }
+  // The geocoder's spellings where they differ from the runtime's (Codex).
+  for (const [name, code] of [['Bosnia and Herzegovina', 'BA'], ['Saint Lucia', 'LC'], ['St. Lucia', 'LC'], ['Ivory Coast', 'CI'],
+    ['Saint Kitts and Nevis', 'KN'], ['Democratic Republic of the Congo', 'CD'], ['The Bahamas', 'BS'], ['Hong Kong', 'HK']]) {
+    assert.equal(countryNamedIn(`Somewhere, ${name}`), code, name);
+  }
 });
 
 test('owned addresses must agree; a disagreement is not resolved by picking one', () => {

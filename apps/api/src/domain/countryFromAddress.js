@@ -26,6 +26,14 @@ const ALIASES = {
   'éire': 'IE', eire: 'IE', 'republic of ireland': 'IE',
   españa: 'ES', espana: 'ES', deutschland: 'DE', nederland: 'NL', 'the netherlands': 'NL',
   'ελλάδα': 'GR', hellas: 'GR', türkiye: 'TR', turkiye: 'TR', österreich: 'AT', hrvatska: 'HR',
+  // The English names the geocoder uses where the runtime writes them otherwise.
+  'ivory coast': 'CI', "côte d'ivoire": 'CI', 'czech republic': 'CZ', burma: 'MM', swaziland: 'SZ',
+  macedonia: 'MK', 'east timor': 'TL', 'cape verde': 'CV', gambia: 'GM', bahamas: 'BS',
+  'democratic republic of the congo': 'CD', 'republic of the congo': 'CG', 'congo-brazzaville': 'CG',
+  palestine: 'PS', 'palestinian territories': 'PS', 'palestinian territory': 'PS',
+  'hong kong': 'HK', macau: 'MO', macao: 'MO', micronesia: 'FM', 'federated states of micronesia': 'FM',
+  'sao tome and principe': 'ST', 'são tomé and príncipe': 'ST', 'saint barthélemy': 'BL',
+  'falkland islands': 'FK', 'british virgin islands': 'VG', 'united states virgin islands': 'VI',
 };
 
 // Codes that name something other than one country: reserved (UK is GB's alias,
@@ -38,7 +46,12 @@ const NOT_COUNTRIES = new Set(['UK', 'EU', 'EZ', 'UN', 'QO', 'ZZ',
 // ISO 3166's user-assigned ranges: AA, QM–QZ, XA–XZ (Kosovo's XK is the one in use).
 const PRIVATE_USE = (c) => c === 'AA' || (c[0] === 'Q' && c[1] >= 'M') || (c[0] === 'X' && c !== 'XK') || c === 'ZZ';
 
-const fold = (s) => String(s).normalize('NFC').trim().toLowerCase().replace(/\s+/g, ' ');
+// Folded the same way on both sides, so the geocoder's spelling and the runtime's
+// meet: "Bosnia and Herzegovina" / "Bosnia & Herzegovina", "St. Lucia" / "Saint
+// Lucia", a leading "The" (Codex).
+const fold = (s) => String(s).normalize('NFC').trim().toLowerCase()
+  .replace(/&/g, ' and ').replace(/\bst\.?(?=\s)/g, 'saint').replace(/^the\s+/, '')
+  .replace(/\s+/g, ' ').trim();
 
 const NAMES = (() => {
   const names = new Map();
