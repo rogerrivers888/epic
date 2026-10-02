@@ -309,3 +309,9 @@ test('an adults’ event has no children to drop off, so Checked never kicks in'
   assert.equal(needsChecked({ lane: 'course', visibility: 'public', parents: 'drop_off', age_min: 18 }), false, 'Adults is the default');
   assert.equal(needsChecked({ lane: 'course', visibility: 'public', parents: 'drop_off', age_min: null }), true, 'Anyone, dropped off, public');
 });
+
+test('weekly and course need how long, so every session has an end', () => {
+  assert.equal(stepFilled({ lane: 'weekly', weekdays: [4], first_date: '2027-01-07', starts_at: '19:00' }, 'weekly'), false);
+  assert.equal(stepFilled({ lane: 'weekly', weekdays: [4], first_date: '2027-01-07', starts_at: '19:00', duration_min: 60 }, 'weekly'), true);
+  assert.equal(stepFilled({ lane: 'course', first_date: '2027-01-07', starts_at: '09:00', sessions: 8 }, 'run'), false);
+});

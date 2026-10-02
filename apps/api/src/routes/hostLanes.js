@@ -758,7 +758,11 @@ router.post('/host/lanes/offers/:id/video', async (req, res, next) => {
     if (b.coverS !== undefined) patch.videoCoverS = num(b.coverS);
     if (b.onProfile !== undefined) patch.videoOnProfile = Boolean(b.onProfile);
     const updated = await repo.updateOffer(offer.id, patch);
-    if (b.onProfile && updated.video_id && !host.intro_video_id) await repo.updateHost(host.id, { introVideoId: updated.video_id });
+    // The profile shows this offer's video only while the toggle says so, and the current take,
+    // never one replaced since (Codex, 2 Oct 2026).
+    const wasThis = host.intro_video_id && host.intro_video_id === offer.video_id;
+    if (updated.video_on_profile && updated.video_id && (!host.intro_video_id || wasThis)) await repo.updateHost(host.id, { introVideoId: updated.video_id });
+    else if (!updated.video_on_profile && wasThis) await repo.updateHost(host.id, { introVideoId: null });
     res.json({ offer: await lanePayload(updated, host, account) });
   } catch (err) { next(err); }
 });

@@ -407,8 +407,8 @@ export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
     case 'order': return null;
     case 'cohosts': return null;
     case 'rsvp': return null;
-    case 'weekly': return (offer.weekdays ?? []).length > 0 && has(offer.first_date ?? offer.firstDate) && has(offer.starts_at ?? offer.startsAt);
-    case 'run': return has(offer.first_date ?? offer.firstDate) && has(offer.starts_at ?? offer.startsAt) && Number(offer.sessions) > 0;
+    case 'weekly': return (offer.weekdays ?? []).length > 0 && has(offer.first_date ?? offer.firstDate) && has(offer.starts_at ?? offer.startsAt) && Number(offer.duration_min ?? offer.durationMin) > 0;
+    case 'run': return has(offer.first_date ?? offer.firstDate) && has(offer.starts_at ?? offer.startsAt) && Number(offer.sessions) > 0 && Number(offer.duration_min ?? offer.durationMin) > 0;
     case 'outcome': return has(offer.outcome);
     case 'sessions': return null;
     case 'staydrop': return has(offer.parents);
@@ -453,8 +453,8 @@ export function missingSteps(offer, cfg = DEFAULT_CONFIG) {
 
 /** Field-level blockers in the host's words, for an offer with a lane (what the old `publishBlockers` answers for the old shapes). */
 const STEP_WORDS = {
-  what: 'Say what it is and give it a title.', when: 'Pick the date and the time.', weekly: 'Pick the day, the time and when it starts.',
-  run: 'Pick the first session, the time and how many sessions.', outcome: 'Say what they’ll be able to do by the end.',
+  what: 'Say what it is and give it a title.', when: 'Pick the date and the time.', weekly: 'Pick the day, the time, how long and when it starts.',
+  run: 'Pick the first session, the time, how long and how many sessions.', outcome: 'Say what they’ll be able to do by the end.',
   staydrop: 'Say whether parents stay or drop off.', why: 'Say why you, for this one.', avail: 'Say when you’re free and how long a session is.',
   where: 'Say where it happens.', price: 'Finish the price: the numbers, and the refund policy if it’s paid.',
   wprice: 'Finish the price: the numbers each week, and the refund policy if it’s paid.', who: 'Say who can come.',
