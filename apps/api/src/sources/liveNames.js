@@ -17,6 +17,19 @@
 const MAX = 2000;
 const queue = new Map(); // ref -> { name, lat, lng }
 
+// What Google answered lately, held in memory for an hour so the display
+// resolver need not ask again for a name it has just been told — a plan read
+// back minutes after its search, say (sources/displayNames.js). The data
+// policy allows a provider's name in memory for hours; never on disk or a device.
+const HELD_MS = 60 * 60_000;
+const HELD_MAX = 5000;
+const held = new Map(); // ref -> { name, at }
+/** The name Google gave this place within the hour, or null. */
+export function heldName(ref, now = Date.now()) {
+  const h = held.get(ref);
+  return h && now - h.at < HELD_MS ? h.name : null;
+}
+
 /** Note a live name (and the point it came with, if any) for the next drain. */
 /**
  * `mayMatch: false` asks only that an existing owned match be judged — never
@@ -27,6 +40,9 @@ export function noteLiveName(ref, name, point = null, { tries = 0, mayMatch = tr
   if (!ref || typeof name !== 'string' || !name.trim()) return;
   // Only Google's references carry a Google name; another provider's id is not checked here.
   if (!String(ref).startsWith('google:')) return;
+  held.delete(ref);
+  held.set(ref, { name: name.trim(), at: Date.now() });
+  if (held.size > HELD_MAX) held.delete(held.keys().next().value);
   if (!queue.has(ref) && queue.size >= MAX) return;
   const had = queue.get(ref);
   const lat = Number(point?.lat), lng = Number(point?.lng);
@@ -56,5 +72,5 @@ export function takeLiveNames(n = 100) {
 
 export const pendingLiveNames = () => queue.size;
 
-/** For tests: empty the queue. */
-export function clearLiveNames() { queue.clear(); }
+/** For tests: empty the queue and the hour's memory. */
+export function clearLiveNames() { queue.clear(); held.clear(); }

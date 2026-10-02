@@ -1,8 +1,9 @@
 /**
  * Planning sessions, and throwing them away when their time is up.
  *
- * A session's `state` holds the ideas a search produced — and those carry the
- * provider's venue names, ratings and photo references. Migration 026 gave a
+ * A session's `state` holds the ideas a search produced. A provider's venue
+ * names are emptied on the way in (migration 343) and named again on read;
+ * its ratings and photo references are still held, for the session's hours. Migration 026 gave a
  * session ten hours for exactly that reason: "it is licensed content held on
  * our side, so shorter is the better direction to be wrong in."
  *
@@ -13,6 +14,7 @@
 
 import { query } from '../db.js';
 import * as providerCalls from './providerCalls.js';
+import { nameJson } from '../sources/displayNames.js';
 
 /**
  * Delete sessions whose time is up.
@@ -44,7 +46,16 @@ export async function insertPlanSession(householdId, state, tripId = null) {
 export async function livePlanSession(id, householdId) {
   if (!householdId) throw new Error('livePlanSession needs the household it reads for');
   const { rows } = await query('select * from plan_sessions where id = $1 and household_id = $2 and expires_at > now()', [id, householdId]);
-  return rows[0] ?? null;
+  return named(rows[0] ?? null);
+}
+
+/**
+ * A provider's names were emptied when the state was saved (migration 343);
+ * they are named again here, on read (sources/displayNames.js nameJson).
+ */
+async function named(session) {
+  if (session?.state) await nameJson(session.state, { householdId: session.household_id });
+  return session;
 }
 
 export async function savePlanState(id, state, tripId) {
@@ -63,7 +74,7 @@ export async function planSessionForDay(householdId, tripId, dayId) {
       order by updated_at desc limit 1`,
     [householdId, tripId, dayId],
   );
-  return rows[0] ?? null;
+  return named(rows[0] ?? null);
 }
 
 /**

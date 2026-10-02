@@ -18,7 +18,7 @@ import { currentSpender } from '../context.js';
 import { googleSource } from './google.js';
 import * as providerCalls from '../repositories/providerCalls.js';
 import { ensureRecord } from '../repositories/ownedPlaces.js';
-import { noteLiveName } from './liveNames.js';
+import { noteLiveName, heldName } from './liveNames.js';
 
 const prefixOf = (ref) => String(ref ?? '').split(':')[0];
 // Only Google has a live display-name fetcher; a tripadvisor:/liteapi:/other
@@ -54,7 +54,11 @@ const LIVE_TTL_MS = 60 * 60_000;
 const liveCache = new Map(); // ref -> { name, at }
 const cachedLive = (ref) => {
   const hit = liveCache.get(ref);
-  return hit && Date.now() - hit.at < LIVE_TTL_MS ? hit : undefined;
+  if (hit && Date.now() - hit.at < LIVE_TTL_MS) return hit;
+  // Or a name Google gave in any answer this past hour — a search, a drawer —
+  // held in memory by sources/liveNames.js: no need to ask again.
+  const name = heldName(ref);
+  return name ? { name, at: Date.now() } : undefined;
 };
 
 // A fetch already in flight for a ref, so concurrent lookups — a place page
@@ -141,12 +145,14 @@ export async function resolveNames(rows, { refKey = 'ref', nameKey = 'name', liv
   // Google is asked only for a household: the paid gate refuses anything else
   // (paidGate.js), and a page read with no household — a shared trip's public
   // view — shows an owned name or a neutral word.
-  if (live && householdId) {
+  if (live) {
     const toFetch = [];
     for (const ref of unowned) {
       if (!fetchableLive(ref)) continue;
+      // A name already in memory costs nothing, whoever is reading.
       const hit = cachedLive(ref);
       if (hit) { if (hit.name) liveNames.set(ref, hit.name); continue; }
+      if (!householdId) continue;
       if (toFetch.length >= cap) break; // a screen cannot spend without bound
       toFetch.push(ref);
     }
@@ -211,4 +217,54 @@ export async function resolveInto(specs, opts = {}) {
   }
 }
 
-export default { ownedNamesFor, resolveNames, resolveInto };
+const NAME_KEYS = ['name', 'venueName', 'venueLabel', 'venue_name', 'venue_label'];
+const refOfJson = (o) => {
+  if (typeof o.source === 'string' && typeof o.sourcePlaceId === 'string') return `${o.source}:${o.sourcePlaceId}`;
+  if (typeof o.venueRef === 'string') return o.venueRef;
+  if (typeof o.ref === 'string' && /^[a-z]+:/.test(o.ref)) return o.ref;
+  if (typeof o.key === 'string' && /^[a-z]+:/.test(o.key)) return o.key;
+  return null;
+};
+
+/**
+ * Name the places inside a saved JSON document — a plan session's state —
+ * whose names were emptied on the way in (migration 343). Every object that
+ * carries a provider's place reference and an emptied name field is named
+ * again, in place: our own name first, then a name Google gave within the hour
+ * (in memory, free — the search that made the plan, usually), then Google's
+ * live (capped), then a neutral word. Nothing here
+ * is written back by itself; a save goes through the trigger again.
+ */
+export async function nameJson(doc, { purpose = 'plan.displayName', householdId = null, cap = 25 } = {}) {
+  const found = [];
+  const walk = (node) => {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!node || typeof node !== 'object') return;
+    for (const v of Object.values(node)) if (v && typeof v === 'object') walk(v);
+    const ref = refOfJson(node);
+    if (!ref) return;
+    const keys = NAME_KEYS.filter((k) => k in node && node[k] == null);
+    if (keys.length) found.push({ node, ref, keys });
+  };
+  walk(doc);
+  if (!found.length) return doc;
+  // Only a provider's place had its name emptied; any other empty name was
+  // empty when it was written and stays so.
+  const rentedSet = await rentedRefs([...new Set(found.map((f) => f.ref))]);
+  found.splice(0, found.length, ...found.filter((f) => rentedSet.has(f.ref)));
+  if (!found.length) return doc;
+  // The resolver tries what we own, then a name Google gave within the hour
+  // (in memory — free), then asks Google, capped, then says "a place".
+  const rows = found;
+  const tmp = [...new Map(rows.map((f) => [f.ref, { ref: f.ref, name: null }])).values()];
+  await resolveNames(tmp, { refKey: 'ref', nameKey: 'name', purpose, householdId, cap });
+  const by = new Map(tmp.map((x) => [x.ref, x]));
+  for (const f of rows) {
+    const x = by.get(f.ref);
+    for (const k of f.keys) f.node[k] = x.name;
+    f.node.nameSource = x.nameSource;
+  }
+  return doc;
+}
+
+export default { ownedNamesFor, resolveNames, resolveInto, nameJson };

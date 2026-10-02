@@ -68,6 +68,14 @@ const CHAT = {
   where: `tag_label is not null and ((tag_kind = 'stop' and tag_ref is not null and ${RENTED('tag_ref')}) or tag_kind = 'day')`,
 };
 
+// A plan session's saved search results and options (migration 343): a
+// session counts when stripping its state of providers' names would change it.
+// The place ids stay; the names come back from the resolver on read.
+const PLAN = {
+  key: 'plan_sessions.state', said: 'saved plan sessions',
+  where: 'state is distinct from epic_strip_rented_names(state)',
+};
+
 /** What each store holds that the purge would clear. Changes nothing. */
 export async function quote(client = { query }) {
   const byStore = {};
@@ -77,8 +85,10 @@ export async function quote(client = { query }) {
   }
   const { rows: [c] } = await client.query(`select count(*)::int as n from chat_topics where ${CHAT.where}`);
   byStore[CHAT.key] = c.n;
+  const { rows: [pl] } = await client.query(`select count(*)::int as n from plan_sessions where ${PLAN.where}`);
+  byStore[PLAN.key] = pl.n;
   const total = Object.values(byStore).reduce((a, b) => a + b, 0);
-  return { total, byStore, said: Object.fromEntries([...STORES.map((s) => [keyOf(s), s.said]), [CHAT.key, CHAT.said]]) };
+  return { total, byStore, said: Object.fromEntries([...STORES.map((s) => [keyOf(s), s.said]), [CHAT.key, CHAT.said], [PLAN.key, PLAN.said]]) };
 }
 
 /** The purge: every store cleared in one transaction, one log row with the counts. */
@@ -94,6 +104,8 @@ export async function run({ by = null, expected = null } = {}) {
     }
     const { rowCount } = await c.query(`update chat_topics set tag_label = null where ${CHAT.where}`);
     byStore[CHAT.key] = rowCount;
+    const { rowCount: plans } = await c.query(`update plan_sessions set state = epic_strip_rented_names(state) where ${PLAN.where}`);
+    byStore[PLAN.key] = plans;
     const cleared = Object.values(byStore).reduce((a, b) => a + b, 0);
     // Nothing is left behind: the same question asked again must answer nought.
     const after = await quote(c);

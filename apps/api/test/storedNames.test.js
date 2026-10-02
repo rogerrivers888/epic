@@ -217,3 +217,55 @@ test('an organiser\'s and a host\'s own words on a provider\'s reference are sho
     values ($1, 'anytime', 'draft', 'A', $2, 'Meet by the red door', 'host') returning id`, [host.id, g]);
   assert.equal((await hostingRepo.offerById(o.id)).venue_label, 'Meet by the red door');
 });
+
+test('a plan session keeps no provider\'s names: the place ids stay, and reading it names them again', async () => {
+  const planSessions = await import('../src/repositories/planSessions.js');
+  const { toVenue, googleSource } = await import('../src/sources/google.js');
+  const hh = await household();
+  const inMemory = randomUUID();
+  const owned = randomUUID();
+  await query(`insert into place_records (venue_ref, name, provenance) values ($1, 'The Owned Gallery', '{"name":"wikipedia"}')`, [`google:${owned}`]);
+  // The search that made the plan: Google's answer passes through toVenue,
+  // which holds the name in memory for the hour.
+  toVenue({ id: inMemory, displayName: { text: 'Held From The Search' } });
+  const state = { pool: { candidates: [
+    { source: 'google', sourcePlaceId: inMemory, name: 'Held From The Search', key: `google:${inMemory}` },
+    { source: 'google', sourcePlaceId: owned, name: 'Google Gallery Name' },
+    { source: 'osm', sourcePlaceId: 'node/1', name: 'The Open Park' },
+  ] }, options: [{ title: 'A morning', stops: [{ venueRef: `google:${owned}`, name: 'Google Gallery Name' }] }] };
+  const s = await planSessions.insertPlanSession(hh, state);
+  const { rows: [raw] } = await query('select state from plan_sessions where id = $1', [s.id]);
+  const c = raw.state.pool.candidates;
+  assert.deepEqual(c.map((x) => x.name), [null, null, 'The Open Park'], 'a provider\'s names are not kept; an open place\'s is');
+  assert.deepEqual(c.map((x) => x.sourcePlaceId), [inMemory, owned, 'node/1'], 'the place ids stay');
+  assert.equal(raw.state.options[0].stops[0].name, null);
+  assert.doesNotMatch(JSON.stringify(raw.state), /Google Gallery Name|Held From The Search/);
+  const original = googleSource.displayName;
+  let asked = 0;
+  googleSource.displayName = async () => { asked += 1; return 'Asked'; };
+  try {
+    const read = await planSessions.livePlanSession(s.id, hh);
+    assert.deepEqual(read.state.pool.candidates.map((x) => x.name), ['Held From The Search', 'The Owned Gallery', 'The Open Park']);
+    assert.equal(read.state.options[0].stops[0].name, 'The Owned Gallery');
+    assert.equal(asked, 0, 'named from what we own and what is in memory: nothing asked of Google');
+  } finally { googleSource.displayName = original; }
+});
+
+test('the purge counts and clears a plan session saved before the rule', async () => {
+  const purge = await import('../src/sources/namePurge.js');
+  const hh = await household();
+  await query('alter table plan_sessions disable trigger no_rented_name');
+  let id;
+  try {
+    ({ rows: [{ id }] } = await query(`insert into plan_sessions (household_id, state) values ($1, $2) returning id`,
+      [hh, JSON.stringify({ pool: { candidates: [{ source: 'google', sourcePlaceId: randomUUID(), name: 'Legacy Plan Name' }] } })]));
+  } finally {
+    await query('alter table plan_sessions enable trigger no_rented_name');
+  }
+  const q = await purge.quote();
+  assert.ok(q.byStore['plan_sessions.state'] >= 1, JSON.stringify(q.byStore));
+  await purge.run({ by: 'test', expected: q.total });
+  const { rows: [r] } = await query('select state from plan_sessions where id = $1', [id]);
+  assert.doesNotMatch(JSON.stringify(r.state), /Legacy Plan Name/);
+  assert.equal((await purge.quote()).byStore['plan_sessions.state'], 0);
+});
