@@ -91,15 +91,53 @@ async function whereIs(ref, noted) {
 
 /**
  * Match a place on its live name, in memory; write the owned point if one is
- * clearly it. `kind` is 'first sight' (it had no owned point) or 'rematch' (a
- * doubtful one was just set aside), so the two are counted apart.
+ * clearly it. `awaiting` is the suspicion of a place whose match was set aside
+ * and still waits for its re-match, or null for a place that never had one
+ * (a first sight). The point, the suspicion's answer and the week's count are
+ * one transaction: none of them can land without the others (Codex, 2 Oct 2026).
  */
-async function matchOnLiveName(ref, liveName, noted, kind = 'first sight') {
+async function matchOnLiveName(ref, liveName, noted, awaiting = null) {
   const { point, box } = await whereIs(ref, noted);
   const out = await matchPlace({ ref, names: [liveName], point, box, rented: true });
   if (out.none) return { matched: false, why: out.none };
-  const w = await recordOwnedPoint({ ref, ...out, method: `${kind}: ${out.method}` });
-  return w.written ? { matched: true, source: out.source, sourceRef: String(out.sourceRef ?? '') } : { matched: false, why: w.why };
+  const kind = awaiting ? 'rematch' : 'first sight';
+  const sourceRef = String(out.sourceRef ?? '');
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    const w = await recordOwnedPoint({ ref, ...out, method: `${kind}: ${out.method}` }, c);
+    if (w.written && awaiting) {
+      await c.query(
+        `update owned_point_suspects set rematched_source = $4, rematched_ref = $5
+          where venue_ref = $1 and source = $2 and source_ref = $3`,
+        [awaiting.venue_ref, awaiting.source, awaiting.source_ref, out.source, sourceRef]);
+      await c.query(`insert into name_checks (venue_ref, outcome, source) values ($1, 'rematched', $2)`, [ref, out.source]);
+    } else if (w.written) {
+      await c.query(`insert into name_checks (venue_ref, outcome, source) values ($1, 'first-sight', $2)`, [ref, out.source]);
+    }
+    await c.query('commit');
+    return w.written ? { matched: true, source: out.source, sourceRef } : { matched: false, why: w.why };
+  } catch (err) {
+    await c.query('rollback').catch(() => null);
+    throw err;
+  } finally { c.release(); }
+}
+
+/** An agreement, stamped on the row that was judged and counted, together. */
+async function agree(row) {
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    const { rowCount } = await c.query(
+      `update owned_points set checked_at = now() where venue_ref = $1 and source = $2 and coalesce(source_ref, '') = $3`,
+      [row.venue_ref, row.source, row.source_ref]);
+    if (rowCount) await c.query(`insert into name_checks (venue_ref, outcome, source) values ($1, 'agreed', $2)`, [row.venue_ref, row.source]);
+    await c.query('commit');
+    return rowCount > 0;
+  } catch (err) {
+    await c.query('rollback').catch(() => null);
+    throw err;
+  } finally { c.release(); }
 }
 
 /**
@@ -156,25 +194,6 @@ export async function setAside(row, score) {
   } finally { c.release(); }
 }
 
-/**
- * One outcome, written down for the Monday count: a reference and a source,
- * never a name. A failure to write it is said in the log and never stops the
- * work it describes — a committed set-aside still gets its re-match (Codex,
- * 2 Oct 2026). The set-aside's own outcome is written inside its transaction.
- */
-const noteOutcome = (ref, outcome, source = null) =>
-  query('insert into name_checks (venue_ref, outcome, source) values ($1, $2, $3)', [ref, outcome, source])
-    .catch((err) => console.error(`epic-api: name-check — could not count ${outcome} for ${ref}: ${String(err?.message ?? err).slice(0, 120)}`));
-
-/** A set-aside place matched again: the suspicion says what it went to, and the week counts it. */
-async function afterRematch(suspect, m) {
-  await query(
-    `update owned_point_suspects set rematched_source = $4, rematched_ref = $5
-      where venue_ref = $1 and source = $2 and source_ref = $3`,
-    [suspect.venue_ref, suspect.source, suspect.source_ref, m.source, m.sourceRef]);
-  await noteOutcome(suspect.venue_ref, 'rematched', m.source);
-}
-
 let draining = false;
 
 /**
@@ -215,9 +234,9 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
           const { rows: [awaiting] } = await query(
             `select venue_ref, source, source_ref from owned_point_suspects
               where venue_ref = $1 and rematched_source is null order by created_at desc limit 1`, [x.ref]);
-          const m = await matchOnLiveName(x.ref, x.name, x, awaiting ? 'rematch' : 'first sight');
-          if (m.matched && awaiting) { out.rematched += 1; await afterRematch(awaiting, m); }
-          else if (m.matched) { out.firstSight += 1; await noteOutcome(x.ref, 'first-sight', m.source); }
+          const m = await matchOnLiveName(x.ref, x.name, x, awaiting ?? null);
+          if (m.matched && awaiting) out.rematched += 1;
+          else if (m.matched) out.firstSight += 1;
           continue;
         }
         if (!NAMED_SOURCES.includes(row.source)) { out.cantSpeak += 1; continue; }
@@ -225,18 +244,14 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
         if (v.verdict === 'agrees') {
           // Only the row that was judged: one the matcher put in its place since
           // was not compared with anything (Codex, 2 Oct 2026).
-          const { rowCount } = await query(
-            `update owned_points set checked_at = now() where venue_ref = $1 and source = $2 and coalesce(source_ref, '') = $3`,
-            [x.ref, row.source, row.source_ref]);
-          if (!rowCount) { out.cantSpeak += 1; continue; }
+          if (!(await agree(row))) { out.cantSpeak += 1; continue; }
           out.agreed += 1;
-          await noteOutcome(x.ref, 'agreed', row.source);
         } else if (v.verdict === 'doubtful') {
           const a = await setAside(row, v.score);
           if (!a.setAside) { out.cantSpeak += 1; continue; }
           out.doubted += 1;
-          const m = await matchOnLiveName(x.ref, x.name, x, 'rematch');
-          if (m.matched) { out.rematched += 1; await afterRematch(row, m); }
+          const m = await matchOnLiveName(x.ref, x.name, x, row);
+          if (m.matched) out.rematched += 1;
         } else {
           out.cantSpeak += 1;
         }
