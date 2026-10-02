@@ -74,3 +74,20 @@ test('admission: a full ONS postcode settles GB over a stale stamp; an Eircode n
   assert.equal(await admission.recordAdmissionAnswer(eire, { free: true }, { sourceUrl: 'https://x.ie', postcode: 'ZA8 X2Y3' }), null);
   assert.equal(await ownedCostBand(eire), null);
 });
+
+test('a full Eircode never fills a missing country from its routing key', async () => {
+  // Codex: with no stamp, W12 X2Y3 missed the exact lookup and fell back to W12.
+  await query(`insert into postcodes (pcds, sector, outcode, lat, lng, source)
+               values ('W12 7RJ', 'W12 7', 'W12', 51.51, -0.23, 'test') on conflict (pcds) do nothing`);
+  const ref = 'osm:node/ac-unstamped-eircode';
+  await index.noteMany([{ ref, lat: 53.35, lng: -6.26 }], { source: 'osm' });
+  await query('update place_index set country_code = null where venue_ref = $1', [ref]);
+  await query(`insert into place_records (venue_ref, postcode, updated_at) values ($1, 'W12 X2Y3', now())
+               on conflict (venue_ref) do update set postcode = excluded.postcode`, [ref]);
+  await index.settleCountryFromPostcode([ref]);
+  const { rows: [pi] } = await query('select country_code from place_index where venue_ref = $1', [ref]);
+  assert.equal(pi.country_code, null, 'left unknown, not made GB');
+  assert.equal(await index.postcodeSaysGb('W12 X2Y3', null), false);
+  assert.equal(await index.postcodeSaysGb('W12', null), true, 'an outcode alone still fills');
+  assert.equal(await index.postcodeSaysGb('W12 9ZZ', null), true, 'a GB-shaped postcode ONS has not loaded yet still fills');
+});

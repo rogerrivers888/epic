@@ -1239,11 +1239,16 @@ export const PCDS_FROM = (col) => `(left(${NO_SPACE(col)}, length(${NO_SPACE(col
  *     (`postcodes`, migration 253) is GB-only and every `pcds` has a three-character
  *     second part, so an Eircode — whose second part is four — can never be one.
  *   - An outcode alone can only FILL a missing country. W12 is a London outcode and
- *     a Dublin routing key, so an outcode never overrides a country already set.
+ *     a Dublin routing key, so an outcode never overrides a country already set —
+ *     and it fills only from a GB-shaped postcode, never from a full Eircode.
  */
 export const POSTCODE_SAYS_GB = (postcodeCol, countryCol) => `(
   exists (select 1 from postcodes p where p.pcds = ${PCDS_FROM(postcodeCol)})
   or (${countryCol} is null
+      -- GB-shaped: an outcode alone, or one with a GB second part (digit, two
+      -- letters). A full Eircode — W12 X2Y3, a four-character second part — is
+      -- neither, so its routing key cannot fill the country with GB (Codex).
+      and ${NO_SPACE(postcodeCol)} ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?([0-9][A-Z]{2})?$'
       and exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM(postcodeCol)}))))`;
 
 /**
