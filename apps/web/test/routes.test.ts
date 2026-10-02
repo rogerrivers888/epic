@@ -407,6 +407,7 @@ test('Household, Settings, Prototypes and the back office', () => {
   // of them — so a piece of work is a link somebody can be sent.
   assert.deepEqual(roundTrip('/admin/places'), { name: 'admin', screen: 'places' });
   assert.deepEqual(parseRoute('/admin/places?where=gb'), { name: 'admin', screen: 'places' });
+  assert.deepEqual(roundTrip('/admin/review'), { name: 'admin', screen: 'review' });
   assert.deepEqual(parseRoute('/admin/places?where=berkshire&lens=category'), { name: 'admin', screen: 'places' });
   assert.deepEqual(parseRoute('/admin/places?where=windsor&within=30&by=drive'), { name: 'admin', screen: 'places' });
   assert.deepEqual(parseRoute('/admin/places?where=sl4-1qn&within=30&by=drive&cat=family&sub=play'), { name: 'admin', screen: 'places' });

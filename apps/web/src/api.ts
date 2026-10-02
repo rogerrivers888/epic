@@ -1864,6 +1864,13 @@ export type PlaceRing = {
   };
 };
 
+/** One row of the C30/C61 review queue (a spotted feature awaiting a decision). */
+export type ReviewFeature = {
+  norm: string; raw: string; places: number; exampleSubcategory: string | null;
+  asserts: number; denies: number; asks: number; mostlyAgainst: boolean;
+  known: boolean; lastSeen: string | null;
+};
+
 export type PlaceRow = {
   ref: string; name: string | null; nameFrom: string | null;
   /** The name is the search term that found it, not the place's own (namesFor). */
@@ -3105,6 +3112,19 @@ export const api = {
   /** BO2q — the places themselves. */
   adminPlaceList: (p: PlaceWhere & { cat?: string | null; sub?: string | null; show?: string; q?: string; missing?: string; sort?: string; desc?: string }) =>
     request<PlaceLevel & { rows: PlaceRow[]; facts: FactDef[]; bar: BarFact[]; counted: string[]; notReady: number }>(`/api/admin/place-index/places${qs(p)}`),
+  /**
+   * The C30/C61 review queue — the concrete features Google review-spotting raised
+   * from the reviews a search already fetched, for the owner to approve into facts
+   * or ignore. Read-only; no Google text, only our derived counts.
+   */
+  adminReviewQueue: (p: { sub?: string | null; limit?: number } = {}) =>
+    request<{ features: ReviewFeature[]; newCount: number; knownCount: number }>(`/api/admin/place-index/review-queue${qs(p)}`),
+  /** Approve a feature into our fact list; it is then verified from owned sources. */
+  adminApproveFeature: (norm: string) =>
+    post<{ feature: string; attributeKey: string; asked: number; subcategories: string[] }>(`/api/admin/place-index/review-queue/${encodeURIComponent(norm)}/approve`, {}),
+  /** Ignore a feature for good — it never raises again. */
+  adminIgnoreFeature: (norm: string, reason?: string) =>
+    post<{ feature: string; ignored: number }>(`/api/admin/place-index/review-queue/${encodeURIComponent(norm)}/ignore`, reason ? { reason } : {}),
   /**
    * The same scope as a household would be shown it — our order, our fields,
    * nothing nameless. Free: no provider is asked anything.
