@@ -15,12 +15,15 @@ import { parseLegal } from './legalParse';
 
 /** **bold** and *italic* inside one line. */
 function Inline({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).filter(Boolean);
+  // `\*` is a literal star (a family of names, epic.voice.*), never emphasis.
+  const STAR = '\u0000';
+  const plain = (t: string) => t.split(STAR).join('*');
+  const parts = text.replace(/\\\*/g, STAR).split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).filter(Boolean);
   return (
     <>
-      {parts.map((p, i) => (p.startsWith('**') ? <Text key={i} style={{ fontWeight: '700' }}>{p.slice(2, -2)}</Text>
-        : p.startsWith('*') && p.length > 2 ? <Text key={i} style={{ fontStyle: 'italic' }}>{p.slice(1, -1)}</Text>
-          : <Text key={i}>{p}</Text>))}
+      {parts.map((p, i) => (p.startsWith('**') ? <Text key={i} style={{ fontWeight: '700' }}>{plain(p.slice(2, -2))}</Text>
+        : p.startsWith('*') && p.length > 2 ? <Text key={i} style={{ fontStyle: 'italic' }}>{plain(p.slice(1, -1))}</Text>
+          : <Text key={i}>{plain(p)}</Text>))}
     </>
   );
 }

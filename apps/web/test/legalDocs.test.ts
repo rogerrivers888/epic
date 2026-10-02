@@ -49,3 +49,30 @@ test('the Markdown the pack uses is all understood: headings, lists, tables', ()
   assert.ok(blocks.some((b) => b.kind === 'ul'), 'the who-we-share-with list');
   assert.ok(!blocks.some((b) => b.kind === 'p' && /^\|/.test(b.text)), 'no table row left as a paragraph');
 });
+
+test('every key the app stores is in the cookie notice — read from the source, not from a list', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const root = new URL('../', import.meta.url).pathname;
+  const files: string[] = [join(root, 'App.tsx')];
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir)) {
+      const p = join(dir, f);
+      if (statSync(p).isDirectory()) walk(p); else if (/\.(ts|tsx)$/.test(f)) files.push(p);
+    }
+  };
+  walk(join(root, 'src'));
+  // Key names: 'epic.x', `epic.x.${…}` — the dotted family the app writes under. (Map layers are epic-…, not storage.)
+  const found = new Set<string>();
+  for (const f of files) {
+    for (const m of readFileSync(f, 'utf8').matchAll(/['`](epic\.[a-zA-Z][a-zA-Z.-]*)(\$\{)?/g)) {
+      const name = m[1].replace(/\.$/, '');
+      if (name === 'epic' || /\.(js|json|csv)$/.test(name)) continue;
+      found.add(name);
+    }
+  }
+  const listed = (COOKIES.match(/\| ([^|]+) \(/g) ?? []).flatMap((cell) => cell.slice(2, -2).split(',').map((n) => n.trim().replace(/\\\*$/, '*')));
+  const covered = (key: string) => listed.some((n) => (n.endsWith('.*') ? key === n.slice(0, -2) || key.startsWith(n.slice(0, -1)) : key === n));
+  const missing = [...found].filter((k) => !covered(k));
+  assert.deepEqual(missing, [], 'stored but not in the notice');
+});
