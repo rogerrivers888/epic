@@ -323,3 +323,11 @@ test('on request needs hours a session fits into; a late session ends the next d
   assert.equal(s[0].endsAt, '01:00');
   assert.equal(s[0].endsOn, '2027-01-09');
 });
+
+test('a course whose first date was skipped is judged on its first real session', async () => {
+  const { laneBlockers } = await import('../src/domain/lanes.js');
+  const today = new Date(); const iso = (d) => d.toISOString().slice(0, 10);
+  const skipped = new Date(today); skipped.setUTCDate(skipped.getUTCDate() - 2);
+  const offer = { lane: 'course', first_date: iso(skipped), skipped_dates: [iso(skipped)], sessions: 3, starts_at: '09:00', duration_min: 60, visibility: 'invite', who_chosen: true, outcome: 'x', parents: 'stay', venue: 'out_about', venue_label: 'Hall', price_mode: 'free', max_count: 8, what_label: 'Swim', title: 'Swim' };
+  assert.ok(!laneBlockers(offer, host()).some((b) => /date has gone/.test(b)), 'the run starts next week, not two days ago');
+});

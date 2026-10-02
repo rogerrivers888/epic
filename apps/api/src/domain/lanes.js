@@ -555,11 +555,12 @@ export const CHECK_WORDS = {
  * here they are taken as given, so an edit to a live offer is judged on what
  * the edit can change.
  */
-export function laneBlockers(offer, host, cfg = DEFAULT_CONFIG) {
+export function laneBlockers(offer, host, cfg = DEFAULT_CONFIG, holidays = new Map()) {
   const items = checklist(offer, { host, account: { email: 'given', mobile: 'given' } }, cfg);
   // A one-off or a course whose first date has gone cannot go out — at sending, or at approval
   // after a review that ran past it (Codex, 2 Oct 2026). A weekly class rolls on.
-  const first = offer.lane === 'oneoff' ? ymd(offer.starts_on ?? offer.startsOn) : offer.lane === 'course' ? ymd(offer.first_date ?? offer.firstDate) : null;
+  // A course's first *actual* session: a skipped first date pushes it on (Codex, 2 Oct 2026).
+  const first = offer.lane === 'oneoff' ? ymd(offer.starts_on ?? offer.startsOn) : offer.lane === 'course' ? (courseRun(offer, holidays, cfg).dates[0] ?? ymd(offer.first_date ?? offer.firstDate)) : null;
   const past = first && first < ymd(new Date()) ? ['That date has gone. Pick a new one.'] : [];
   return [...past, ...laneGaps(offer, cfg), ...items.filter((i) => (i.blocks === 'send' || i.blocks === 'live') && !i.done).map((i) => CHECK_WORDS[i.key])];
 }

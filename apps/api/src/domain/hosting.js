@@ -333,7 +333,7 @@ export function ageGate(offer, party) {
 export function publishBlockers(offer, host, evidence = null) {
   // An offer made in one of the four lanes (hosting v7) is held to its own
   // rules: the lane's steps and the checklist, never the old shapes' questions.
-  if (offer.lane) return laneBlockers(offer, host ?? {}, hostingConfig());
+  if (offer.lane) return laneBlockers(offer, host ?? {}, hostingConfig(), holidaySet(knownBankHolidays()));
   const out = [];
   const pub = offer.visibility === 'public';
   const paid = (offer.money ?? 'free') !== 'free';
