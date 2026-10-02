@@ -233,18 +233,20 @@ export async function buildOsrmMode({
         const { rows: dropped } = await client.query(
           'delete from ring_counts where cell = $1 and mode = $2 returning minutes', [from.code, canonical]);
         await client.query('delete from ring_rankings where cell = $1 and mode = $2', [from.code, canonical]);
-        await client.query('commit');
         droppedRings = [...new Set(dropped.map((r) => r.minutes))]
           .map((minutes) => ({ cell: from.code, mode: canonical, minutes }));
+        // The rings just dropped are handed to the caller inside this same
+        // transaction, so the obligation to recount them is written with the
+        // marker that says this origin is done — never a done origin whose
+        // dropped ring nobody owes (Codex).
+        if (droppedRings.length && onRingsDropped) await onRingsDropped(droppedRings, (sql, params) => client.query(sql, params));
+        await client.query('commit');
       } catch (err) {
         await client.query('rollback').catch(() => {});
         throw err;
       } finally {
         client.release();
       }
-      // The rings just dropped are handed back so a caller that owes them a
-      // recount can keep the keys somewhere that outlives this process.
-      if (droppedRings.length && onRingsDropped) await onRingsDropped(droppedRings);
       pairs += edges.length;
       built += 1;
       if (onProgress && i % 100 === 0) {

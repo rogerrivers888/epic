@@ -62,10 +62,10 @@ export const PROFILES = [
  * by a newer run carries that run, so an older run finishing its recount cannot
  * forget an obligation the newer one renewed (Codex).
  */
-export async function rememberRings(keys, run) {
+export async function rememberRings(keys, run, q = query) {
   const map = Object.fromEntries((keys ?? []).map((k) => [ringId(k), String(run)]));
   if (!Object.keys(map).length) return;
-  await query(
+  await q(
     `insert into bo_settings (key, value, version, updated_by, updated_at)
      values ($1, jsonb_build_object('rings', $2::jsonb), 1, 'osrm-build service', now())
      on conflict (key) do update set
@@ -121,11 +121,15 @@ async function writeState(next, { who, expect = null } = {}) {
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [OSRM_BUILD_KEY]);
     const { rows: [prior] } = await client.query('select value from bo_settings where key = $1', [OSRM_BUILD_KEY]);
     const was = prior?.value ?? { state: 'none' };
+    // The database's clock, the one cell_builds.at and ring_counts.computed_at
+    // are stamped with: an epoch or a cutoff from the worker's own clock would
+    // be compared against times it did not set (Codex).
+    const { rows: [{ now }] } = await client.query('select now() as now');
     if (expect && !expect(was)) {
       await client.query('rollback');
       return { changed: false, was };
     }
-    const value = { ...was, ...(typeof next === 'function' ? next(was) : next) };
+    const value = { ...was, ...(typeof next === 'function' ? next(was, new Date(now).toISOString()) : next) };
     const { rows: [row] } = await client.query(
       `insert into bo_settings (key, value, version, updated_by, updated_at) values ($1, $2::jsonb, 1, $3, now())
        on conflict (key) do update set value = excluded.value, version = bo_settings.version + 1,
@@ -179,10 +183,7 @@ export async function approveOsrmBuild({ by = null } = {}) {
 /** Claim the approved build for this run, atomically: two cron ticks cannot both start it. */
 export async function claimOsrmBuild({ by = 'osrm-build service' } = {}) {
   const out = await writeState(
-    (was) => {
-      const startedAt = new Date().toISOString();
-      return { state: 'running', startedAt, runBy: by, runId: randomUUID(), epoch: was.epoch ?? startedAt };
-    },
+    (was, now) => ({ state: 'running', startedAt: now, runBy: by, runId: randomUUID(), epoch: was.epoch ?? now }),
     { who: by, expect: (was) => was.state === 'approved' },
   );
   return out.changed ? out.value : null;
@@ -340,7 +341,7 @@ export async function runOsrmBuildJob({
         const out = await d.buildOsrmMode({
           mode: p.mode, cells, origins, table: d.osrmTable(routed.url, { profile: p.label }), horizon,
           resume: true, since: claimed.epoch, chunk: 300,
-          onRingsDropped: (keys) => d.rememberRings(keys, claimed.runId),
+          onRingsDropped: (keys, q) => d.rememberRings(keys, claimed.runId, q),
           onProgress: ({ done, of, pairs }) => d.log(p.mode, `${done}/${of}`, `${pairs} pairs`),
         });
         result.modes[p.mode] = { built: out.built, skipped: out.skipped, pairs: out.pairs, runId: out.runId };
@@ -355,7 +356,8 @@ export async function runOsrmBuildJob({
     // ones that existed before it, and any counted while it ran from the reach
     // it was replacing (the race osrmMatrix.js recorded). Driving is untouched
     // by this build and is not recounted (Codex).
-    const finished = new Date().toISOString();
+    // The cutoff on the database's clock — ring counts are stamped with it.
+    const finished = new Date((await query('select now() as at')).rows[0].at).toISOString();
     await d.rememberRings(await d.ringKeys({ before: finished }), claimed.runId);
     const first = await settleOwed(d);
     // A ring count another process had already begun from the old reach can
