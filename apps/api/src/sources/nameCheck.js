@@ -81,6 +81,17 @@ async function ownedFor(refs) {
   return new Map(rows.map((r) => [r.venue_ref, r]));
 }
 
+/**
+ * Which of `refs` the index already holds. A first-sight match is made only
+ * for a place we already know — the backfill's own scope — so a passing read
+ * (a sweep, a benchmark, an example) never invents a place in the index or an
+ * owned point for something nobody holds (Codex, 2 Oct 2026).
+ */
+async function indexed(refs) {
+  const { rows } = await query('select venue_ref from place_index where venue_ref = any($1)', [refs]);
+  return new Set(rows.map((r) => r.venue_ref));
+}
+
 /** Where to look for a place's owned twin: the point that came with the name, else the index's, else its census box. */
 async function whereIs(ref, noted) {
   const { rows: [pi] } = await query('select lat, lng, slice from place_index where venue_ref = $1', [ref]);
@@ -208,9 +219,10 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
   try {
     const batch = takeLiveNames(n).filter((x) => !seenRecently(x.ref, now));
     if (!batch.length) return out;
-    let owned;
+    let owned, known;
     try {
       owned = await ownedFor(batch.map((x) => x.ref));
+      known = await indexed(batch.map((x) => x.ref));
     } catch (err) {
       // The batch goes back on the queue for the next minute rather than
       // being lost to one failed read (Codex, 2 Oct 2026).
@@ -234,6 +246,9 @@ export async function drain({ n = 100, now = Date.now() } = {}) {
           const { rows: [awaiting] } = await query(
             `select venue_ref, source, source_ref from owned_point_suspects
               where venue_ref = $1 and rematched_source is null order by created_at desc limit 1`, [x.ref]);
+          // A first sight only for a place we already hold, and only from a
+          // sighting allowed to make one; a waiting re-match is always ours.
+          if (!awaiting && (!x.mayMatch || !known.has(x.ref))) { out.cantSpeak += 1; continue; }
           const m = await matchOnLiveName(x.ref, x.name, x, awaiting ?? null);
           if (m.matched && awaiting) out.rematched += 1;
           else if (m.matched) out.firstSight += 1;

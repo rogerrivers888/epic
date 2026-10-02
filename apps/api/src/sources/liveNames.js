@@ -18,7 +18,12 @@ const MAX = 2000;
 const queue = new Map(); // ref -> { name, lat, lng }
 
 /** Note a live name (and the point it came with, if any) for the next drain. */
-export function noteLiveName(ref, name, point = null, { tries = 0 } = {}) {
+/**
+ * `mayMatch: false` asks only that an existing owned match be judged — never
+ * that a new one be made from this sighting. The benchmark keeps nothing but
+ * its verdict, so its places must not become owned points (Codex, 2 Oct 2026).
+ */
+export function noteLiveName(ref, name, point = null, { tries = 0, mayMatch = true } = {}) {
   if (!ref || typeof name !== 'string' || !name.trim()) return;
   // Only Google's references carry a Google name; another provider's id is not checked here.
   if (!String(ref).startsWith('google:')) return;
@@ -33,6 +38,8 @@ export function noteLiveName(ref, name, point = null, { tries = 0 } = {}) {
     lat: has ? lat : had?.lat ?? null,
     lng: has ? lng : had?.lng ?? null,
     tries: Math.max(tries, had?.tries ?? 0),
+    // Any sighting that may match lets the place be matched.
+    mayMatch: Boolean(mayMatch || had?.mayMatch),
   });
 }
 

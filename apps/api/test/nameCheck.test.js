@@ -50,7 +50,7 @@ test('only a Google reference with a real name is noted, and a Places answer not
   assert.equal(live.pendingLiveNames(), 0);
   toVenue({ id: 'PLACE1', displayName: { text: 'Harbour Café' }, location: { latitude: LAT, longitude: LNG } });
   const [x] = live.takeLiveNames();
-  assert.deepEqual(x, { ref: 'google:PLACE1', name: 'Harbour Café', lat: LAT, lng: LNG, tries: 0 });
+  assert.deepEqual(x, { ref: 'google:PLACE1', name: 'Harbour Café', lat: LAT, lng: LNG, tries: 0, mayMatch: true });
   // A later sighting with no point keeps the point an earlier one brought.
   live.noteLiveName('google:PLACE2', 'Harbour Café', { lat: LAT, lng: LNG });
   live.noteLiveName('google:PLACE2', 'Harbour Café');
@@ -153,6 +153,16 @@ test('a place with no owned point is matched at first sight, and then shows the 
   nc.forgetChecks(); live.clearLiveNames();
   const ref = `google:${randomUUID()}`;
   const id = await fsaPlace('Selkie Bakehouse', LAT - 0.003, LNG);
+  // A place nobody holds is never matched from a passing read…
+  live.noteLiveName(ref, 'Selkie Bakehouse', { lat: LAT - 0.003, lng: LNG });
+  assert.equal((await nc.drain()).firstSight, 0, 'not in the index: not ours to match');
+  // …nor from the benchmark, which keeps nothing but its verdict.
+  await query('insert into place_index (venue_ref) values ($1)', [ref]);
+  nc.forgetChecks();
+  live.noteLiveName(ref, 'Selkie Bakehouse', { lat: LAT - 0.003, lng: LNG }, { mayMatch: false });
+  assert.equal((await nc.drain()).firstSight, 0, 'a benchmark sighting only checks');
+  // A place we hold, seen by an ordinary read, is.
+  nc.forgetChecks();
   live.noteLiveName(ref, 'Selkie Bakehouse', { lat: LAT - 0.003, lng: LNG });
   const out = await nc.drain();
   assert.equal(out.firstSight, 1);
