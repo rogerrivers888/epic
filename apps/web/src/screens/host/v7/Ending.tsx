@@ -61,13 +61,16 @@ export function Ending({ offerId }: { offerId: string }) {
   const cfg = home.config;
   const look = LANES[offer.lane];
   const pub = offer.visibility === 'public';
-  const invited = offer.invites.reduce((n, i) => n + (i.heads || 1), 0);
+  // Messages that actually went, one per invitation — not party sizes, and not ones no sender could send (Codex, 2 Oct 2026).
+  const sent = offer.invites.filter((i) => i.sentAt).length;
+  const invited = offer.invites.length;
 
   const big = pub ? (offer.state === 'in_review' ? 'Sent for review.' : 'It’s live.') : 'Invites are out.';
   const sub = pub
-    ? (offer.state === 'in_review' ? `Back to you within ${cfg.reviewHours} hours` : 'People can book from today')
-    : invited === 0 ? 'Share the invite link to ask people'
-      : invited === 1 ? '1 text or email on its way' : `${invited} texts and emails on their way`;
+    // Guest booking for the four lanes is its own brief; until it lands the page is up but not bookable.
+    ? (offer.state === 'in_review' ? `Back to you within ${cfg.reviewHours} hours` : 'Booking opens soon')
+    : sent === 1 ? '1 text or email on its way' : sent > 1 ? `${sent} texts and emails on their way`
+      : invited ? `${invited} invited · share the link to reach them` : 'Share the invite link to ask people';
   const fee = home.isPro || offer.privateFeeState === 'included' ? 'Included in Pro'
     : offer.privateFeeState === 'paid' ? `${gbp(cfg.privateEventPence)} paid` : null;
   const meta = pub ? `${look.tag} · public · ${offer.state === 'in_review' ? 'in review' : 'live'}` : [look.tag, 'private', fee].filter(Boolean).join(' · ');

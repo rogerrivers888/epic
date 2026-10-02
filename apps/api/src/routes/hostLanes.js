@@ -775,7 +775,7 @@ router.post('/host/lanes/offers/:id/video', async (req, res, next) => {
     // never one replaced since (Codex, 2 Oct 2026).
     const wasThis = host.intro_video_id && host.intro_video_id === offer.video_id;
     if (updated.video_on_profile && updated.video_id && (!host.intro_video_id || wasThis)) await repo.updateHost(host.id, { introVideoId: updated.video_id });
-    else if (!updated.video_on_profile && wasThis) await repo.updateHost(host.id, { introVideoId: null });
+    else if (wasThis && (!updated.video_on_profile || !updated.video_id)) await repo.updateHost(host.id, { introVideoId: null });
     res.json({ offer: await lanePayload(updated, host, account) });
   } catch (err) { next(err); }
 });
