@@ -537,3 +537,17 @@ test('a Pro Checkout paid but never synced sends on the next press — never a s
     });
   } finally { await srv.close(); }
 });
+
+test('a Checkout paid before Epic wrote it down is still recorded by the webhook', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await readyHost(h, member));
+  try {
+    const offer = await filledOneoff(srv);
+    const body = JSON.stringify({ type: 'checkout.session.completed', livemode: false, data: { object: { id: 'cs_race_1', mode: 'payment', status: 'complete', payment_status: 'paid', amount_total: 1000, metadata: { epic_kind: 'event', epic_offer_id: offer.id, epic_household_id: h.id } } } });
+    const t = Math.floor(Date.now() / 1000);
+    const sig = `t=${t},v1=${crypto.createHmac('sha256', 'whsec_test').update(`${t}.${body}`).digest('hex')}`;
+    assert.equal((await srv.raw('/api/stripe/webhook', body, { 'content-type': 'application/json', 'stripe-signature': sig })).status, 200);
+    assert.equal((await query('select private_fee_state from host_offers where id = $1', [offer.id])).rows[0].private_fee_state, 'paid');
+    assert.equal((await query("select state from hosting_payments where stripe_ref = 'cs_race_1'")).rows[0].state, 'succeeded');
+  } finally { await srv.close(); }
+});

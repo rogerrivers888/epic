@@ -1045,7 +1045,16 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
       await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and reason = $2 and state = 'succeeded'", [obj.metadata.epic_household_id, `sub:${obj.id}`]);
     } else if ((event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') && obj.id && stripe.checkoutPaid(obj)) {
       const kind = obj.metadata?.epic_kind === 'pro' ? 'pro' : 'private_fee';
-      const pay = await repo.paymentByRef(obj.id, kind);
+      let pay = await repo.paymentByRef(obj.id, kind);
+      // Stripe can say it was paid before Epic has written the session down: rebuild the row from the
+      // Checkout's own details, so a payment is never lost to the race (Codex, 2 Oct 2026).
+      if (!pay && obj.metadata?.epic_offer_id) {
+        const offer = await repo.offerById(obj.metadata.epic_offer_id);
+        if (offer && (!obj.metadata.epic_household_id || (await repo.hostById(offer.host_id))?.household_id === obj.metadata.epic_household_id)) {
+          pay = await repo.insertPayment({ kind, offerId: offer.id, hostId: offer.host_id, householdId: obj.metadata.epic_household_id ?? null, amountPence: obj.amount_total ?? 0, epicPence: obj.amount_total ?? 0, stripeRef: obj.id, mode: 'test', state: 'pending' });
+          await repo.updateOffer(offer.id, { privateFeeRef: obj.id });
+        }
+      }
       if (pay && pay.state !== 'succeeded') {
         await repo.updatePayment(pay.id, { state: 'succeeded' });
         if (kind === 'pro' && obj.subscription) await query('update hosting_payments set reason = $2 where id = $1', [pay.id, `sub:${obj.subscription}`]);
