@@ -5,7 +5,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COOKIES, PRIVACY, TERMS, LAST_UPDATED } from '../src/site/pages/legal/legalDocs.ts';
+import { COOKIES, COOKIES_WITH_TRACKING, PRIVACY, TERMS, LAST_UPDATED } from '../src/site/pages/legal/legalDocs.ts';
 import { parseLegal } from '../src/site/pages/legal/legalParse.ts';
 
 test('the company is named as it is registered, and the contact is support@', () => {
@@ -75,4 +75,19 @@ test('every key the app stores is in the cookie notice — read from the source,
   const covered = (key: string) => listed.some((n) => (n.endsWith('.*') ? key === n.slice(0, -2) || key.startsWith(n.slice(0, -1)) : key === n));
   const missing = [...found].filter((k) => !covered(k));
   assert.deepEqual(missing, [], 'stored but not in the notice');
+});
+
+test('the service worker\'s caches are on the list, by their version family', async () => {
+  const { readFileSync } = await import('node:fs');
+  const sw = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
+  const version = /const VERSION = '([^']+)'/.exec(sw)?.[1] ?? '';
+  assert.ok(version.startsWith('epic-shell'), 'the caches are named from VERSION');
+  assert.match(COOKIES, /epic-shell-\\\* \(app caches\)/);
+});
+
+test('with the cookie banner on, the notice lists the consent cookie and Google\'s, set only on acceptance', () => {
+  assert.doesNotMatch(COOKIES_WITH_TRACKING, /Nothing is used for statistics or marketing yet/);
+  for (const name of ['epic_consent', '_ga', '_gcl_au']) assert.ok(COOKIES_WITH_TRACKING.includes(name), name);
+  assert.match(COOKIES_WITH_TRACKING, /only if you choose Accept all/);
+  assert.doesNotMatch(COOKIES_WITH_TRACKING, /\[[^\]]*\]/);
 });

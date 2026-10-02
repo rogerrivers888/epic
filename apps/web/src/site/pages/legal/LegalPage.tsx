@@ -17,13 +17,15 @@ import { pick } from '../../i18n';
 import { SiteH1, SiteH2, SiteP } from '../../type';
 import { LEGAL_STRINGS } from './LegalPage.strings';
 import { LegalMarkdown } from './LegalMarkdown';
-import { COOKIES, COOKIES_TITLE, LAST_UPDATED, PRIVACY, PRIVACY_TITLE, TERMS, TERMS_TITLE } from './legalDocs';
+import { TRACKING_ON } from '../../config';
+import { COOKIES, COOKIES_TITLE, COOKIES_WITH_TRACKING, LAST_UPDATED, PRIVACY, PRIVACY_TITLE, TERMS, TERMS_TITLE } from './legalDocs';
 
 /** The full documents from the owner's legal pack, by page. */
 const DOCS = {
   terms: { title: TERMS_TITLE, md: TERMS },
   privacy: { title: PRIVACY_TITLE, md: PRIVACY },
-  cookies: { title: COOKIES_TITLE, md: COOKIES },
+  // With the banner on, the notice lists the consent cookie and Google's too.
+  cookies: { title: COOKIES_TITLE, md: TRACKING_ON ? COOKIES_WITH_TRACKING : COOKIES },
 } as const;
 import { InterestForm } from '../../InterestForm';
 import { W2_WORDS } from '../home/W2Sorted.strings';
