@@ -1032,7 +1032,8 @@ router.post('/host/desk/stop', async (_req, res, next) => {
   try {
     const { host, account } = await me();
     const out = await withTransaction(async (c) => {
-      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host:${host.id}`]);
+      // The same lock every new booking takes, so none can slip in between the count and the stop (Codex, 2 Oct 2026).
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${host.id}`]);
       const { rows: [o] } = await c.query(
         `select (select count(*) from experience_bookings b join booking_sessions bs on bs.booking_id = b.id join offer_sessions x on x.id = bs.session_id
                   where b.host_id = $1 and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled')::int as bookings,

@@ -293,3 +293,17 @@ test('Codex: a refund after the first session was paid reduces only what is left
   assert.equal(first.amount_pence + (second?.amount_pence ?? 0), 4000, 'the host is paid £40 in all — the share left after the refund — never more');
   assert.equal(money.compareRow({ kind: 'release', state: 'succeeded', amount_pence: 100 }, { amountPence: 0, ok: false, held: false }), 'matched');
 });
+
+test('Codex: a tip that comes after the last payout gets a payout of its own', async () => {
+  settings.forget();
+  const { host, offer, booking } = await aPaidSession({ endedHoursAgo: 300 });
+  await money.schedulePayouts();
+  await query(`update host_payouts set state = 'paid' where host_id = $1`, [host.id]);
+  await query(`insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence, state, created_at) values ($1, $2, $3, $4, 500, 30, 'paid', now() - interval '100 hours')`, [booking.id, offer.id, host.id, booking.household_id]);
+  await money.schedulePayouts();
+  const keys = [];
+  await money.releasePayouts({ transfer: async (t) => { keys.push(t); return { id: 'tr_tip' }; }, status: () => ({ ready: true }) });
+  const mine = keys.filter((t) => t.hostId === host.id);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].amountPence, 500, 'the tip, whole');
+});

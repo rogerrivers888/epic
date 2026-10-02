@@ -33,6 +33,7 @@ const HELD_WORDS = {
 /** Make payout rows for sessions that have ended. Returns how many were made. */
 export async function schedulePayouts({ now = new Date() } = {}) {
   const s = await settings.current();
+  await ledger.scheduleTipPayouts({ now, releaseHours: typeof s.payout_release === 'number' ? s.payout_release : 72 });
   const ended = await ledger.sessionsEndedWithoutPayout({ now });
   let made = 0;
   for (const row of ended) {

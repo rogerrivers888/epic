@@ -174,12 +174,9 @@ export async function claimPayout(id, { by }) {
       [id, by],
     );
     if (!p) return null;
-    const { rows: tips } = await c.query(
-      `update booking_tips set payout_id = $1
-        where host_id = $2 and state = 'paid' and payout_id is null returning amount_pence`,
-      [id, p.host_id],
-    );
-    const tipsPence = tips.reduce((n, t) => n + t.amount_pence, 0);
+    await c.query(`update booking_tips set payout_id = $1 where host_id = $2 and state = 'paid' and payout_id is null`, [id, p.host_id]);
+    // Every tip this payout carries, including any put on it when it was made.
+    const { rows: [{ pence: tipsPence }] } = await c.query(`select coalesce(sum(amount_pence), 0)::int as pence from booking_tips where payout_id = $1`, [id]);
     const { rows: [withTips] } = await c.query('update host_payouts set tips_pence = $2 where id = $1 returning *', [id, tipsPence]);
     return withTips;
   });
@@ -230,4 +227,33 @@ export async function saveReconciliation({ mode, checked, mismatched, details })
 export async function lastReconciliation() {
   const { rows: [row] } = await query('select * from stripe_reconciliations order by ran_at desc limit 1');
   return row ?? null;
+}
+
+/**
+ * Tips that arrived after the host's last payout went, with nothing scheduled
+ * to carry them: a payout of their own, so a tip is never left unpaid (Codex,
+ * 2 Oct 2026). Waits the release window from the tip, as a session would.
+ */
+export async function scheduleTipPayouts({ now = new Date(), releaseHours = 72 } = {}) {
+  const { rows } = await query(
+    `select host_id, array_agg(id) as ids, sum(amount_pence)::int as pence, min(created_at) as first_at
+       from booking_tips t
+      where t.state = 'paid' and t.payout_id is null and t.created_at <= $1::timestamptz - make_interval(hours => $2::int)
+        and not exists (select 1 from host_payouts p where p.host_id = t.host_id and p.state in ('scheduled', 'held'))
+      group by host_id`,
+    [now, releaseHours],
+  );
+  let made = 0;
+  for (const r of rows) {
+    await withTransaction(async (c) => {
+      const { rows: [p] } = await c.query(
+        `insert into host_payouts (host_id, amount_pence, tips_pence, release_at, state) values ($1, 0, $2, $3, 'scheduled') returning id`,
+        // Its clock is the first tip's: the release window counts from when the money came, as a session's does from its end.
+        [r.host_id, r.pence, r.first_at],
+      );
+      await c.query(`update booking_tips set payout_id = $1 where id = any($2::uuid[]) and payout_id is null`, [p.id, r.ids]);
+      made += 1;
+    });
+  }
+  return made;
 }

@@ -355,7 +355,7 @@ router.post('/hosts/:id/remove', requireOwnerSignedIn('remove a host'), async (r
     const why = typeof req.body?.why === 'string' ? req.body.why.trim().slice(0, 500) : '';
     if (!why) throw refuse(400, 'why', 'Say why.');
     const out = await withTransaction(async (c) => {
-      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host:${req.params.id}`]);
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${req.params.id}`]);
       const { rows: [o] } = await c.query(
         `select (select count(*) from experience_bookings where host_id = $1 and state in ('pending', 'confirmed'))::int as bookings,
                 (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`, [req.params.id],

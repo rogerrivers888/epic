@@ -266,7 +266,14 @@ async function book({ offerId, body, household, account, invite = null }) {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${offerId}`]);
       const e = await eventWithSessions(offerId, c);
       // One booking at a time per host too, so two of their events can't both take the last intro place (Codex, 2 Oct 2026).
-      if (e) await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${e.offer.host_id}`]);
+      if (e) {
+        await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${e.offer.host_id}`]);
+        // Read again under the lock a stop takes: a host who stopped a moment ago takes no booking (Codex, 2 Oct 2026).
+        const { rows: [fresh] } = await c.query('select paused, stopped_at from hosts where id = $1', [e.offer.host_id]);
+        if (fresh?.paused || fresh?.stopped_at) throw refuse(409, 'host_paused', 'This host isn’t taking new bookings just now.');
+        const { rows: [st] } = await c.query('select state from host_offers where id = $1', [offerId]);
+        if (st?.state !== 'live') throw refuse(404, 'not_open', 'That event isn’t open for booking.');
+      }
       if (!e || e.offer.state !== 'live') throw refuse(404, 'not_open', 'That event isn’t open for booking.');
       const { offer: o, sessions, host } = e;
       if (host.paused || host.stopped_at) throw refuse(409, 'host_paused', 'This host isn’t taking new bookings just now.');
@@ -948,19 +955,23 @@ router.post('/host/lanes/requests/:id/accept', async (req, res, next) => {
 router.post('/host/lanes/requests/:id/decline', async (req, res, next) => {
   try {
     const { b, o } = await myRequest(req.params.id);
-    await declineRequest(b, o, 'declined');
+    if (!(await declineRequest(b, o, 'declined'))) throw refuse(409, 'answered', 'This request has been answered.');
     res.json({ declined: true });
   } catch (err) { next(err); }
 });
 
 async function declineRequest(b, o, why) {
-  await withTransaction(async (c) => {
+  // Told only when this decline is the one that happened: a lapse racing an Accept says nothing (Codex, 2 Oct 2026).
+  const changed = await withTransaction(async (c) => {
     const { rows: [again] } = await c.query('select * from experience_bookings where id = $1 for update', [b.id]);
-    if (again.request_state !== 'asked') return;
+    if (again.request_state !== 'asked') return false;
     await owe(c, again, { amountPence: 0, cause: why, key: `request_${why}:${b.id}`, wholeBooking: true });
     await c.query(`update experience_bookings set request_state = $2, state = 'cancelled', cancelled_by = $3, cancel_cause = $2 where id = $1`, [b.id, why, why === 'lapsed' ? 'epic' : 'host']);
+    return true;
   });
+  if (!changed) return false;
   await notifications.notify({ householdId: b.household_id, kind: 'ask_to_book_declined', title: why === 'lapsed' ? `No answer in time: ${o?.title ?? 'your request'}` : `Not this time: ${o?.title ?? 'your request'}`, body: 'Your card hold is released.', link: o ? `/experiences/${o.id}` : '/trips', dedupeKey: `ask_${why}:${b.id}` }).catch(() => null);
+  return true;
 }
 
 /** Requests nobody answered in time lapse: the hold is let go and the guest is told. */
