@@ -64,7 +64,7 @@ export const SOURCES = [
  * identifier proves anything about. Everything free writes a row without one as
  * a matter of course.
  */
-const FOUND_IT = (t) => `${t}.source_place_id is not null
+export const FOUND_IT = (t) => `${t}.source_place_id is not null
    -- Only a source we *pay* proves itself with an identifier. The free ones
    -- write a row without one all the time and mean it: the sweep and the atlas
    -- name themselves as they ingest, and "ours" has no identifier to give.

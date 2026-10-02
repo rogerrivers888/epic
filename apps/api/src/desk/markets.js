@@ -15,7 +15,7 @@ import { logChange } from './changes.js';
 import { BLOCKED_MARKETS } from '../domain/markets.js';
 import { NAMESPACES, hasDrifted } from '../domain/wording.js';
 import { scaleFor } from '../domain/costBand.js';
-import { OUTCODE_FROM, PCDS_FROM as AS_PCDS, nullCountryAddresses } from '../repositories/placeIndex.js';
+import { OUTCODE_FROM, PCDS_FROM as AS_PCDS, nullCountryAddresses, FOUND_IT } from '../repositories/placeIndex.js';
 import { countryFromAddresses } from '../domain/countryFromAddress.js';
 
 /* ------------------------------------------------------------------ markets */
@@ -167,7 +167,7 @@ export async function areaKeyCheck() {
     ownership: await n(`select ownership, count(*)::int as places from place_index where country_code is null group by 1 order by 2 desc`),
     refKind: await n(`select split_part(venue_ref, ':', 1) as ref_kind, count(*)::int as places from place_index where country_code is null group by 1 order by 2 desc`),
     sources: await n(`select coalesce(string_agg(distinct s.source, '+' order by s.source), '(none)') as sources, count(*)::int as places
-                        from place_index pi left join place_index_sources s on s.venue_ref = pi.venue_ref
+                        from place_index pi left join place_index_sources s on s.venue_ref = pi.venue_ref and (${FOUND_IT('s')})
                        where pi.country_code is null group by pi.venue_ref`).then((rows) => {
       const tally = new Map();
       for (const r of rows) tally.set(r.sources, (tally.get(r.sources) ?? 0) + 1);
@@ -179,7 +179,10 @@ export async function areaKeyCheck() {
   };
   const noCountrySample = await n(`
       select pi.venue_ref, pi.ownership, pi.subcategory, pi.first_seen, r.name,
-             (select string_agg(s.source, '+' order by s.source) from place_index_sources s where s.venue_ref = pi.venue_ref) as sources
+             -- Only a source that found it: a paid provider asked with no match keeps a
+             -- row without an id, and that is not a finding (Codex; FOUND_IT).
+             (select string_agg(s.source, '+' order by s.source) from place_index_sources s
+               where s.venue_ref = pi.venue_ref and (${FOUND_IT('s')})) as sources
         from place_index pi left join place_records r on r.venue_ref = pi.venue_ref
        where pi.country_code is null
        order by md5(pi.venue_ref) limit 30`);
