@@ -86,6 +86,7 @@ test('the settle pass fills a missing country from the geocoded address, and rep
   await place('google:addr-dubai', { facts: [['nominatim', 'Iris Bay Tower, Business Bay, Dubai, 00000, United Arab Emirates']] });
   await place('google:addr-lebanon-tn', { facts: [['nominatim', '123 Main St, Lebanon, Tennessee, 37087, United States']] });
   const again = await index.settleCountriesFromAddresses(['google:addr-dubai', 'google:addr-lebanon-tn']);
+  // (A stale read cannot stamp: the update requires the address it read to still be held.)
   assert.deepEqual(again.settled.map((s) => [s.ref, s.country]).sort(), [['google:addr-dubai', 'AE'], ['google:addr-lebanon-tn', 'US']]);
 });
 
@@ -99,8 +100,9 @@ test('the area-key check names the settled, the unsettled with its reason, and t
   assert.ok(out.nonGbPlaces.some((p) => p.venue_ref === 'google:addr-vatican' && p.country === 'VA'));
   assert.equal(out.addressVerdicts.find((x) => x.venue_ref === 'google:addr-unknown').reason, 'no reverse-geocoded address held');
   assert.equal(out.addressVerdicts.find((x) => x.venue_ref === 'google:addr-ungeocodable').reason, 'no owned address names a country');
-  assert.equal(out.nonGbPlaces.find((p) => p.venue_ref === 'google:addr-pantheon').geocoded_address,
-    'Piazza della Rotonda, Municipio Roma I, Rome, Lazio, 00186, Italy', 'the evidence actually used is shown');
+  const pantheon = out.nonGbPlaces.find((p) => p.venue_ref === 'google:addr-pantheon');
+  assert.equal(pantheon.current_geocoded_address, 'Piazza della Rotonda, Municipio Roma I, Rome, Lazio, 00186, Italy');
+  assert.equal(pantheon.geocode_agrees, true, 'and whether it names the country the place holds');
   assert.ok(out.placeholderPostcodes.some((p) => p.postcode === '00000' && p.places >= 1));
   assert.ok(out.placeholderPostcodes.some((p) => p.postcode === 'N/A'), 'in any case');
   // And migration 357 is confirmed from the database, not inferred from a deploy.
@@ -110,4 +112,21 @@ test('the area-key check names the settled, the unsettled with its reason, and t
   assert.deepEqual(out.migration357.area_counts_key, ['country_code', 'area_slug', 'category', 'subcategory']);
   assert.equal(out.migration357.slug_check, true);
   assert.equal(out.migration357.country_default, null);
+});
+
+test('a country is not stamped from an address that changed after it was read', async () => {
+  const ref = 'google:addr-race';
+  await place(ref, { facts: [['nominatim', 'Somewhere, Rome, Italy']] });
+  const rows = await index.nullCountryAddresses([ref]);
+  // The geocode is refreshed between the read and the write.
+  await query(`update place_facts set value = to_jsonb('Somewhere, Vatican City'::text) where venue_ref = $1 and source = 'nominatim'`, [ref]);
+  const { countryFromAddresses: cfa } = await import('../src/domain/countryFromAddress.js');
+  const out = cfa(rows[0].addresses);
+  const { rowCount } = await query(
+    `update place_index set country_code = $2 where venue_ref = $1 and country_code is null
+       and exists (select 1 from place_facts f where f.venue_ref = $1 and f.field = 'address'
+                    and f.source = 'nominatim' and f.expires_at is null and f.value #>> '{}' = $3)`, [ref, out.code, out.from]);
+  assert.equal(rowCount, 0, 'the guard the pass uses refuses the stale read');
+  const settled = await index.settleCountriesFromAddresses([ref]);
+  assert.deepEqual(settled.settled.map((s) => s.country), ['VA'], 'the next pass reads the address as it is now');
 });

@@ -91,13 +91,19 @@ export async function areaKeyCheck() {
     `select count(*)::int as n from place_index where country_code is not null and upper(country_code) <> 'GB'`);
   const nonGbPlaces = await n(`
       select pi.venue_ref, upper(pi.country_code) as country, r.name, r.postcode,
-             -- The reverse-geocoded address a country is read from (Codex: show the
-             -- evidence actually used, not the composed record's address).
+             -- The CURRENT reverse-geocoded address, labelled as such: a country may
+             -- have come from a source area or a postcode, and the geocode may have
+             -- changed since (Codex). Whether it names this country is computed below.
              (select f.value #>> '{}' from place_facts f where f.venue_ref = pi.venue_ref
-                and f.field = 'address' and f.source = 'nominatim' and f.expires_at is null) as geocoded_address
+                and f.field = 'address' and f.source = 'nominatim' and f.expires_at is null) as current_geocoded_address
         from place_index pi left join place_records r on r.venue_ref = pi.venue_ref
        where pi.country_code is not null and upper(pi.country_code) <> 'GB'
        order by 2, r.name nulls last, pi.venue_ref limit 500`);
+  for (const p of nonGbPlaces) {
+    const named = p.current_geocoded_address ? countryFromAddresses([p.current_geocoded_address]).code : null;
+    p.geocode_names = named;
+    p.geocode_agrees = named == null ? null : named === p.country;
+  }
   // Every place still without a country that holds an address, and why its address
   // did not settle it.
   const addressVerdicts = (await nullCountryAddresses()).map((r) => {
