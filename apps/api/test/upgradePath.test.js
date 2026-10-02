@@ -28,7 +28,29 @@ import dotenv from 'dotenv';
 const here = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(here, '../../../.env'), quiet: true });
 const BASE = process.env.DATABASE_URL || 'postgres://epic:epic@localhost:5434/epic';
-const DB = 'epic_test_upgrade';
+/**
+ * Named from the process id, as helpers/db.js names every other test database
+ * (owner, 2 Oct 2026). A fixed name meant two overlapping runs — a session's
+ * pre-push suite and a peer's — each dropped and recreated the other's database
+ * mid-test, and the loser failed with "epic_test_upgrade already exists", which
+ * read as a broken migration and held up a push.
+ */
+const PREFIX = 'epic_test_upgrade';
+const DB = `${PREFIX}_${process.pid}`;
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; } };
+
+/** Databases an earlier run left behind, whose process has gone — as helpers/db.js does. */
+async function dropDeadSiblings(admin) {
+  const { rows } = await admin.query(`select datname from pg_database where datname like $1`, [`${PREFIX}_%`]);
+  for (const { datname } of rows) {
+    const pid = Number(datname.slice(`${PREFIX}_`.length));
+    if (!Number.isInteger(pid) || pid === process.pid || alive(pid)) continue;
+    await admin.query(`drop database if exists ${datname} with (force)`).catch(() => null);
+  }
+  // The old fixed name, once, without force: a peer still running the old file
+  // is not cut off mid-run; it goes the first time nobody is in it.
+  await admin.query(`drop database if exists ${PREFIX}`).catch(() => null);
+}
 
 /** Where the place index begins: everything before it is "an existing installation". */
 const INDEX_FROM = 142;
@@ -38,6 +60,7 @@ const urlFor = (database) => { const u = new URL(BASE); u.pathname = `/${databas
 test('the migrations apply to an installation that already has research in it', async () => {
   const admin = new pg.Pool({ connectionString: urlFor('postgres') });
   try {
+    await dropDeadSiblings(admin);
     await admin.query(`drop database if exists ${DB} with (force)`);
     await admin.query(`create database ${DB}`);
   } finally { await admin.end(); }
@@ -76,5 +99,11 @@ test('the migrations apply to an installation that already has research in it', 
     // migration must not write a row that points into it.
     const { rows: [n] } = await pool.query('select count(*)::int as n from place_index');
     assert.equal(n.n, 0, 'a migration must not fill the index; buildIfEmpty does that at boot');
-  } finally { await pool.end(); }
+  } finally {
+    await pool.end();
+    // Nothing reuses it: drop it now rather than leave it for the next run's sweep.
+    const cleanup = new pg.Pool({ connectionString: urlFor('postgres') });
+    try { await cleanup.query(`drop database if exists ${DB} with (force)`); } catch { /* the next run's sweep has it */ }
+    finally { await cleanup.end(); }
+  }
 });
