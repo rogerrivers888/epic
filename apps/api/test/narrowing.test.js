@@ -870,5 +870,9 @@ test('the gate proof: held or not per named place, can’t-speak for an unknown 
   const none = await surfacing.gateProof({ names: ['St Gateproof Plain'], checkId: '00000000-0000-0000-0000-000000000000' });
   assert.equal(none.places[0].held, null, 'no completed check: never a false "surfaces"');
   assert.equal(none.filedElsewhere, null, 'and the leak count cannot speak either');
+  // A pattern is never a name: `%` matches nothing rather than the whole estate.
+  const wild = await surfacing.gateProof({ names: ['%'], checkId: run.checkId });
+  assert.equal(wild.places[0].records, 0);
+  assert.equal(wild.places[0].held, null);
   assert.equal(none.places[0].liveHeld, true);
 });

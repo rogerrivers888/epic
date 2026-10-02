@@ -497,8 +497,13 @@ export async function gateProof({ names = [], checkId = null } = {}) {
   const places = [];
   for (const raw of names.map((n) => String(n).trim()).filter(Boolean).slice(0, 40)) {
     const { rows } = await query(
-      `select venue_ref as ref from place_records where name ilike $1
-        union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where name ilike $1`, [raw]);
+      // The name as written, case aside — never a pattern: `%` would match the
+      // whole estate (Codex). Capped, and the cap is said, never read as absence.
+      `select ref from (
+         select venue_ref as ref from place_records where lower(name) = lower($1)
+         union select coalesce(venue_ref, 'atlas:' || id::text) from attractions where lower(name) = lower($1)
+       ) x order by ref limit 21`, [raw]);
+    if (rows.length > 20) { places.push({ name: raw, records: null, held: null, why: 'more than 20 records go by that name — name a narrower one' }); continue; }
     const seeds = rows.map((r) => r.ref);
     if (!seeds.length) { places.push({ name: raw, records: 0, held: null, why: 'no record of that name is held' }); continue; }
     const { rootOf, membersOf } = await aliasClosure(seeds);
@@ -528,9 +533,10 @@ export async function gateProof({ names = [], checkId = null } = {}) {
   }
 
   // The stored side, read in ONE repeatable-read snapshot so a check or a
-  // reconsideration writing meanwhile can never be half-seen (Codex). "Held" is
-  // held back under one completed check now — the rows still carrying its id and
-  // not surfaced, which is what apply acts on. A check running now rewrites those
+  // reconsideration writing meanwhile can never be half-seen (Codex). "Held" is the
+  // place's hidden-or-pending state now, under any determination; the leak count
+  // is over one completed check's snapshot, which is what apply acts on. A check
+  // running now rewrites those
   // rows as it goes, so while one runs the stored side cannot speak; a crashed run
   // older than the six hours `runningCheck` honours does not count.
   const stored = await withTransaction(async (c) => {
@@ -546,11 +552,14 @@ export async function gateProof({ names = [], checkId = null } = {}) {
     const heldBy = new Map();
     for (const [i, p] of places.entries()) {
       if (!p.members) continue;
+      // Held is the place's state now, under whichever determination holds it —
+      // a row reconsidered since (check_id null) or re-judged by a later check is
+      // still holding it back, and must never read as "surfaces" (Codex).
       const { rows } = await c.query(
-        `select distinct s.venue_ref from place_surfacing_members m
+        `select distinct s.venue_ref, s.check_id, s.applied from place_surfacing_members m
            join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
-          where m.member_ref = any($1::text[]) and s.check_id = $2`, [p.members, done.id]);
-      heldBy.set(i, rows.map((r) => r.venue_ref));
+          where m.member_ref = any($1::text[])`, [p.members]);
+      heldBy.set(i, rows);
     }
     const { rows: snap } = await c.query(
       `select distinct m.member_ref as ref from place_surfacing_members m
@@ -563,7 +572,10 @@ export async function gateProof({ names = [], checkId = null } = {}) {
     if (!members) return p;
     if (!stored.readCheck) return { ...p, held: null, why: stored.why, heldBy: [] };
     const by = stored.heldBy.get(i) ?? [];
-    return { ...p, held: by.length > 0, heldBy: by };
+    return {
+      ...p, held: by.length > 0, heldBy: by.map((r) => r.venue_ref),
+      heldUnder: [...new Set(by.map((r) => r.check_id ?? 'reconsidered'))], applied: by.some((r) => r.applied),
+    };
   });
   if (!stored.readCheck) return { checkId: null, why: stored.why, places: out, snapshotRecords: null, filedElsewhere: null, leakedExamples: [] };
   const leaked = await filedElsewhere(stored.snap);
