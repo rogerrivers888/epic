@@ -523,7 +523,7 @@ function EditSheet({ data, member, refresh, canEdit, onClose }: { data: Househol
   // shared passcode is the founding household's lead though its person may
   // have no account to carry `isLead` (Codex, 2 Oct 2026).
   const { isOwner } = useSession();
-  const callerOwner = isOwner || Boolean(data.members.find((m) => m.id === data.me)?.access?.isLead);
+  const callerOwner = isOwner || Boolean(data.meIsLead) || Boolean(data.members.find((m) => m.id === data.me)?.access?.isLead);
   const targetIsChild = (member.age != null ? member.age < 18 : member.isMinor);
   // Only an adult removes anybody, as the server says — a signed-in teenager is
   // not offered a Remove the API would refuse (Codex, 2 Oct 2026).

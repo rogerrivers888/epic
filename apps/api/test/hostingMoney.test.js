@@ -274,3 +274,17 @@ test('company reporting is never on without a Companies House number', async () 
     assert.deepEqual([h.tax_is_company, h.company_number], [true, 'SC123456']);
   } finally { await srv.close(); }
 });
+
+test("a whole-run series under way shows its money on the Past tab, though the run has not finished", async () => {
+  const { household } = await aHousehold(query, 'the running series');
+  const host = await repo.insertHost(household.id, { name: 'Sam', type: 'skill' });
+  const started = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+  const offer = await repo.insertOffer(host.id, 'series', { firstDate: started, sessions: 6 });
+  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: 'whole', party: [], heads: 1, state: 'confirmed', amountPence: 6000 }, null);
+  const srv = await hostServer(household);
+  try {
+    const body = await (await fetch(`${srv.url}/api/host/money`)).json();
+    assert.equal(body.byOffer[offer.id].grossPence, 6000, 'the money sits beside the sessions already held');
+    assert.equal(body.trusted.completed, 0, 'but the run is not yet a completed experience');
+  } finally { await srv.close(); }
+});

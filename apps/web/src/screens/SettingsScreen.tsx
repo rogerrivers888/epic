@@ -305,7 +305,7 @@ function MyAccountTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
   // The household's lead (its first account) pays and may delete it; the
   // estate owner is a different thing and keeps only "Providers and usage"
   // (Codex, 2 Oct 2026). The shared passcode is the founding household's lead.
-  const isLead = isOwner || Boolean(data.members.find((m) => m.id === data.me)?.access?.isLead);
+  const isLead = isOwner || Boolean(data.meIsLead) || Boolean(data.members.find((m) => m.id === data.me)?.access?.isLead);
   const [ratingsOpen, setRatingsOpen] = useQueryState('ratings', false, asFlag);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);

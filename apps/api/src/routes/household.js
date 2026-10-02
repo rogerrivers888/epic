@@ -313,6 +313,10 @@ router.get('/', async (_req, res, next) => {
     const me = await currentMember();
     res.json({
       me: me?.id ?? null,
+      // Whether the person asking is this household's lead, from the account
+      // itself: a founding account has no member linked, so no member's access
+      // record can say it (Codex, 2 Oct 2026).
+      meIsLead: await callerIsLead(),
       household: {
         id: household.id,
         name: household.name,

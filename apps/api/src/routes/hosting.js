@@ -535,9 +535,14 @@ router.get('/host/money', async (req, res, next) => {
     // Per-offer money is PAST dates only: its one reader is the Past tab's
     // money block, which must agree with the past-dates table beside it
     // (Codex, 1 Oct 2026). The all-time figures live in `totals`.
+    // A whole-run booking on a series counts here once its first session has
+    // passed — the table beside it lists the elapsed sessions and attributes
+    // the booking's money to the first — not only after the last (Codex,
+    // 2 Oct 2026). The Trusted count above still waits for a run to finish.
+    const pastForMoney = live.filter((b) => (occurrenceDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) < today);
     const byOffer = {};
     for (const o of offers) {
-      const mine = done.filter((b) => b.offer_id === o.id);
+      const mine = pastForMoney.filter((b) => b.offer_id === o.id);
       byOffer[o.id] = feesForPeriod(mine.map(resolve));
     }
     const payoutAccounts = (await repo.payoutAccountsOf(host.id)).map(payoutAccountPayload);

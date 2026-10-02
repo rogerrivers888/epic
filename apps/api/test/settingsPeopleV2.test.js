@@ -829,3 +829,14 @@ test('leaving now with no length said still ends with the day window (at least a
   assert.ok(new Date(t.return_at).getTime() <= Math.max(winEnd, new Date(t.depart_at).getTime() + 3600000),
     'ends by the window close, or an hour after leaving if that is later');
 });
+
+test('a founding account with no person linked is still the lead', async () => {
+  const { household: h } = await aHousehold(query);
+  const lead = await createAccountOnHousehold(h.id, { memberId: null, name: 'Founder', role: 'customer', plan: 'household', email: 'founder-nomember@example.com' });
+  const { rows: [acct] } = await query('select * from accounts where id = $1', [lead.id]);
+  const srv = await server({ ...acct, status: 'active' });
+  try {
+    const body = (await srv.get('/api/household')).body;
+    assert.equal(body.meIsLead, true, 'Delete household and Plan and billing are theirs');
+  } finally { await srv.close(); }
+});

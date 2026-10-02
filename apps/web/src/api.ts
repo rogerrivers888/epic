@@ -495,6 +495,8 @@ export type Learned = {
 export type HouseholdResponse = {
   /** The signed-in person's member id: the "You" face, and whose page is read-only to others. */
   me: string | null;
+  /** The person asking is the household's lead — read from their account, which may have no member linked. */
+  meIsLead?: boolean;
   household: Household;
   members: Member[];
   learned: Learned[];
