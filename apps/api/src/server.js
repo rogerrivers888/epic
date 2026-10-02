@@ -750,7 +750,7 @@ const loadLaunchCutoff = async () => {
   catch (err) { console.warn(`epic-api: launch-gate cutoff load failed: ${err.message}`); return false; }
 };
 if (!(await loadLaunchCutoff()) && siteGateOn()) {
-  failClosedUntilCutoff();
+  failClosedUntilCutoff(cleanSlateAppliedAt);
   const retry = setInterval(async () => { if (await loadLaunchCutoff()) clearInterval(retry); }, 60_000);
   retry.unref?.();
 }

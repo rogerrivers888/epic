@@ -312,3 +312,24 @@ test('while the cutoff is unknown, a session this process minted passes and an o
     } finally { setCleanSlateEpoch(null); }
   });
 });
+
+test('a malformed override does not lift the fail-closed state, and a reachable database restores the cutoff on the next request', async () => {
+  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: 'not a date', GATE_USER: null, GATE_PASSWORD: null }, async () => {
+    const older = aToken();
+    await insertSession(older, 'opened before the cutoff could be read');
+    const read = () => run(mockReq({ path: '/api/admin/narrowing/preview', headers: { authorization: bearer(older) } }));
+    let calls = 0;
+    failClosedUntilCutoff(async () => { calls += 1; throw new Error('database still down'); });
+    try {
+      assert.equal((await read()).nexted, false, 'a non-date EPIC_GATE_SINCE is no override — still closed');
+      assert.equal(calls, 1, 'it tried to load the cutoff on demand');
+      await read();
+      assert.equal(calls, 1, 'and does not retry more than every five seconds');
+    } finally { setCleanSlateEpoch(null); }
+
+    failClosedUntilCutoff(async () => new Date(Date.now() - 3_600_000));
+    try {
+      assert.equal((await read()).nexted, true, 'the database answering again restores the real cutoff at once');
+    } finally { setCleanSlateEpoch(null); }
+  });
+});

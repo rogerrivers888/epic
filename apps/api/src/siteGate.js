@@ -68,9 +68,34 @@ export function setCleanSlateEpoch(date) {
  * older session waits for the real cutoff, which the retry restores
  * (setCleanSlateEpoch ends this state).
  */
-export function failClosedUntilCutoff() {
+let loadCutoff = null;
+let lastTry = 0;
+let inFlight = null;
+export function failClosedUntilCutoff(load = null) {
   cutoffUnknown = true;
+  loadCutoff = load;
+  lastTry = 0;           // a newly unknown cutoff is tried on the very next request
   recordMintsSinceBoot(true);
+}
+
+/**
+ * While the cutoff is unknown, try again on demand — at most every five seconds,
+ * one attempt shared by every request in flight. A request carrying a session is
+ * proof the database is answering again, so the real cutoff is restored at once
+ * rather than on the next minute's retry, and from then on every replica judges
+ * the same session the same way on the database's own clock (Codex, 2 Oct 2026).
+ * A failure leaves the fail-closed state as it was.
+ */
+async function ensureCutoff() {
+  if (!cutoffUnknown || !loadCutoff) return;
+  if (inFlight) { await inFlight; return; }
+  if (Date.now() - lastTry < 5_000) return;
+  lastTry = Date.now();
+  inFlight = (async () => {
+    try { setCleanSlateEpoch(await loadCutoff()); }
+    catch { /* still unknown; fail closed as before */ }
+  })();
+  try { await inFlight; } finally { inFlight = null; }
 }
 const gateSince = () => {
   const env = process.env.EPIC_GATE_SINCE ? Date.parse(process.env.EPIC_GATE_SINCE) : NaN;
@@ -80,7 +105,10 @@ const gateSince = () => {
 const predatesGate = (session) => {
   // The owner's explicit override always wins; otherwise, while the automatic
   // cutoff is unknown, only this process's own sessions are known to be after it.
-  if (!process.env.EPIC_GATE_SINCE && cutoffUnknown) return !mintedSinceBoot(session?.id);
+  // A malformed override is no override: it must not lift the fail-closed state
+  // (Codex, 2 Oct 2026).
+  const override = process.env.EPIC_GATE_SINCE ? Date.parse(process.env.EPIC_GATE_SINCE) : NaN;
+  if (!Number.isFinite(override) && cutoffUnknown) return !mintedSinceBoot(session?.id);
   const since = gateSince();
   if (since == null || !session?.created_at) return false;
   const made = new Date(session.created_at).getTime();
@@ -178,6 +206,7 @@ function wantsBasicChallenge(req) {
 /** The middleware, mounted first (server.js). See the file header for the model. */
 export async function siteGate(req, res, next) {
   if (!siteGateOn()) return next();
+  if (cutoffUnknown) await ensureCutoff();
   res.set('X-Robots-Tag', 'noindex');
   // Match the exempt paths with any trailing slash stripped, since Express's
   // default non-strict routing treats `/api/session/link/` and `/api/session/link`
