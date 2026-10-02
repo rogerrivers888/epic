@@ -356,7 +356,18 @@ export async function applyPaymentIntent(pi) {
   if (!b) return null;
   const o = await repo.offerById(b.offer_id);
   const host = await repo.hostById(b.host_id);
-  if (pi.status === 'succeeded' && b.payment_state !== 'charged' && !['refunded', 'partially_refunded'].includes(b.payment_state)) {
+  // Paid after the booking had already been let go (unpaid too long, cancelled, set-up failed): the money is
+  // taken back in full at once, and nobody is told it is on (Codex, 2 Oct 2026).
+  if (pi.status === 'succeeded' && b.state === 'cancelled' && ['none', 'held', 'failed'].includes(b.payment_state)) {
+    await withTransaction(async (c) => {
+      const { rows: [now] } = await c.query(`update experience_bookings set payment_state = 'charged', charged_pence = $2 where id = $1 and payment_state in ('none', 'held', 'failed') returning *`, [b.id, pi.amount_received ?? b.value_pence]);
+      if (!now) return;
+      await c.query(`update hosting_payments set state = 'succeeded', kind = 'charge', updated_at = now() where stripe_ref = $1 and kind in ('charge', 'hold')`, [pi.id]);
+      await owe(c, now, { amountPence: now.charged_pence, cause: 'paid_after_cancel', key: `paid_after_cancel:${b.id}`, wholeBooking: true });
+    });
+    return b.id;
+  }
+  if (pi.status === 'succeeded' && b.state !== 'cancelled' && b.payment_state !== 'charged' && !['refunded', 'partially_refunded'].includes(b.payment_state)) {
     const { rowCount } = await query(
       `update experience_bookings set payment_state = 'charged', charged_pence = $2, state = case when state = 'pending' then 'confirmed' else state end,
               request_state = case when request_state = 'asked' then 'accepted' else request_state end
@@ -374,6 +385,8 @@ export async function applyPaymentIntent(pi) {
     await query(`update experience_bookings set payment_state = 'failed', state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'payment_failed' where id = $1 and payment_state = 'none'`, [b.id]);
     await query(`update booking_sessions set state = 'cancelled' where booking_id = $1`, [b.id]);
     await query(`update hosting_payments set state = 'failed', updated_at = now() where stripe_ref = $1`, [pi.id]).catch(() => null);
+    // An invitation answered with a card that then failed is open again, so they can answer once more (Codex, 2 Oct 2026).
+    await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where booking_id = $1`, [b.id]);
   }
   return b.id;
 }
@@ -914,7 +927,7 @@ export async function lapseRequests({ now = new Date() } = {}) {
 export async function dropUnpaid({ now = new Date() } = {}) {
   const { rows } = await query(
     `update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'unpaid'
-      where state = 'pending' and payment_state = 'none' and request_state is null and value_pence > 0 and created_at < $1 - interval '30 minutes'
+      where state = 'pending' and payment_state = 'none' and request_state is null and value_pence > 0 and created_at < $1::timestamptz - interval '30 minutes'
       returning id`,
     [now],
   );

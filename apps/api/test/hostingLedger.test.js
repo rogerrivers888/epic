@@ -266,3 +266,13 @@ test('Codex: a payout claimed by a run that died is picked up again, with the sa
   assert.equal(keys.filter((k) => k === `payout-${p.id}`).length, 1, 'once, with its own key');
   assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'paid');
 });
+
+test('Codex: Stripe unreachable leaves a payout released for the next run, not failed', async () => {
+  settings.forget();
+  const { sessions: [s] } = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  const { rows: [p] } = await query('select * from host_payouts where session_id = $1', [s.id]);
+  await query(`update host_payouts set release_at = now() - interval '1 hour' where id = $1`, [p.id]);
+  await money.releasePayouts({ transfer: async () => { throw Object.assign(new Error('x'), { code: 'stripe_unreachable' }); }, status: () => ({ ready: true }) });
+  assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'released');
+});

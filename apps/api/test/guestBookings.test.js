@@ -430,3 +430,20 @@ test('Codex: a guest who cancels inside the no-refund window gives the place bac
     assert.equal(rows.length, 1, 'the payout still counts the money kept');
   } finally { await srv.close(); }
 });
+
+test('Codex: a payment that lands after the booking was let go is refunded in full, and nobody is told it is on', async () => {
+  settings.forget();
+  const ev = await anEvent({ price: 2500, priceMode: 'same_each' });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${ev.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    await query(`update experience_bookings set created_at = now() - interval '1 hour' where id = $1`, [r.body.booking.id]);
+    await guest.dropUnpaid();
+    pays(r.body.pay.paymentIntent);
+    await srv.send('POST', `/api/booked/${r.body.booking.id}/payment`, {});
+    const { rows: [b] } = await query('select state, payment_state, refunded_pence from experience_bookings where id = $1', [r.body.booking.id]);
+    assert.deepEqual([b.state, b.payment_state, b.refunded_pence], ['cancelled', 'charged', 2500]);
+    assert.equal((await query(`select count(*)::int as n from notifications where household_id = $1 and kind = 'booking_confirmed'`, [a.household.id])).rows[0].n, 0);
+  } finally { await srv.close(); }
+});

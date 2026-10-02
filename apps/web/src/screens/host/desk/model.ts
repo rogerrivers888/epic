@@ -18,7 +18,7 @@ export type Standing = { words: string | null; level?: 'good' | 'risk' | 'review
 export type LadderProgress = { rate: number; ratedEvents: number; avg: number | null; next: { pct: number; ratedEvents: number; avgAtLeast: number; eventsToGo: number; avgOk: boolean } | null } | null;
 
 export type DeskHome =
-  | { home: '4e' }
+  | { home: '4e'; helping?: number }
   | {
     home: 'desk'; state: DeskState;
     host: { id: string; name: string; photo: string | null };

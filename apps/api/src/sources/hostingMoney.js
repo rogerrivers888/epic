@@ -84,8 +84,10 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
       }).catch(() => null);
       out.released += 1;
     } catch (err) {
-      // Not paid: the row says so and a person looks. The same idempotency key
-      // makes a later retry the same transfer, never a second one.
+      // Stripe unreachable — or a reply lost after Stripe accepted it: the payout stays released, and the next
+      // run tries again with the same key, so it is the same transfer (Codex, 2 Oct 2026). Only a definite
+      // refusal marks it failed for a person to look at.
+      if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
       await ledger.finishPayout(p.id, { state: 'failed' });
       console.error(`epic-api: payout ${p.id} failed — ${err.code ?? err.message}`);
       out.failed += 1;

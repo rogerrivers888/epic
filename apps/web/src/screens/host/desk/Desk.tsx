@@ -36,7 +36,7 @@ export function HostDesk({ fallbackCount = 0 }: { fallbackCount?: number }) {
   const strip = invites.length ? <CohostInvites invites={invites} onDone={(id) => setInvites((l) => l.filter((x) => x.id !== id))} /> : null;
   if (error && !home) return <View style={{ flex: 1 }}>{strip}<HostLanes yours={fallbackCount} /></View>;
   if (!home) return <Loading />;
-  if (home.home === '4e') return <View style={{ flex: 1 }}>{strip}<HostLanes yours={0} /></View>;
+  if (home.home === '4e') return <View style={{ flex: 1 }}>{strip}<HostLanes yours={home.helping ?? 0} /></View>;
   return <View style={{ flex: 1 }}>{strip}<DeskHomeView d={home} /></View>;
 }
 

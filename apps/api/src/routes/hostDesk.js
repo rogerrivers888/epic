@@ -209,7 +209,9 @@ async function standingFor(host, rating, s) {
 
 router.get('/host/desk', async (_req, res, next) => {
   try {
-    const { household, host, account } = await me();
+    const { household, host, account } = await me({ hostOptional: true });
+    // A co-host who hosts nothing of their own gets 4e, with a way into the events they help with (Codex, 2 Oct 2026).
+    if (!host) return res.json({ home: '4e', helping: (await helpingWith(account?.id)).length });
     const now = new Date();
     const s = await settingsRepo.current();
     const offers = await offersWithSessions(host.id);
