@@ -427,6 +427,7 @@ export function derive(patch, current) {
   // Decides by comes before the first session, or it decides nothing (Codex, 2 Oct 2026).
   const startDay = current.lane === 'oneoff' ? ymd(next.starts_on) : current.lane === 'course' ? ymd(next.first_date) : null;
   if (p.decidesOn && startDay && p.decidesOn >= startDay) throw refuse(400, 'decides_after_start', 'Decides by has to be before the first session.');
+  if (p.decidesOn && p.decidesOn < ymd(new Date())) throw refuse(400, 'decides_in_past', 'Decides by can’t be a day that has gone.');
   if (p.firstDate !== undefined && current.lane === 'course') p.weekday = p.firstDate ? dow(p.firstDate) : null;
   if (p.weekdays !== undefined && current.lane === 'weekly') p.weekday = p.weekdays[0] ?? null;
   // Prices: free clears every figure; Weekly's four boxes keep the old readers' one price in step.

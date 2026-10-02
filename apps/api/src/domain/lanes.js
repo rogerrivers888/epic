@@ -295,7 +295,13 @@ export function decidesOn(offer, holidays = new Map(), cfg = DEFAULT_CONFIG) {
   const own = ymd(offer.decides_on ?? offer.decidesOn);
   if (own) return own;
   const first = firstSessionDate(offer, holidays, cfg);
-  return first ? plusDays(first, -cfg.decidesDaysBefore) : null;
+  if (!first) return null;
+  // Never already gone: an event starting within the week decides today, and one starting today
+  // has nothing left to decide (Codex, 2 Oct 2026).
+  const today = ymd(new Date());
+  const day = plusDays(first, -cfg.decidesDaysBefore);
+  if (day >= today) return day;
+  return today < first ? today : null;
 }
 
 /**
@@ -442,6 +448,7 @@ export function stepFilled(offer, step, cfg = DEFAULT_CONFIG) {
       const own = ymd(offer.decides_on ?? offer.decidesOn);
       const start = offer.lane === 'oneoff' ? ymd(offer.starts_on ?? offer.startsOn) : offer.lane === 'course' ? ymd(offer.first_date ?? offer.firstDate) : null;
       if (own && start && own >= start) return false;
+      if (own && own < ymd(new Date())) return false;
       return true;
     }
     case 'wprice': {
@@ -495,7 +502,8 @@ export const laneGaps = (offer, cfg = DEFAULT_CONFIG) => missingSteps(offer, cfg
 export function checklist(offer, { host, account } = {}, cfg = DEFAULT_CONFIG) {
   const pub = offer.visibility === 'public';
   const epic = paidThroughEpic(offer);
-  const profileDone = Boolean(host?.name?.trim() && host?.photo_id && host?.date_of_birth && ageOn(host.date_of_birth) >= cfg.hostMinAge);
+  // Name, photo, a line about you, and a date of birth that is 18 or over (README › Host profile).
+  const profileDone = Boolean(host?.name?.trim() && host?.photo_id && host?.intro_text?.trim() && host?.date_of_birth && ageOn(host.date_of_birth) >= cfg.hostMinAge);
   const items = [];
   const push = (key, blocks, done, extra = {}) => items.push({ key, blocks, done: Boolean(done), ...extra });
   push('email', 'send', has(account?.email));

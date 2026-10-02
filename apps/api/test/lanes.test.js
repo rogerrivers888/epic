@@ -108,7 +108,7 @@ test('decides by: a week before the first session by default, the host’s own d
   assert.equal(decidesOn(course, BH), '2027-01-02');
   assert.equal(decidesOn({ ...course, decides_on: '2026-12-20' }, BH), '2026-12-20');
   assert.equal(decidesOn({ ...course, min_count: null }, BH), null, 'no minimum, no decides-by');
-  assert.equal(decidesOn({ lane: 'oneoff', starts_on: '2026-06-13', min_count: 10 }), '2026-06-06');
+  assert.equal(decidesOn({ lane: 'oneoff', starts_on: '2027-06-12', min_count: 10 }), '2027-06-05');
   assert.equal(decidesOn({ lane: 'weekly', first_date: '2026-10-08', weekdays: [4], min_count: 4 }), null, 'weekly decides each session');
 });
 
@@ -181,7 +181,7 @@ test('weekly is paid when either price is set', () => {
   assert.equal(paidThroughEpic({ lane: 'weekly', drop_in_pence: 1200, visibility: 'public', money: 'direct' }), true, 'public paid is Epic collects only');
 });
 
-const host = (over = {}) => ({ name: 'Maya Okafor', photo_id: 'p1', date_of_birth: '1986-03-02', identity_state: 'none', payouts_state: 'none', checked_state: 'none', tax_reference: null, ...over });
+const host = (over = {}) => ({ name: 'Maya Okafor', photo_id: 'p1', intro_text: 'Henley local', date_of_birth: '1986-03-02', identity_state: 'none', payouts_state: 'none', checked_state: 'none', tax_reference: null, ...over });
 const account = { email: 'maya@example.com', mobile: '07700900118' };
 
 test('private checklist: profile and payouts block sending; the video is optional; tax waits for the first payout', () => {
@@ -330,4 +330,12 @@ test('a course whose first date was skipped is judged on its first real session'
   const skipped = new Date(today); skipped.setUTCDate(skipped.getUTCDate() - 2);
   const offer = { lane: 'course', first_date: iso(skipped), skipped_dates: [iso(skipped)], sessions: 3, starts_at: '09:00', duration_min: 60, visibility: 'invite', who_chosen: true, outcome: 'x', parents: 'stay', venue: 'out_about', venue_label: 'Hall', price_mode: 'free', max_count: 8, what_label: 'Swim', title: 'Swim' };
   assert.ok(!laneBlockers(offer, host()).some((b) => /date has gone/.test(b)), 'the run starts next week, not two days ago');
+});
+
+test('decides by is never a day already gone', () => {
+  const d = new Date(); d.setUTCDate(d.getUTCDate() + 3);
+  const soon = d.toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal(decidesOn({ lane: 'oneoff', starts_on: soon, min_count: 5 }), today, 'three days away decides today, not four days ago');
+  assert.equal(decidesOn({ lane: 'oneoff', starts_on: today, min_count: 5 }), null, 'starting today, nothing left to decide');
 });

@@ -85,7 +85,7 @@ function ProfileSheet({ home, onClose, onChanged }: SheetProps) {
     } catch (e: any) { showToast(e.message); } finally { setUploading(false); }
   };
 
-  const ok = Boolean(name.trim() && photoId && dob);
+  const ok = Boolean(name.trim() && photoId && line.trim() && dob);
   const save = () => run(async () => {
     await api.laneProfile({ name: name.trim(), line: line.trim() || null, photoId, dateOfBirth: dob ?? undefined });
     await onChanged();

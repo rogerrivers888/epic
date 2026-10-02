@@ -132,19 +132,19 @@ test('a step saves; answers that contradict themselves are refused; the money fo
     const p = (body) => srv.send('PATCH', `/api/host/lanes/offers/${offer.id}`, body);
     assert.equal((await p({ minCount: 12, maxCount: 10 })).body.error, 'min_over_max');
     assert.equal((await p({ ageMin: 12, ageMax: 5 })).body.error, 'ages_backwards');
-    assert.equal((await p({ multiDay: true, startsOn: '2026-06-13', endsOn: '2026-06-12' })).body.error, 'ends_before_start');
-    assert.equal((await p({ multiDay: true, startsOn: '2026-06-13', endsOn: '2026-06-20' })).body.error, 'too_many_days', 'a one-off runs over at most four days');
-    let r = await p({ startsOn: '2026-06-13', startsAt: '13:00', endsAt: '23:00', draftStep: 'when' });
+    assert.equal((await p({ multiDay: true, startsOn: '2027-06-12', endsOn: '2027-06-11' })).body.error, 'ends_before_start');
+    assert.equal((await p({ multiDay: true, startsOn: '2027-06-12', endsOn: '2027-06-19' })).body.error, 'too_many_days', 'a one-off runs over at most four days');
+    let r = await p({ startsOn: '2027-06-12', startsAt: '13:00', endsAt: '23:00', draftStep: 'when' });
     assert.equal(r.status, 200);
     assert.equal(r.body.offer.startsAt, '13:00');
     assert.equal(r.body.offer.draftStep, 'when');
     assert.ok(!r.body.offer.missing.includes('when'));
 
     r = await p({ priceMode: 'same_each', pricePence: 3500, childPence: 2000, minCount: 5, maxCount: 10, refundPolicy: 'moderate' });
-    assert.equal((await p({ decidesOn: '2026-06-20' })).body.error, 'decides_after_start', 'decides by comes before the first session');
+    assert.equal((await p({ decidesOn: '2027-06-19' })).body.error, 'decides_after_start', 'decides by comes before the first session');
     assert.equal(r.body.offer.money, 'epic', 'paid defaults to Epic collecting');
     assert.equal(r.body.offer.refundWords, 'Full refund up to 5 days before');
-    assert.equal(r.body.offer.decidesOnDefault, '2026-06-06', 'a week before the first session');
+    assert.equal(r.body.offer.decidesOnDefault, '2027-06-05', 'a week before the first session');
     r = await p({ money: 'direct' });
     assert.equal(r.body.offer.money, 'direct', 'a private host may be paid directly');
     r = await p({ visibility: 'public' });
@@ -303,7 +303,7 @@ async function readyHost(h, member, { mobile = `077${String(Math.floor(Math.rand
   const account = await anAccount(h, member, { mobile });
   const { rows: [m] } = await query("insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'photo', 'image/jpeg', '\\x00', 1) returning id", [h.id]);
   const host = await repo.insertHost(h.id, { name: 'Maya Okafor', dateOfBirth: '1986-03-02', accountId: account.id });
-  await repo.updateHost(host.id, { photoId: m.id });
+  await repo.updateHost(host.id, { photoId: m.id, introText: 'Henley local' });
   return account;
 }
 
