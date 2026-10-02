@@ -86,7 +86,10 @@ export const LIME_WASH = '#E8FACE';  // oklch(0.96 0.06 125): the host page's st
 // line on deep green, and the placeholder in either field.
 export const INK_FIELD = '#2E2B29';
 export const ON_DEEP_GREEN = '#DFE9CF';
-export const PLACEHOLDER = '#8A8482';
+// Placeholder text at 4.5:1 or better on its own field (Codex, 2 Oct 2026): the
+// handoff's #8A8482 measured 3.6:1 on cream and 3.8:1 on the ink field.
+export const PLACEHOLDER = '#6E6967';
+export const PLACEHOLDER_ON_INK = '#ADA7A4';
 
 /**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a

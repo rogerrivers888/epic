@@ -22,7 +22,7 @@
 import React, { useId, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { CREAM, INK, INK_FIELD, INK_HOVER, LIME, LIME_HOVER, LIME_TINT, MOSS, PLACEHOLDER, fonts } from '../theme';
+import { CREAM, INK, INK_FIELD, INK_HOVER, LIME, LIME_HOVER, LIME_TINT, MOSS, PLACEHOLDER, PLACEHOLDER_ON_INK, fonts } from '../theme';
 import { api, type InterestSignup } from '../api';
 import { type SiteLocale } from '../routes';
 import { useRouter } from '../router';
@@ -122,7 +122,7 @@ export function InterestForm({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={w.placeholder}
-            placeholderTextColor={PLACEHOLDER}
+            placeholderTextColor={onInk ? PLACEHOLDER_ON_INK : PLACEHOLDER}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
