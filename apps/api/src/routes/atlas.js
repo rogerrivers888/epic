@@ -425,8 +425,13 @@ atlas.get('/places', async (req, res, next) => {
       + rows.filter(needsTaxonomy).length
       + wantPictures.length
       + wantRatings.length;
-    res.json({ places, wherePending: pending });
-    if (pending && !whereRunning.has(household.id)) {
+    // Whether the lookups started by an earlier read were still going when this
+    // one came in. A count that has not moved while they run is work in
+    // progress, not a stall, and the screen must not give up on it (Codex,
+    // 2 Oct 2026: one slow station batch outlasts three of its polls).
+    const busy = whereRunning.has(household.id);
+    res.json({ places, wherePending: pending, busy });
+    if (pending && !busy) {
       whereRunning.add(household.id);
       // Two lanes, side by side. The postcode and station wait on
       // OpenStreetMap and TfL, seconds a place when they answer at all, and

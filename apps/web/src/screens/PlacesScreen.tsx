@@ -210,7 +210,7 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   // (Codex, D13). A place write invalidates these keys centrally (api.request),
   // and `loadPlaces` below is the hook's forced refresh for the background refill.
   const areaKey = inArea && sel ? placesRowsKey(atHome ? 'home' : `${country!.country}/${country!.city}`) : null;
-  const { data: areaData, error: placesErr, refresh: loadPlaces } = useCachedResource<{ places: AtlasPlace[]; wherePending?: number }>(
+  const { data: areaData, error: placesErr, refresh: loadPlaces } = useCachedResource<{ places: AtlasPlace[]; wherePending?: number; busy?: boolean }>(
     areaKey,
     () => ('home' in (sel as any)
       ? api.atlasPlaces({ nearHome: true })
@@ -313,12 +313,15 @@ export function PlacesScreen({ route, household, refreshHousehold }: {
   // household with fifty places saw icons until they left and came back (owner,
   // 2 Oct 2026: "stop the screen giving up after 30 s"). So it keeps going, more
   // slowly each time (5 s, growing to a minute), and stops only when nothing is
-  // waiting or three reads in a row brought nothing new — a lookup that keeps
-  // failing is the server's to retry later, not this screen's to hammer.
+  // waiting or three finished passes in a row brought nothing new — a lookup
+  // that keeps failing is the server's to retry later, not this screen's to
+  // hammer. A read taken while the server's last pass is still running says
+  // nothing either way, so it is not counted (`busy`; Codex, 2 Oct 2026).
+  const serverBusy = areaData?.busy ?? false;
   useEffect(() => {
     if (!wherePending) return;
     const s = stalled.current;
-    s.rounds = s.last != null && wherePending >= s.last ? s.rounds + 1 : 0;
+    if (!serverBusy) s.rounds = s.last != null && wherePending >= s.last ? s.rounds + 1 : 0;
     s.last = wherePending;
     if (s.rounds >= 3) return;
     const wait = Math.min(60_000, Math.round(5000 * 1.5 ** refills.current));

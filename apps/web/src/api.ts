@@ -2431,7 +2431,7 @@ export const api = {
     request<{ trips: TripSummary[]; countries: { code: string; name: string; trips: number }[] }>(`/api/trips${qs(p)}`),
   // atlas
   atlas: () => request<{ countries: AtlasCountry[]; unplaced: number; home: AtlasHome | null }>('/api/atlas'),
-  atlasPlaces: (p: { country?: string; city?: string; kind?: string; status?: string; q?: string; nearHome?: boolean } = {}) => request<{ places: AtlasPlace[]; wherePending?: number }>(`/api/atlas/places${qs(p)}`),
+  atlasPlaces: (p: { country?: string; city?: string; kind?: string; status?: string; q?: string; nearHome?: boolean } = {}) => request<{ places: AtlasPlace[]; wherePending?: number; busy?: boolean }>(`/api/atlas/places${qs(p)}`),
   /** The country, the areas and the ground a search covers. Answers from what the API holds, so it never delays a search. */
   atlasSketch: (p: { lat: number; lng: number; radiusKm?: number; country?: string }) => request<SketchMap>(`/api/atlas/sketch${qs(p)}`),
   // trips v2
