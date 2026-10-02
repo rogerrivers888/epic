@@ -114,3 +114,18 @@ test('a non-GB postcode locality stands for its outcode without the prefix', asy
   const { rows: [l] } = await query(`select to_eat_count from localities where slug = 'ie-zq9'`);
   assert.equal(l.to_eat_count, 1);
 });
+
+test('a source area stamped abroad does not file a place the postcode rule settled in GB', async () => {
+  // Codex: an IE-stamped scout area held a place whose own record says GB; filing by
+  // the source area's country put it on the Irish board as well as the London one.
+  const ref = 'osm:node/ac-scout-gb';
+  await query(`insert into scout_areas (code, country_code, lat, lng) values ('ZQ7', 'IE', 53.3, -6.3) on conflict (code) do nothing`);
+  await query(`insert into scout_places (area_code, venue_ref, name, rank, outcode, from_sources) values ('ZQ7', $1, 'A pub', 1, 'ZQ7', '["osm"]') on conflict do nothing`, [ref]);
+  await index.noteMany([{ ref, lat: 51.5, lng: -0.2, countryCode: 'GB' }], { source: 'osm' });
+  await query(`insert into place_cells (venue_ref, cell, lat, lng) values ($1, null, 51.5, -0.2)
+               on conflict (venue_ref) do update set lat = excluded.lat, lng = excluded.lng`, [ref]);
+  await query('update place_index set country_code = $2, placed_at = null, settle_tried_at = null where venue_ref = $1', [ref, 'GB']);
+  await index.settleNew();
+  const { rows } = await query(`select area_slug from place_areas where venue_ref = $1 and area_slug like '%zq7' order by 1`, [ref]);
+  assert.deepEqual(rows.map((r) => r.area_slug), ['zq7'], 'filed under its own country, not the source area\'s');
+});

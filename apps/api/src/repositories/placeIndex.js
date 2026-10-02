@@ -896,8 +896,9 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
-    select coalesce(a.venue_ref, 'atlas:' || a.id::text), ${AREA_SLUG('reg.country_code', 'lower(a.outcode)')}
+    select coalesce(a.venue_ref, 'atlas:' || a.id::text), ${AREA_SLUG('coalesce(pi.country_code, reg.country_code)', 'lower(a.outcode)')}
       from attractions a left join regions reg on reg.slug = a.region_slug
+      left join place_index pi on pi.venue_ref = coalesce(a.venue_ref, 'atlas:' || a.id::text)
      where a.state <> 'hidden' and a.outcode is not null
     on conflict do nothing`);
   await query(`
@@ -906,8 +907,9 @@ async function reindexWhileLocked({ onProgress }) {
     on conflict do nothing`);
   await query(`
     insert into place_areas (venue_ref, area_slug)
-    select sp.venue_ref, ${AREA_SLUG('sa.country_code', 'lower(sp.outcode)')}
+    select sp.venue_ref, ${AREA_SLUG('coalesce(pi.country_code, sa.country_code)', 'lower(sp.outcode)')}
       from scout_places sp left join scout_areas sa on sa.code = sp.area_code
+      left join place_index pi on pi.venue_ref = sp.venue_ref
      where sp.outcode is not null
     on conflict do nothing`);
   await query(`
@@ -1215,6 +1217,9 @@ end)`;
  * migration 357). GB keeps the bare code (`w12`), so nothing live moves; anywhere
  * else carries its country (`ie-w12`), so a Dublin routing key and a London outcode
  * are two areas, never one. A row with no country is filed as GB, as it always was.
+ * Filing passes the place's RESOLVED country (place_index, after the postcode rule)
+ * ahead of any source area's, so a corrected place is never filed under the stale
+ * one (Codex).
  */
 /**
  * The outward code a postcode locality stands for, in SQL: its slug less the country
@@ -1492,7 +1497,8 @@ async function settleWhileLocked(limit) {
     select coalesce(a.venue_ref, 'atlas:' || a.id::text), x.slug
       from attractions a
       left join regions reg on reg.slug = a.region_slug
-      cross join lateral (values (a.region_slug), (a.locality_slug), (${AREA_SLUG('reg.country_code', 'lower(a.outcode)')})) as x(slug)
+      left join place_index pi on pi.venue_ref = coalesce(a.venue_ref, 'atlas:' || a.id::text)
+      cross join lateral (values (a.region_slug), (a.locality_slug), (${AREA_SLUG('coalesce(pi.country_code, reg.country_code)', 'lower(a.outcode)')})) as x(slug)
      where a.state <> 'hidden' and x.slug is not null
        and coalesce(a.venue_ref, 'atlas:' || a.id::text) = any($1)
     on conflict do nothing`, [refs]);
@@ -1501,7 +1507,8 @@ async function settleWhileLocked(limit) {
     select sp.venue_ref, x.slug
       from scout_places sp
       left join scout_areas sa on sa.code = sp.area_code
-      cross join lateral (values (sp.locality_slug), (${AREA_SLUG('sa.country_code', 'lower(sp.outcode)')})) as x(slug)
+      left join place_index pi on pi.venue_ref = sp.venue_ref
+      cross join lateral (values (sp.locality_slug), (${AREA_SLUG('coalesce(pi.country_code, sa.country_code)', 'lower(sp.outcode)')})) as x(slug)
      where x.slug is not null and sp.venue_ref = any($1)
     on conflict do nothing`, [refs]);
   await query(`
