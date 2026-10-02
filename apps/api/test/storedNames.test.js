@@ -280,3 +280,12 @@ test('the purge counts and clears a plan session saved before the rule', async (
   assert.doesNotMatch(JSON.stringify(r.state), /Legacy Plan Name/);
   assert.equal((await purge.quote()).byStore['plan_sessions.state'], 0);
 });
+
+test('a fixed stop in a plan — source "anchor", key a provider\'s — loses the provider\'s name too', async () => {
+  const hh = await household();
+  const g = `google:${randomUUID()}`;
+  const { rows: [s] } = await query(`insert into plan_sessions (household_id, state) values ($1, $2) returning state`,
+    [hh, JSON.stringify({ fixed: [{ key: g, source: 'anchor', sourcePlaceId: g.split(':')[1], name: 'Google Theatre Name' }] })]);
+  assert.equal(s.state.fixed[0].name, null);
+  assert.equal(s.state.fixed[0].key, g, 'the reference stays');
+});

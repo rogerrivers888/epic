@@ -24,13 +24,17 @@ begin
   end if;
   if jsonb_typeof(j) <> 'object' then return j; end if;
   select coalesce(jsonb_object_agg(key, epic_strip_rented_names(value)), '{}'::jsonb) into out from jsonb_each(j);
-  ref := coalesce(
+  -- Every reference the object carries is asked, not only the first: a fixed
+  -- stop is {source: 'anchor', …, key: 'google:…'} (Codex, 2 Oct 2026).
+  select r into ref from unnest(array[
     case when jsonb_typeof(out -> 'source') = 'string' and jsonb_typeof(out -> 'sourcePlaceId') = 'string'
          then (out ->> 'source') || ':' || (out ->> 'sourcePlaceId') end,
     case when jsonb_typeof(out -> 'venueRef') = 'string' then out ->> 'venueRef' end,
     case when jsonb_typeof(out -> 'ref') = 'string' and (out ->> 'ref') ~ '^[a-z]+:' then out ->> 'ref' end,
-    case when jsonb_typeof(out -> 'key') = 'string' and (out ->> 'key') ~ '^[a-z]+:' then out ->> 'key' end);
-  if ref is not null and coalesce(epic_ref_true_source(ref), '') = any(epic_rented_sources()) then
+    case when jsonb_typeof(out -> 'key') = 'string' and (out ->> 'key') ~ '^[a-z]+:' then out ->> 'key' end]) r
+   where r is not null and coalesce(epic_ref_true_source(r), '') = any(epic_rented_sources())
+   limit 1;
+  if ref is not null then
     foreach k in array array['name', 'venueName', 'venueLabel', 'venue_name', 'venue_label'] loop
       if jsonb_typeof(out -> k) = 'string' then out := jsonb_set(out, array[k], 'null'::jsonb); end if;
     end loop;

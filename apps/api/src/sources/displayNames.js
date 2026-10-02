@@ -218,13 +218,14 @@ export async function resolveInto(specs, opts = {}) {
 }
 
 const NAME_KEYS = ['name', 'venueName', 'venueLabel', 'venue_name', 'venue_label'];
-const refOfJson = (o) => {
-  if (typeof o.source === 'string' && typeof o.sourcePlaceId === 'string') return `${o.source}:${o.sourcePlaceId}`;
-  if (typeof o.venueRef === 'string') return o.venueRef;
-  if (typeof o.ref === 'string' && /^[a-z]+:/.test(o.ref)) return o.ref;
-  if (typeof o.key === 'string' && /^[a-z]+:/.test(o.key)) return o.key;
-  return null;
-};
+// Every reference an object carries, as migration 343 reads them: a fixed stop
+// is {source: 'anchor', …, key: 'google:…'}, so no one of them is enough alone.
+const refsOfJson = (o) => [
+  typeof o.source === 'string' && typeof o.sourcePlaceId === 'string' ? `${o.source}:${o.sourcePlaceId}` : null,
+  typeof o.venueRef === 'string' ? o.venueRef : null,
+  typeof o.ref === 'string' && /^[a-z]+:/.test(o.ref) ? o.ref : null,
+  typeof o.key === 'string' && /^[a-z]+:/.test(o.key) ? o.key : null,
+].filter(Boolean);
 
 /**
  * Name the places inside a saved JSON document — a plan session's state —
@@ -241,17 +242,19 @@ export async function nameJson(doc, { purpose = 'plan.displayName', householdId 
     if (Array.isArray(node)) { node.forEach(walk); return; }
     if (!node || typeof node !== 'object') return;
     for (const v of Object.values(node)) if (v && typeof v === 'object') walk(v);
-    const ref = refOfJson(node);
-    if (!ref) return;
+    const refs = refsOfJson(node);
+    if (!refs.length) return;
     const keys = NAME_KEYS.filter((k) => k in node && node[k] == null);
-    if (keys.length) found.push({ node, ref, keys });
+    if (keys.length) found.push({ node, refs, keys });
   };
   walk(doc);
   if (!found.length) return doc;
   // Only a provider's place had its name emptied; any other empty name was
-  // empty when it was written and stays so.
-  const rentedSet = await rentedRefs([...new Set(found.map((f) => f.ref))]);
-  found.splice(0, found.length, ...found.filter((f) => rentedSet.has(f.ref)));
+  // empty when it was written and stays so. The provider's reference is the
+  // one that names it.
+  const rentedSet = await rentedRefs([...new Set(found.flatMap((f) => f.refs))]);
+  for (const f of found) f.ref = f.refs.find((r) => rentedSet.has(r)) ?? null;
+  found.splice(0, found.length, ...found.filter((f) => f.ref));
   if (!found.length) return doc;
   // The resolver tries what we own, then a name Google gave within the hour
   // (in memory — free), then asks Google, capped, then says "a place".
