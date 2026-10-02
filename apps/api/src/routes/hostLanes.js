@@ -881,7 +881,8 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
       const pro = await hostingPro(account, household.id);
       const plan = oneOf(['event', 'pro'], req.body?.plan) ?? offer.private_plan ?? (pro ? 'pro' : 'event');
       if (plan !== offer.private_plan) offer = await repo.updateOffer(offer.id, { privatePlan: plan });
-      const feeDone = pro || ['paid', 'included'].includes(offer.private_fee_state);
+      // 'included' is Pro's, and counts only while Pro does (Codex, 2 Oct 2026).
+      const feeDone = pro || offer.private_fee_state === 'paid';
       if (!feeDone && offer.private_fee_state === 'pending' && offer.private_fee_ref) {
         // One Checkout per offer and plan: a retry, or a host back from cancelling, gets the
         // same session — never a second one that could also be paid (Codex, 2 Oct 2026).
@@ -896,7 +897,7 @@ router.post('/host/lanes/offers/:id/publish', async (req, res, next) => {
           if (old && old.state === 'pending') await repo.updatePayment(old.id, { state: 'cancelled' });
         }
       }
-      if (!['paid', 'included'].includes(offer.private_fee_state) && !pro) {
+      if (offer.private_fee_state !== 'paid' && !pro) {
         // The £10, or joining Pro: Stripe's hosted Checkout, test mode only.
         const amount = plan === 'pro' ? cfg.proMonthlyPence : cfg.privateEventPence;
         const back = `${appUrl()}/host/offers/${offer.id}/publish?back=paid`;

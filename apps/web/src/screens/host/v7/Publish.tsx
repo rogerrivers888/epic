@@ -26,7 +26,7 @@ import { paths } from '../../../routes';
 import { useViewport } from '../../../hooks/useViewport';
 import { CREAM, HAIRLINE, INK, INK_MUTED, LIME, LIME_TINT, MOSS, TICK_EDGE, fonts } from '../../../theme';
 import { Note, Tick, goToStripe, hx, pointer, tx, v } from './kit';
-import { LANES, gbp, type CheckItem, type LaneHome, type LaneOffer } from './model';
+import { LANES, gbp, titleOf, type CheckItem, type LaneHome, type LaneOffer } from './model';
 import { PublishSheet, SHEET_KINDS, type SheetKind } from './Sheets';
 import { mmss } from './VideoSheet';
 import { Preview } from './Preview';
@@ -132,7 +132,9 @@ export function Publish({ offerId }: { offerId: string }) {
   const stripeNote = !needsStripe ? null : !cfg.stripe.ready ? 'Card payments aren’t switched on yet.' : cfg.stripe.mode === 'test' ? 'Payments are in test mode until Epic switches them on.' : null;
 
   const verifying = offer.action.key === 'verify';
-  const dim = offer.blockers.length > 0 && !verifying;
+  // Steps left empty come first: the checklist cannot send what the set-up has not finished (Codex, 2 Oct 2026).
+  const gaps = offer.missing ?? [];
+  const dim = (gaps.length > 0 || offer.blockers.length > 0) && !verifying;
 
   /** Where an item goes when it is tapped (null: nowhere). */
   const goFor = (it: CheckItem): (() => void) | null => {
@@ -161,6 +163,7 @@ export function Publish({ offerId }: { offerId: string }) {
 
   const press = () => {
     if (busy) return;
+    if (gaps.length) { navigate(paths.hostSetup(offer.id, gaps[0])); return; }
     if (verifying) { openSheet('verify'); return; }
     if (offer.blockers.length) {
       const first = offer.checklist.find((i) => i.key === offer.blockers[0]);
@@ -196,6 +199,17 @@ export function Publish({ offerId }: { offerId: string }) {
         <Text style={v.title}>{pub ? 'Before it goes live' : 'Before the invites go'}</Text>
         <Text style={[tx(12.5, '400', INK_MUTED), { marginTop: -6 }]}>{pub ? 'Public' : 'Private'} · {offer.paid ? 'paid' : 'free'} · {doneCount} of {counted.length} done</Text>
 
+        {gaps.length ? (
+          <View style={v.list}>
+            {gaps.map((g) => (
+              <Press key={g} onPress={() => navigate(paths.hostSetup(offer.id, g))} accessibilityRole="button" style={[{ flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: HAIRLINE }, pointer]}>
+                <Tick on={false} />
+                <View style={{ flex: 1 }}><Text style={tx(14.5, '700')}>{titleOf(offer.lane, g)}</Text><Text style={tx(12, '400', INK_MUTED)}>Still to fill in</Text></View>
+                <Icon name="more" size={16} color={INK_MUTED} />
+              </Press>
+            ))}
+          </View>
+        ) : null}
         <View style={v.list}>
           {offer.checklist.map((it) => {
             const go = goFor(it);

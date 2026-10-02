@@ -534,7 +534,7 @@ export function publishAction(offer, items, { isPro = false } = {}, cfg = DEFAUL
     if (verified && !verified.done) return { key: 'verify', label: 'Carry on · Verified' };
     return { key: 'review', label: 'Send for review' };
   }
-  if (isPro || offer.private_fee_state === 'paid' || offer.private_fee_state === 'included') return { key: 'send', label: 'Send the invites' };
+  if (isPro || offer.private_fee_state === 'paid') return { key: 'send', label: 'Send the invites' };
   if ((offer.private_plan ?? 'event') === 'pro') return { key: 'pro', label: 'Join Pro · send the invites' };
   const pounds = cfg.privateEventPence / 100;
   return { key: 'pay', label: `Pay £${pounds % 1 ? pounds.toFixed(2) : pounds} · send the invites` };

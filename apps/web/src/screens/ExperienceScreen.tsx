@@ -242,9 +242,11 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
             {offer.priceMode === 'by_numbers' ? <Text style={type.small}>Depends on numbers: never more than {money(offer.price.ceilingPence)} each.</Text> : null}
             {needsLine(offer) ? <Text style={[type.small, { color: colors.ink, fontWeight: '600' }]}>{needsLine(offer)}</Text> : null}
             <Text style={type.small}>
-              {offer.money === 'direct' ? `Paid to ${host.name.split(' ')[0]} directly, however you normally would. ` : `${offer.refundWords ?? REFUND_WORDS[offer.refundRule]}.`}{offer.minCount ? ` Under ${offer.minCount} and it is called off — everybody is told and nothing is taken.` : ''}
+              {offer.money === 'direct' ? `Paid to ${host.name.split(' ')[0]} directly, however you normally would. ` : (offer.lane && (offer.priceMode === 'free' || !offer.refundWords) ? '' : `${offer.refundWords ?? REFUND_WORDS[offer.refundRule]}.`)}{offer.minCount ? ` Under ${offer.minCount} and it is called off — everybody is told and nothing is taken.` : ''}
             </Text>
-            {offer.ageLimit ? <Text style={type.small}>Over {offer.ageLimit}s only. We ask for the age of everyone in the party when you book.</Text> : null}
+            {offer.lane && (offer.ageMin != null || offer.ageMax != null)
+              ? <Text style={type.small}>{offer.ageMin != null && offer.ageMin >= 18 && offer.ageMax == null ? 'Adults only (18+).' : offer.ageMin != null && offer.ageMax != null ? `Ages ${offer.ageMin} to ${offer.ageMax}.` : offer.ageMin != null ? `Ages ${offer.ageMin} and up.` : `Up to age ${offer.ageMax}.`}</Text>
+              : offer.ageLimit ? <Text style={type.small}>Over {offer.ageLimit}s only. We ask for the age of everyone in the party when you book.</Text> : null}
           </View>
 
           {booked.length ? (

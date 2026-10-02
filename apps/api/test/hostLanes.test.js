@@ -371,6 +371,10 @@ test('private: nothing is sent before the £10 is paid through Stripe (test mode
       await query("insert into hosting_payments (kind, household_id, amount_pence, state, stripe_ref, mode) values ('pro', $1, 1299, 'succeeded', 'cs_pro_test', 'test')", [h.id]);
       const next = await filledOneoff(srv);
       assert.equal(next.action.label, 'Send the invites', 'not asked to buy Pro again');
+      // Pro ended: an event it covered but never sent asks for the £10 again.
+      await query("update host_offers set private_fee_state = 'included' where id = $1", [next.id]);
+      await query("update hosting_payments set state = 'cancelled' where household_id = $1 and kind = 'pro'", [h.id]);
+      assert.equal((await srv.get(`/api/host/lanes/offers/${next.id}`)).body.offer.action.label, 'Pay £10 · send the invites');
       assert.equal(r.body.ending.kind, 'invites');
       assert.equal(r.body.ending.invited, 2);
       assert.equal(r.body.offer.sessionRows.length, 1, 'the one date laid down');
