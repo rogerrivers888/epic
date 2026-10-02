@@ -421,6 +421,9 @@ atlas.get('/places', async (req, res, next) => {
         const { rows: vs } = await query(
           `select distinct on (venue_ref) venue_ref, image_url from venue_site_images
             where venue_ref = any($1) and licence_status in ('none', 'granted')
+              -- Not where the owner has judged the place's own pictures not fit
+              -- (Photo review; Codex, 2 Oct 2026).
+              and not exists (select 1 from photo_reviews pr where pr.venue_ref = venue_site_images.venue_ref and pr.verdict = 'owned_not_fit')
             order by venue_ref, (found_how = 'og:image') desc, found_at desc`, [bare]).catch(() => ({ rows: [] }));
         const byRef = new Map(vs.map((v) => [v.venue_ref, v.image_url]));
         for (const p of places) if (byRef.has(p.venueRef)) p.photos = [{ url: byRef.get(p.venueRef), attribution: 'venue website' }];

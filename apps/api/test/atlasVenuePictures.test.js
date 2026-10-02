@@ -49,6 +49,10 @@ test('the owner sees a venue-site picture on a bare row; another account does no
     const row2 = theirs.places.find((p) => p.venueRef === ref);
     assert.ok(row2);
     assert.equal(row2.photos, undefined, 'unlicensed pictures are the owner\'s alone');
+    // Judged not fit in Photo review: no longer drawn, even for the owner.
+    await query(`insert into photo_reviews (venue_ref, verdict) values ($1, 'owned_not_fit')`, [ref]);
+    const after = await (await fetch(`${owner.base}/atlas/places?country=GB&city=${encodeURIComponent(town)}`)).json();
+    assert.equal(after.places.find((p) => p.venueRef === ref).photos, undefined);
   } finally {
     globalThis.fetch = realFetch;
     await owner.close(); await other.close();
