@@ -553,3 +553,12 @@ test('robots.txt is fetched through the address guard: a private host is never a
   assert.equal(await safeRobots('http://127.0.0.1:4000/robots.txt'), null);
   assert.equal(await safeRobots('http://[::1]/robots.txt'), null);
 });
+
+test('a picture on the page from somebody else\'s host is not the venue\'s; its own and its site builder\'s are', async () => {
+  const { picturesOnPage } = await import('../src/sources/venueImages.js');
+  const html = `<img src="https://widgets.booker.example/hero.jpg"><img src="https://images.squarespace-cdn.com/content/v1/x/front.jpg">
+    <img src="https://media.venue.example/dining.jpg"><img src="https://tracker.example/p.jpg">`;
+  assert.deepEqual(picturesOnPage(html, 'https://venue.example/').map((p) => p.url), [
+    'https://images.squarespace-cdn.com/content/v1/x/front.jpg', 'https://media.venue.example/dining.jpg',
+  ]);
+});

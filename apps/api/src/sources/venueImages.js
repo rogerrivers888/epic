@@ -42,6 +42,9 @@ const absolute = (src, base) => {
   } catch { return null; }
 };
 
+// Where the common site builders keep a site's own uploaded images.
+const BUILDER_HOST = /(^|\.)(squarespace-cdn\.com|wixstatic\.com|cdn\.shopify\.com|ctfassets\.net|website-files\.com|webflow\.com|wp\.com|wordpress\.com|cloudinary\.com|imgix\.net|godaddysites\.com|img1\.wsimg\.com|weebly\.com|editmysite\.com|jimdo\.com|jimcdn\.com|framerusercontent\.com|cargo\.site|myshopify\.com)$/i;
+
 // The furniture of a website rather than a picture of the place: icons, logos,
 // sprites, tracking pixels and payment badges.
 const FURNITURE = /(logo|icon|sprite|favicon|avatar|badge|pixel|spacer|placeholder|payment|visa|mastercard|tripadvisor|google|facebook|instagram|twitter|social|arrow|button)/i;
@@ -57,6 +60,11 @@ export function picturesOnPage(html, pageUrl) {
   const add = (src, why) => {
     const url = absolute(src, pageUrl);
     if (!url || seen.has(url)) return;
+    // The venue's own pictures: on its own site, or on the image host of the
+    // site builder it is made with. A picture from anywhere else on the page —
+    // a booking widget, somebody else's gallery, a tracker — is not the venue's
+    // (Codex, 2 Oct 2026).
+    if (!sameSite(url, pageUrl) && !BUILDER_HOST.test(hostOf(url) ?? '')) return;
     if (FURNITURE.test(url) || /\.svg(\?|$)/i.test(url)) return;
     seen.add(url);
     out.push({ url, why });
