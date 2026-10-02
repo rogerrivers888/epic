@@ -122,6 +122,8 @@ async function askWaiting(client, subcategoryKey, setKey) {
        from feature_pending_asks w join place_attributes a on a.key = w.attribute_key
       where w.subcategory_key = $1`, [subcategoryKey]);
   for (const w of waiting) {
+    const { rows: words } = await client.query('select norm from attribute_aliases where target_key = $1', [w.attribute_key]);
+    const norms = words.map((r) => r.norm);
     // Asked everywhere: no set question beside it — but a global that has been
     // switched off is switched back on, or the fact would be asked nowhere (Codex,
     // 2 Oct 2026). Retired since: nothing to ask. Anything else is asked now, and a
@@ -129,23 +131,38 @@ async function askWaiting(client, subcategoryKey, setKey) {
     // forgetting the fact.
     if (w.active && w.global_id) {
       await client.query('update questions set active = true, updated_at = now() where id = $1 and not active', [w.global_id]);
+      // The drawer's approved candidates point at the global question that asks them.
+      await client.query(
+        `update harvest_candidates set question_id = $1
+          where subcategory = $2 and status = 'promoted' and question_id is null and norm = any($3)`,
+        [w.global_id, subcategoryKey, norms]);
     } else if (w.active) {
       // The set now attached may also serve a drawer that ignored this word; the
       // ignore stands, so the fact stays owed rather than asked over it.
-      const { rows: words } = await client.query('select norm from attribute_aliases where target_key = $1', [w.attribute_key]);
       // Held back only if the set does not already actively ask it: a question
       // already there means the drawer is asked, and the obligation is met.
       const { rows: [already] } = await client.query(
         "select 1 from questions where attribute_key = $1 and scope = 'set' and set_key = $2 and active limit 1", [w.attribute_key, setKey]);
-      if (!already && (await setIgnores(client, setKey, words.map((r) => r.norm))).length) continue;
+      if (!already && (await setIgnores(client, setKey, norms)).length) continue;
       const q = await addQuestion({ attributeKey: w.attribute_key, setKey, scope: 'set' }, client);
       if (q && q.active === false) await client.query('update questions set active = true, updated_at = now() where id = $1', [q.id]);
-      // The drawer's approved candidates now have a question to point at.
       if (q) {
+        // Every drawer on the set is now asked the fact: its approved candidates point
+        // at the question, and one still undecided — a candidate restored after its
+        // ignore held the set back — is decided by the asking, not left actionable
+        // (Codex, 2 Oct 2026). A filing (decided_at set) is left as it is.
         await client.query(
-          `update harvest_candidates set question_id = $1
-            where subcategory = $2 and status = 'promoted' and question_id is null
-              and norm = any($3)`, [q.id, subcategoryKey, words.map((r) => r.norm)]);
+          `update harvest_candidates
+              set question_id = $1,
+                  status = 'promoted',
+                  decided_at = coalesce(decided_at, now()),
+                  decided_by = coalesce(decided_by, 'approved in the review queue'),
+                  examples = case when status = 'promoted' then examples else '{}' end
+            where norm = any($2)
+              and subcategory in (select subcategory_key from question_set_subcategories where set_key = $3)
+              and ((status = 'promoted' and question_id is null)
+                   or (status in ('new', 'unresolved') and decided_at is null))`,
+          [q.id, norms, setKey]);
       }
     }
     await client.query('delete from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [w.attribute_key, subcategoryKey]);

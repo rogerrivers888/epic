@@ -833,8 +833,15 @@ test('a drawer owed a fact that is asked everywhere by the time a set arrives is
   // Switched off: the attach must switch it back on, or the fact is asked nowhere.
   await query("insert into questions (attribute_key, scope, active) values ('pg-everywhere', 'global', false)");
   await query("insert into feature_pending_asks (attribute_key, subcategory_key) values ('pg-everywhere', $1) on conflict do nothing", [sub]);
+  // The drawer's approved candidate, promoted with no question yet.
+  await query("insert into attribute_aliases (norm, target_key, raw) values ('pg everywhere', 'pg-everywhere', 'pg everywhere') on conflict (norm) do update set target_key = 'pg-everywhere'");
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await sets.recordCandidates(sub, [{ norm: 'pg everywhere', raw: 'pg everywhere', rawForms: ['pg everywhere'], sources: ['google'], examples: [], kind: 'feature', placesSeen: 1, asserts: 1, denies: 0, asks: 0 }], { placesTotal: 1 });
+  await query("update harvest_candidates set status = 'promoted', decided_at = now(), question_id = null where norm = 'pg everywhere' and subcategory = $1", [sub]);
 
   await sets.attach('c30-pendglobal-set', sub);
+  const { rows: [g] } = await query("select id from questions where attribute_key = 'pg-everywhere' and scope = 'global'");
+  assert.equal((await query("select question_id from harvest_candidates where norm = 'pg everywhere' and subcategory = $1", [sub])).rows[0].question_id, g.id, 'the candidate points at the global question');
   assert.equal((await query("select count(*)::int n from questions where attribute_key = 'pg-everywhere' and scope = 'set'")).rows[0].n, 0, 'no set question beside the global one');
   assert.equal((await query("select active from questions where attribute_key = 'pg-everywhere' and scope = 'global'")).rows[0].active, true, 'the switched-off global is asked again');
   assert.equal((await query("select count(*)::int n from feature_pending_asks where attribute_key = 'pg-everywhere'")).rows[0].n, 0, 'the obligation is met and cleared');
@@ -911,6 +918,10 @@ test('a set shared with a drawer that ignored the word is not asked, and says so
   await sets.unignore(candA.id);
   assert.equal((await query("select count(*)::int n from questions where attribute_key = $1 and set_key = 'c30-si-set' and active", [res.attributeKey])).rows[0].n, 1, 'asked on the shared set once the veto is gone');
   assert.equal((await query('select count(*)::int n from feature_pending_asks where attribute_key = $1 and subcategory_key = $2', [res.attributeKey, subC])).rows[0].n, 0, 'and C is no longer owed it');
+  // A's restored candidate is decided by that asking, not left actionable.
+  const { rows: [qs] } = await query("select id from questions where attribute_key = $1 and set_key = 'c30-si-set'", [res.attributeKey]);
+  const { rows: [ra] } = await query('select status, question_id from harvest_candidates where id = $1', [candA.id]);
+  assert.deepEqual(ra, { status: 'promoted', question_id: qs.id }, 'the restored candidate is promoted and points at the question');
 });
 
 test('a detail cached without a place is spotted, free, when read again for that place', async () => {
