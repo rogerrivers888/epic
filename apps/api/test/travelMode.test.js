@@ -56,7 +56,7 @@ test('close-to-home radius: any-distance is unbounded, furthest ticked mode wins
   assert.equal(closeToHomeRadiusMiles({ minutes: 60, modes: ['car', 'walking'] }), car);
   // Train routes through transit, not the driving fall-back.
   const train = closeToHomeRadiusMiles({ minutes: 60, modes: ['train'] });
-  assert.equal(train, Math.max(1, Math.round(searchRadiusKm('transit', 60, { capKm: 200 }) / 1.60934)));
+  assert.equal(train, Math.ceil((searchRadiusKm('transit', 60, { capKm: 200 }) / 1.60934) * 10) / 10);
   assert.notEqual(train, car);
 });
 
@@ -66,4 +66,12 @@ test('ninety minutes reaches further than sixty, and two hours further still —
   const m120 = closeToHomeRadiusMiles({ minutes: 120, modes: ['car'] });
   assert.ok(m90 > m60, `90 min (${m90}mi) must beat 60 min (${m60}mi)`);
   assert.ok(m120 > m90, `120 min (${m120}mi) must beat 90 min (${m90}mi)`);
+});
+
+test('no ticked mode is not a car, and a short walk is not rounded down to nothing', () => {
+  assert.equal(closeToHomeRadiusMiles({ minutes: 60, modes: [], fallbackMiles: 7 }), 7, '"Not set" keeps the standing radius');
+  assert.notEqual(closeToHomeRadiusMiles({ minutes: 60, modes: [], fallbackMiles: 7 }), closeToHomeRadiusMiles({ minutes: 60, modes: ['car'] }));
+  const km = searchRadiusKm('walking', 30, { capKm: 200 });
+  const miles = closeToHomeRadiusMiles({ minutes: 30, modes: ['walking'] });
+  assert.ok(miles * 1.60934 >= km, `the radius (${miles}mi) holds everything the estimate reaches (${km}km)`);
 });

@@ -446,8 +446,10 @@ function NoticedSheet({ member, learned, refresh, onClose }: { member: Member; l
 
 function PendingInvite({ member, refresh }: { member: Member; refresh: () => Promise<void> }) {
   const [url, setUrl] = useState<string | null>(null);
-  const resend = async () => { try { const r = await api.inviteMember(member.id, { channels: member.access?.email ? ['email'] : ['sms'] }); setUrl(r.invitation.url); showToast(r.invitation.sent ? 'Invite sent' : 'Link ready to copy'); await refresh(); } catch (e: any) { showToast(e?.body?.message || 'Could not resend'); } };
-  const copy = async () => { const link = url; if (link && typeof navigator !== 'undefined' && navigator.clipboard) { await navigator.clipboard.writeText(link); showToast('Link copied'); } else { await resend(); } };
+  const resend = async (): Promise<string | null> => { try { const r = await api.inviteMember(member.id, { channels: member.access?.email ? ['email'] : ['sms'] }); setUrl(r.invitation.url); showToast(r.invitation.sent ? 'Invite sent' : 'Link ready to copy'); await refresh(); return r.invitation.url; } catch (e: any) { showToast(e?.body?.message || 'Could not resend'); return null; } };
+  // With no link in hand yet, the resend makes one — and that same link is the
+  // one copied, in the same tap (Codex, 2 Oct 2026).
+  const copy = async () => { const link = url ?? await resend(); if (link && typeof navigator !== 'undefined' && navigator.clipboard) { await navigator.clipboard.writeText(link); showToast('Link copied'); } };
   return (
     <View style={styles.tintBlock}>
       <Text style={styles.tintTitle}>Invited{member.access?.invitedAt ? ` ${shortDate(member.access.invitedAt)}` : ''} · not opened yet</Text>

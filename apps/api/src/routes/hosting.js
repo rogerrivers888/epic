@@ -156,6 +156,24 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
 }
 
 /** The host's own offer adds the roster, the money and what stands between it and Publish. */
+/**
+ * How many of the host's first-ten intro places are used: the highest stamped
+ * `intro_ordinal`, which a cancellation never takes back (migration 332). A row
+ * read before the stamp existed counts by state, so nothing reads as unused.
+ */
+export function introPositionsUsed(bookings) {
+  const stamped = bookings.reduce((n, b) => Math.max(n, b.intro_ordinal ?? 0), 0);
+  const unstamped = bookings.filter((b) => b.intro_ordinal == null && (b.state === 'confirmed' || b.state === 'attended')).length;
+  return stamped + unstamped;
+}
+
+/** The intro places used before this booking took its own. */
+function introPositionsBefore(b, bookings) {
+  if (b.intro_ordinal != null) return b.intro_ordinal - 1;
+  return bookings.filter((x) => x.intro_ordinal != null).length
+    + bookings.filter((x) => x.intro_ordinal == null && ['confirmed', 'attended'].includes(x.state) && new Date(x.created_at) < new Date(b.created_at)).length;
+}
+
 function ownOffer(o, host, bookings, broadcasts = [], invites = [], evidence = null, hostBookingsSoFar = null) {
   const live = bookings.filter((b) => b.state !== 'cancelled');
   const collected = live.filter((b) => b.payment_status === 'paid').reduce((n, b) => n + b.amount_pence, 0);
@@ -194,7 +212,7 @@ function ownOffer(o, host, bookings, broadcasts = [], invites = [], evidence = n
         level: host?.trust ?? 'verified',
         // The intro is host-wide (first 90 days / first ten bookings across ALL
         // offers), so count the host's bookings, not just this offer's.
-        intro: introState({ hostStartedAt: host?.created_at, bookingsSoFar: hostBookingsSoFar ?? live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length }),
+        intro: introState({ hostStartedAt: host?.created_at, bookingsSoFar: hostBookingsSoFar ?? introPositionsUsed(bookings) }),
       }),
     },
     bookings: bookings.map((b) => ({
@@ -273,7 +291,7 @@ router.get('/host', async (req, res, next) => {
     const byOffer = (id) => bookings.filter((b) => b.offer_id === id);
     const rating = await repo.ratingOf(host.id);
     const live = bookings.filter((b) => b.state !== 'cancelled');
-    const hostBookingsSoFar = live.filter((b) => b.state === 'confirmed' || b.state === 'attended').length;
+    const hostBookingsSoFar = introPositionsUsed(bookings);
     const evidence = await repo.evidenceOf(host.id);
     // The same credentials the submit endpoint checks, so the dashboard cannot
     // say "everything is in place" about an offer Publish will refuse (Codex,
@@ -473,16 +491,21 @@ router.get('/host/money', async (req, res, next) => {
     // first 90 days AND among the first ten. (The level rate still reads current
     // `host.trust` — trust is not versioned historically, so past bookings move
     // with a level change; a versioned trust ledger is the follow-on for that.)
+    // The position in the ten is the booking's stamped `intro_ordinal` (migration
+    // 332), fixed when it first held a place and kept through a cancellation —
+    // so cancelling an early booking never slides a later one into the 0%
+    // (Codex, 2 Oct 2026).
     const introById = new Map();
-    const chron = [...live].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    chron.forEach((b, i) => { introById.set(b.id, introState({ hostStartedAt: host.created_at, bookingsSoFar: i, now: new Date(b.created_at) })); });
+    for (const b of live) {
+      introById.set(b.id, introState({ hostStartedAt: host.created_at, bookingsSoFar: introPositionsBefore(b, bookings), now: new Date(b.created_at) }));
+    }
     const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });
     // The host-wide figures the screen shows directly. The intro ladder counts
     // bookings MADE (a confirmed booking consumes an intro position whenever
     // its date is, matching the per-booking pricing above); the Trusted ladder
     // counts experiences RUN — distinct past dates, because several guests on
     // one future date are nobody's track record yet (Codex, 1 Oct 2026).
-    const bookingsSoFar = live.length;
+    const bookingsSoFar = introPositionsUsed(bookings);
     const intro = introState({ hostStartedAt: host.created_at, bookingsSoFar });
     const today = ymd(new Date());
     const done = live.filter((b) => (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) < today);

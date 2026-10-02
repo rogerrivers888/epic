@@ -21,12 +21,14 @@ import { closeToHomeRadiusMiles } from '../domain/travel.js';
 /**
  * The household's "close to home" as a radius in miles, from the free distance
  * estimate (Settings revised v2 SE7). Derives from the time + ticked modes;
- * falls back to the old miles radius when "Any distance" is set. Never a paid
- * route — see domain/travel.js.
+ * "Any distance" is unbounded, and no ticked mode keeps the standing radius.
+ * Never a paid route — see domain/travel.js.
  */
+const standingMiles = (h) => h.home_radius_miles ?? 10;
 const nearHomeMiles = (h) => closeToHomeRadiusMiles({
   minutes: h.close_to_home_minutes ?? null,
   modes: Array.isArray(h.travel_modes) ? h.travel_modes : [],
+  fallbackMiles: standingMiles(h),
 });
 import { fillTaxonomy, needsTaxonomy, taxonomyKept } from '../sources/taxonomy.js';
 import { fillPhotos, needsPhoto, photosKept } from '../sources/rentedPhoto.js';
@@ -251,7 +253,10 @@ atlas.get('/', async (_req, res, next) => {
       // "Abroad" rather than listing home among the foreign ones. Taken from
       // where the household's own places actually are, not from a setting
       // nobody filled in.
-      const homeCountry = await atlasRepo.homeCountryCode(household.id, household.home_lat, household.home_lng, radiusMiles);
+      // A local radius, never the close-to-home one: under "Any distance"
+      // that is the whole Earth, and a UK household with more saved places in
+      // the US would be told it lives there (Codex, 2 Oct 2026).
+      const homeCountry = await atlasRepo.homeCountryCode(household.id, household.home_lat, household.home_lng, standingMiles(household));
       home = { label: household.home_label, lat: household.home_lat, lng: household.home_lng, radiusMiles, ...near, image: ownedImage(firstHero), countryCode: homeCountry };
     }
     // Cities are drawn in the order an area list reads best: the ones with the

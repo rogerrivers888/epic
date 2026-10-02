@@ -124,7 +124,7 @@ async function hostServer(household, account) {
   app.use('/api', hostingRouter);
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code ?? 'x', message: err.message }));
-  const s = app.listen(0);
+  const s = app.listen(0, '127.0.0.1');
   await new Promise((r) => s.once('listening', r));
   return { url: `http://127.0.0.1:${s.address().port}`, close: () => new Promise((r) => s.close(r)) };
 }
@@ -173,4 +173,30 @@ test('a waitlisted request never blocks leaving: outstanding counts held places 
   ]);
   assert.equal(held.blocked, true, 'a confirmed place still blocks');
   assert.equal(held.guests, 2, 'and only the held places are the guests to tell');
+});
+
+test('cancelling an early booking never slides a later one into the 0% intro', async () => {
+  const { household } = await aHousehold(query, 'the fixed ten');
+  const host = await repo.insertHost(household.id, { name: 'Ivo', type: 'skill' });
+  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2099-03-01' });
+  const made = [];
+  for (let i = 0; i < 11; i += 1) {
+    made.push(await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-03-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null));
+  }
+  assert.deepEqual(made.map((b) => b.intro_ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 'each booking is stamped its place in turn as it is made');
+  const srv = await hostServer(household);
+  const money = async () => (await fetch(`${srv.url}/api/host/money`)).json();
+  try {
+    const before = await money();
+    const paidBefore = before.totals.lines.find((l) => l.rate > 0);
+    assert.equal(paidBefore?.count, 1, 'the eleventh pays the level rate');
+    // The second booking is called off. It used a place in the ten; the
+    // eleventh stays outside it, and the intro does not reopen.
+    await repo.updateBooking(made[1].id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'guest' });
+    const after = await money();
+    const paidAfter = after.totals.lines.find((l) => l.rate > 0);
+    assert.equal(paidAfter?.count, 1, 'the eleventh is still charged — never re-priced at 0%');
+    assert.equal(after.intro.bookingsLeft, 0, 'the ten are spent; a cancellation does not give one back');
+  } finally { await srv.close(); }
+  assert.equal(await repo.confirmedBookingsSoFar(host.id), 11, 'the host-wide count reads the stamps, cancelled one included');
 });

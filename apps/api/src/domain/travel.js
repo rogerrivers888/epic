@@ -228,14 +228,19 @@ export function searchRadiusKm(mode, minutes, { capKm = 50 } = {}) {
 // not a provider query, so Google's 50 km answer ceiling does not apply here.
 // 200 km holds the full two-hour drive (~120 km); without it the 90- and
 // 120-minute options both collapsed to the 60 km cap's ~37 miles (Codex).
-export function closeToHomeRadiusMiles({ minutes, modes = [], capKm = 200 }) {
+export function closeToHomeRadiusMiles({ minutes, modes = [], capKm = 200, fallbackMiles = 10 }) {
   // "Any distance" (null) is unbounded — not the old 10-mile radius. A radius
   // wide enough to hold any two points on Earth means the near-home view stops
   // filtering by distance at all, as the setting and migration 329 intend.
   if (minutes == null) return ANY_DISTANCE_MILES;
-  const list = modes && modes.length ? modes : ['driving'];
-  const km = Math.max(...list.map((m) => searchRadiusKm(m, minutes, { capKm })));
-  return Math.max(1, Math.round(km / 1.60934));
+  // No mode ticked ("Not set") says nothing about how they travel, so it is
+  // never quietly read as a car: the household's standing radius holds until
+  // they choose (Codex, 2 Oct 2026).
+  if (!modes || !modes.length) return fallbackMiles;
+  const km = Math.max(...modes.map((m) => searchRadiusKm(m, minutes, { capKm })));
+  // Rounded UP to a tenth of a mile: rounding to the nearest mile hid places
+  // the estimate puts inside the time — a 30-minute walk is 1.37 miles, not 1.
+  return Math.ceil((km / 1.60934) * 10) / 10;
 }
 export const ANY_DISTANCE_MILES = 100000;
 
