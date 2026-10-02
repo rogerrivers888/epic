@@ -157,6 +157,24 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
 
 /** The host's own offer adds the roster, the money and what stands between it and Publish. */
 /**
+ * The publish estimate as booking lines. A per-person price is that many
+ * one-person bookings; any other price is one booking for the whole takings
+ * (a per-household price or a total for the group), the nearest honest model
+ * without knowing who will come.
+ */
+export function publishFeeEstimate(o, host, usedSoFar) {
+  const total = takingsAt(o, o.expected_count) ?? 0;
+  const perPerson = o.price_mode === 'same_each' && o.per !== 'household' && o.price_pence && o.expected_count;
+  const count = perPerson ? Number(o.expected_count) : 1;
+  const each = perPerson ? o.price_pence : total;
+  const lines = Array.from({ length: count }, (_, i) => ({
+    amountPence: each, level: host?.trust ?? 'verified', viaHostLink: false,
+    intro: introState({ hostStartedAt: host?.created_at, bookingsSoFar: usedSoFar + i }),
+  }));
+  return feesForPeriod(lines);
+}
+
+/**
  * How many of the host's first-ten intro places are used: the highest stamped
  * `intro_ordinal`, which a cancellation never takes back (migration 332). A row
  * read before the stamp existed counts by state, so nothing reads as unused.
@@ -203,17 +221,11 @@ function ownOffer(o, host, bookings, broadcasts = [], invites = [], evidence = n
     takings: {
       collectedPence: collected, recordedPence: recorded, refundedPence: refunded, payoutOn,
       atMinimum: takingsAt(o, o.min_count), atExpected: takingsAt(o, o.expected_count),
-      // Epic's fee at this host's level, shown before publishing. A host still
-      // inside their first 90 days pays 0% (the exact bookings-left reason is
-      // the Money screen's, which counts the host's real bookings); here the
-      // level rate and the intro-by-time are enough for the publish estimate.
-      fee: feeForBooking({
-        amountPence: takingsAt(o, o.expected_count) ?? 0,
-        level: host?.trust ?? 'verified',
-        // The intro is host-wide (first 90 days / first ten bookings across ALL
-        // offers), so count the host's bookings, not just this offer's.
-        intro: introState({ hostStartedAt: host?.created_at, bookingsSoFar: hostBookingsSoFar ?? introPositionsUsed(bookings) }),
-      }),
+      // Epic's fee if the offer fills to its expected number, shown before
+      // publishing — built per booking, as the Money screen prices them: the
+      // £1.50 minimum is per booking, and the free intro's remaining places in
+      // the first ten are used one booking at a time (Codex, 2 Oct 2026).
+      fee: publishFeeEstimate(o, host, hostBookingsSoFar ?? introPositionsUsed(bookings)),
     },
     bookings: bookings.map((b) => ({
       id: b.id, name: b.booked_by, heads: b.heads, party: b.party ?? [], occurrence: b.occurrence, state: b.state, paymentStatus: b.payment_status,

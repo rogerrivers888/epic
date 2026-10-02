@@ -414,7 +414,9 @@ router.patch('/', async (req, res, next) => {
     const at = homePlace?.lat != null ? homePlace : (h.home_lat != null ? { lat: h.home_lat, lng: h.home_lng } : null);
     if (at) {
       const moved = homePlace?.lat != null && (household.home_lat !== homePlace.lat || household.home_lng !== homePlace.lng);
-      const modeChanged = travelMode != null && travelMode !== household.travel_mode;
+      // The stored mode, not the request's word: "Getting there" sends only the
+      // multi-select, and the single mode is derived on save (Codex, 2 Oct 2026).
+      const modeChanged = h.travel_mode != null && h.travel_mode !== household.travel_mode;
       if (moved || modeChanged) {
         void ringTables.refreshForHome({ lat: at.lat, lng: at.lng, mode: h.travel_mode ?? travelMode ?? 'driving' })
           .then(async (ring) => {

@@ -246,3 +246,17 @@ test("migration 332's back-fill counts a paid-then-cancelled booking, so nobody 
   assert.equal(by.get(last.id).intro_ordinal, 3, 'so the last is third, never renumbered down');
   assert.equal(by.get(last.id).fee_level, 'verified', "and carries the host's level");
 });
+
+test("the publish estimate prices each booking, so the £1.50 minimum applies per booking", async () => {
+  const host = { trust: 'verified', created_at: new Date(Date.now() - 200 * 86400000) };
+  const o = { id: 'x', price_mode: 'same_each', per: 'person', price_pence: 50, expected_count: 10, min_count: null, total_pence: null };
+  const { publishFeeEstimate } = await import('../src/routes/hosting.js');
+  const fee = publishFeeEstimate(o, host, 10);
+  assert.equal(fee.grossPence, 500);
+  assert.equal(fee.feePence, 500, 'ten 50p bookings, each held to the minimum (capped at its price): £5, not one £1.50');
+  // A new host's remaining intro places are used one booking at a time.
+  const fresh = publishFeeEstimate({ ...o, price_pence: 2000 }, { trust: 'verified', created_at: new Date() }, 7);
+  const byRate = {};
+  for (const l of fresh.lines) byRate[l.rate] = (byRate[l.rate] ?? 0) + l.count;
+  assert.deepEqual(byRate, { 0: 3, 20: 7 }, 'three intro places left at 0%, the other seven at the level rate');
+});

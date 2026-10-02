@@ -5530,7 +5530,7 @@ export type OwnOffer = Experience & {
   seeded: string[]; checks: CheckKind[]; rulesAccepted: boolean; transcript: string | null;
   invites: OfferInvite[];
   reviewNote: string | null; reviewChecklist: Record<string, string> | null; reviewedAt: string | null; submittedAt: string | null; publishedAt: string | null;
-  takings: { collectedPence: number; recordedPence: number; refundedPence: number; payoutOn: string | null; atMinimum: number | null; atExpected: number | null; fee: HostFeeLine };
+  takings: { collectedPence: number; recordedPence: number; refundedPence: number; payoutOn: string | null; atMinimum: number | null; atExpected: number | null; /** If it fills to the expected number, per booking. */ fee: HostFeePeriod };
   bookings: ExperienceBooking[];
   broadcasts: { id: string; body: string; sentTo: number; delivered: number; at: string }[];
 };
