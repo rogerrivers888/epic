@@ -350,7 +350,8 @@ export async function reviewQueue({ limit = 200, subcategory = null } = {}) {
  * subcategory filter, or null for the whole queue.
  */
 function queueWhere(subParam) {
-  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved'))";
+  // Undecided means no decision at all — a filed word is 'unresolved' but decided.
+  const undecided = "exists (select 1 from harvest_candidates c where c.norm = s.norm and c.sources ? 'google' and c.status in ('new', 'unresolved') and c.decided_at is null)";
   const notIgnoredHere = "not exists (select 1 from harvest_candidates ci where ci.norm = s.norm and ci.subcategory = p.subcategory and ci.status = 'ignored')";
   return subParam
     ? `where p.subcategory = ${subParam} and ${undecided} and ${notIgnoredHere}`

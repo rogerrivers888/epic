@@ -1144,6 +1144,53 @@ test('a per-drawer ignore waits for the word, so it cannot slip in under an appr
   }
 });
 
+test('a word already filed under a drawer keeps its filing through review-queue decisions', async () => {
+  // Codex, 2 Oct 2026 (P1): a filing is 'unresolved' but decided; approve and ignore
+  // must not overwrite it.
+  const subA = 'c30-filed-a'; const subB = 'c30-filed-b';
+  const a = 'google:ChIJ_c30_filed_a'; const b = 'google:ChIJ_c30_filed_b';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 filed A', 'c30-test-cat') on conflict do nothing", [subA]);
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 filed B', 'c30-test-cat') on conflict do nothing", [subB]);
+  await query("insert into question_sets (key, name) values ('c30-filed-set', 'C30 filed set') on conflict do nothing");
+  await query("insert into question_set_subcategories (subcategory_key, set_key) values ($1, 'c30-filed-set') on conflict do nothing", [subB]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [a, subA]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [b, subB]);
+  await query('delete from harvest_candidates where subcategory = any($1)', [[subA, subB]]);
+  await query('delete from review_sightings where venue_ref = any($1)', [[a, b]]);
+  await query("delete from attribute_aliases where norm = 'tack shed'").catch(() => {});
+  await query("delete from place_attributes where key = 'tack-shed'").catch(() => {});
+
+  await spotFromDetail({ venueRef: a, detail: { reviewSummary: 'A tack shed.' } });
+  const { rows: [candA] } = await query("select id from harvest_candidates where norm = 'tack shed' and subcategory = $1", [subA]);
+  await sets.fileUnder(candA.id, { under: subB, by: 'tester' });
+  await spotFromDetail({ venueRef: b, detail: { reviewSummary: 'A tack shed.' } });
+
+  await sets.approveFeature('tack shed', { actor: 'tester' });
+  const { rows: [after] } = await query("select status, kind, files_under from harvest_candidates where id = $1", [candA.id]);
+  assert.deepEqual(after, { status: 'unresolved', kind: 'filing', files_under: subB }, 'the filing stands');
+});
+
+test('approval refuses a label with nothing in it to make a key from', async () => {
+  // Codex, 2 Oct 2026: slug("  !! ") is empty; never a blank fact.
+  const sub = 'c30-blank-parks';
+  const ref = 'google:ChIJ_c30_blank';
+  await query("insert into shelf_categories (key, label) values ('c30-test-cat', 'C30 test') on conflict do nothing").catch(() => {});
+  await query("insert into shelf_subcategories (key, label, category_key) values ($1, 'C30 blank parks', 'c30-test-cat') on conflict do nothing", [sub]);
+  await query('insert into place_index (venue_ref, subcategory) values ($1, $2) on conflict (venue_ref) do update set subcategory = $2', [ref, sub]);
+  await query('delete from harvest_candidates where subcategory = $1', [sub]);
+  await query('delete from review_sightings where venue_ref = $1', [ref]);
+  // A word with no fact or alias yet, so the label is what names it.
+  await query("delete from feature_pending_asks where attribute_key = 'gift-kiosk'").catch(() => {});
+  await query("delete from attribute_aliases where norm = 'gift kiosk'").catch(() => {});
+  await query("delete from questions where attribute_key = 'gift-kiosk'").catch(() => {});
+  await query("delete from place_attributes where key = 'gift-kiosk'").catch(() => {});
+  await query("delete from harvest_candidates where norm = 'gift kiosk'");
+  await spotFromDetail({ venueRef: ref, detail: { reviewSummary: 'A gift kiosk.' } });
+  await assert.rejects(() => sets.approveFeature('gift kiosk', { actor: 'tester', label: '  !! ' }), (err) => err.status === 400);
+  assert.equal((await query("select count(*)::int n from place_attributes where key = ''")).rows[0].n, 0, 'no blank fact');
+});
+
 test('restoring an older per-drawer ignore leaves a later word-level Ignore standing', async () => {
   // Codex, 2 Oct 2026: restore lifts only the tombstone its own ignore wrote.
   const subA = 'c30-tomb-scope-a'; const subB = 'c30-tomb-scope-b';

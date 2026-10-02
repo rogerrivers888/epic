@@ -882,9 +882,13 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
     if (!seen.length) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     // Every undecided row for the word is locked — the drawers approval asks are
     // derived from all of them, owned ones included (Codex, 2 Oct 2026).
-    await client.query("select 1 from harvest_candidates where norm = $1 and status in ('new', 'unresolved') order by id for update", [norm]);
+    // Undecided means no decision at all: a word filed under a drawer (fileUnder) is
+    // 'unresolved' too but carries its decided_at, and a review-queue click must not
+    // overwrite that filing — every predicate here and in ignoreFeature says so.
+    // (Codex, 2 Oct 2026, the same rule aliasToGlobal already keeps.)
+    await client.query("select 1 from harvest_candidates where norm = $1 and status in ('new', 'unresolved') and decided_at is null order by id for update", [norm]);
     const { rows: cands } = await client.query(
-      "select * from harvest_candidates where norm = $1 and status in ('new', 'unresolved') and sources ? 'google' order by subcategory",
+      "select * from harvest_candidates where norm = $1 and status in ('new', 'unresolved') and decided_at is null and sources ? 'google' order by subcategory",
       [norm]);
     if (!cands.length) throw bad(`"${norm}" is not a feature waiting in the review queue.`);
     // Create or reuse the label — human-authorised, so no quote gate.
@@ -904,6 +908,8 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
       } else {
         const text = label ?? cands[0].raw_forms?.[0] ?? norm;
         const wanted = slug(text);
+        // A label of spaces or punctuation slugs to nothing; never a blank fact.
+        if (!wanted) throw bad('Give the fact a name with letters or numbers in it.');
         // `on conflict do nothing` suppresses the unique violation, so the old catch
         // never fired and a colliding key silently mapped this feature onto an
         // unrelated fact (Codex, 2 Oct 2026). Read the result: a new row is ours to
@@ -964,7 +970,7 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
        union
        select c.subcategory
          from harvest_candidates c
-        where c.norm = $1 and c.status in ('new', 'unresolved') and c.subcategory is not null
+        where c.norm = $1 and c.status in ('new', 'unresolved') and c.decided_at is null and c.subcategory is not null
        order by 1`,
       [norm]);
     const subs = drawerRows.map((r) => r.subcategory);
@@ -1052,7 +1058,7 @@ export async function approveFeature(norm, { actor = null, kind = 'yesno', label
                                 and (q.scope = 'global'
                                      or q.set_key = (select qs.set_key from question_set_subcategories qs where qs.subcategory_key = c.subcategory))
                               order by (q.scope = 'global') desc limit 1)
-        where c.norm = $1 and c.status in ('new', 'unresolved')`,
+        where c.norm = $1 and c.status in ('new', 'unresolved') and c.decided_at is null`,
       [norm, actor, key]);
     await client.query('delete from review_sightings where norm = $1', [norm]);
     // A word approved into a fact is no longer ignored: lift any tombstone so the
@@ -1100,7 +1106,7 @@ export async function ignoreFeature(norm, { actor = null, reason = null } = {}) 
     const { rowCount } = await client.query(
       `update harvest_candidates set status = 'ignored', decided_by = $2, decided_at = now(), examples = '{}',
               decision_reason = coalesce($3, decision_reason)
-        where norm = $1 and status in ('new', 'unresolved')
+        where norm = $1 and status in ('new', 'unresolved') and decided_at is null
           and ($4 = false
                or subcategory in (select p.subcategory from review_sightings s
                                     join place_index p on p.venue_ref = s.venue_ref
