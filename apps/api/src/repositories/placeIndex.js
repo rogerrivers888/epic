@@ -1201,7 +1201,7 @@ const BUILD_LOCK = 'epic.placeIndex.build';
  * limitation of this shared derivation and only bites Ireland, which is groundwork
  * with no live data; it is left for the IE launch rather than reworked here (Codex).
  */
-const OUTCODE_FROM = (col) => `lower(case
+export const OUTCODE_FROM = (col) => `lower(case
   when btrim(upper(${col})) ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' then btrim(upper(${col}))
   when position(' ' in btrim(${col})) > 0 then split_part(btrim(upper(${col})), ' ', 1)
   else left(upper(btrim(${col})), greatest(0, length(btrim(${col})) - 3))

@@ -15,6 +15,7 @@ import { logChange } from './changes.js';
 import { BLOCKED_MARKETS } from '../domain/markets.js';
 import { NAMESPACES, hasDrifted } from '../domain/wording.js';
 import { scaleFor } from '../domain/costBand.js';
+import { OUTCODE_FROM } from '../repositories/placeIndex.js';
 
 /* ------------------------------------------------------------------ markets */
 
@@ -42,13 +43,9 @@ export async function listMarkets() {
  * W12 is a London outcode and a Dublin routing key, and an Eircode's four-character
  * second part can never be a GB pcds.
  */
+// Today's rule is measured with today's own expression, not a copy of it (Codex).
 const NORMAL_PC = (col) => `upper(regexp_replace(${col}, '\\s', '', 'g'))`;
 const AS_PCDS = (col) => `(left(${NORMAL_PC(col)}, length(${NORMAL_PC(col)}) - 3) || ' ' || right(${NORMAL_PC(col)}, 3))`;
-const PC_OUTCODE = (col) => `(case
-  when ${NORMAL_PC(col)} ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' then ${NORMAL_PC(col)}
-  when position(' ' in btrim(${col})) > 0 then split_part(btrim(upper(${col})), ' ', 1)
-  else left(${NORMAL_PC(col)}, greatest(0, length(${NORMAL_PC(col)}) - 3)) end)`;
-
 export async function areaKeyCheck() {
   const n = async (sql, params = []) => (await query(sql, params)).rows;
   const [{ loaded }] = await n('select exists (select 1 from postcodes) as loaded');
@@ -71,9 +68,11 @@ export async function areaKeyCheck() {
   const rule = loaded ? await n(`
       select coalesce(upper(pi.country_code), '(none)') as country,
              count(*)::int as with_postcode,
-             count(*) filter (where exists (select 1 from postcodes p where p.outcode = ${PC_OUTCODE('r.postcode')}))::int as outcode_rule_says_gb,
-             count(*) filter (where ${NORMAL_PC('r.postcode')} ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}$'
-                                and exists (select 1 from postcodes p where p.pcds = ${AS_PCDS('r.postcode')}))::int as full_postcode_rule_says_gb
+             count(*) filter (where exists (select 1 from postcodes p where p.outcode = upper(${OUTCODE_FROM('r.postcode')})))::int as outcode_rule_says_gb,
+             -- Exact membership of the GB-only ONS list is the whole rule: every pcds has a
+             -- three-character second part, so an Eircode can never be one (Codex: no
+             -- separate syntax filter, which would drop special postcodes such as GIR 0AA).
+             count(*) filter (where exists (select 1 from postcodes p where p.pcds = ${AS_PCDS('r.postcode')}))::int as full_postcode_rule_says_gb
         from place_index pi join place_records r on r.venue_ref = pi.venue_ref
        where r.postcode is not null and upper(pi.country_code) is distinct from 'GB'
        group by 1 order by 1`) : null;
