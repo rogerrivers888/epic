@@ -63,7 +63,7 @@ export function AccountScreen() {
   const sidePad = wide ? 64 : 24;
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={{ flexGrow: 1 }}>
+    <ScrollView style={styles.root} contentContainerStyle={{ flexGrow: 1, paddingBottom: insetBottom(0) }}>
       {/* top bar */}
       <View style={[styles.topBar, { paddingLeft: insetLeft(sidePad), paddingRight: insetRight(sidePad), paddingTop: insetTop(28) }]}>
         <Wordmark height={30} ink={INK} ground={CREAM} />
@@ -74,7 +74,7 @@ export function AccountScreen() {
       </View>
 
       {/* lime band */}
-      <View style={[styles.band, { paddingHorizontal: sidePad }, !wide && { flexDirection: 'column', alignItems: 'flex-start', gap: 20 }]}>
+      <View style={[styles.band, { paddingLeft: insetLeft(sidePad), paddingRight: insetRight(sidePad) }, !wide && { flexDirection: 'column', alignItems: 'flex-start', gap: 20 }]}>
         <Text style={styles.hi}>Hi, {firstName(account?.name)}.</Text>
         <Press onPress={() => navigate(paths.inspire())} style={({ hovered }: any) => [styles.openBtn, !wide && { width: '100%' }, hovered && styles.openBtnHover]}>
           <Text style={styles.openLabel}>Open Epic</Text>
@@ -83,7 +83,7 @@ export function AccountScreen() {
       </View>
 
       {/* three columns */}
-      <View style={[styles.columns, { paddingHorizontal: sidePad }, !wide && { flexDirection: 'column' }]}>
+      <View style={[styles.columns, { paddingLeft: insetLeft(sidePad), paddingRight: insetRight(sidePad) }, !wide && { flexDirection: 'column' }]}>
         <Column wide={wide} first title="Your details">
           <Detail label="Name" value={account?.name || '—'} />
           <Detail label="Email" value={account?.email || '—'} />
