@@ -75,6 +75,7 @@ export function failClosedUntilCutoff(load = null) {
   cutoffUnknown = true;
   loadCutoff = load;
   lastTry = 0;           // a newly unknown cutoff is tried on the very next request
+  inFlight = null;       // and is not left waiting on an attempt from before
   recordMintsSinceBoot(true);
 }
 
@@ -88,14 +89,19 @@ export function failClosedUntilCutoff(load = null) {
  */
 async function ensureCutoff() {
   if (!cutoffUnknown || !loadCutoff) return;
-  if (inFlight) { await inFlight; return; }
+  // Nobody waits more than three seconds for it: a stalled attempt carries on in
+  // the background and the request is judged fail-closed meanwhile.
+  const atMost = (p) => Promise.race([p, new Promise((r) => { const t = setTimeout(r, 3_000); t.unref?.(); })]);
+  if (inFlight) { await atMost(inFlight); return; }
   if (Date.now() - lastTry < 5_000) return;
   lastTry = Date.now();
-  inFlight = (async () => {
+  const attempt = (async () => {
     try { setCleanSlateEpoch(await loadCutoff()); }
     catch { /* still unknown; fail closed as before */ }
   })();
-  try { await inFlight; } finally { inFlight = null; }
+  inFlight = attempt;
+  attempt.finally(() => { if (inFlight === attempt) inFlight = null; });
+  await atMost(attempt);
 }
 const gateSince = () => {
   const env = process.env.EPIC_GATE_SINCE ? Date.parse(process.env.EPIC_GATE_SINCE) : NaN;
@@ -206,7 +212,6 @@ function wantsBasicChallenge(req) {
 /** The middleware, mounted first (server.js). See the file header for the model. */
 export async function siteGate(req, res, next) {
   if (!siteGateOn()) return next();
-  if (cutoffUnknown) await ensureCutoff();
   res.set('X-Robots-Tag', 'noindex');
   // Match the exempt paths with any trailing slash stripped, since Express's
   // default non-strict routing treats `/api/session/link/` and `/api/session/link`
@@ -246,6 +251,10 @@ export async function siteGate(req, res, next) {
   // left to throw (→ a retryable 5xx from the error handler), never swallowed into
   // a 401 that would make the client discard a good token (Codex, 1 Oct 2026).
   const session = await liveSessionFor(req);
+  // Only here, after a session lookup has just succeeded — proof the database is
+  // answering — and never ahead of /health, the sign-in door or any other
+  // credential, so a stalled retry cannot hold those up (Codex, 2 Oct 2026).
+  if (session && cutoffUnknown) await ensureCutoff();
   // A session from before the gate's cutoff is treated as no session — it is a
   // token the launch is meant to have retired (see gateSince above).
   if (session && !predatesGate(session)) { req.siteGateSession = session; return next(); }

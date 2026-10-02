@@ -333,3 +333,24 @@ test('a malformed override does not lift the fail-closed state, and a reachable 
     } finally { setCleanSlateEpoch(null); }
   });
 });
+
+test('a stalled cutoff retry never holds up health, the sign-in door, or a request without a session', async () => {
+  await withEnv({ SITE_GATE: null, EPIC_GATE_SINCE: null, GATE_USER: 'u', GATE_PASSWORD: 'p' }, async () => {
+    let calls = 0;
+    failClosedUntilCutoff(() => { calls += 1; return new Promise(() => {}); }); // never answers
+    try {
+      for (const req of [mockReq({ path: '/health' }), mockReq({ path: '/api/session', method: 'POST' }),
+        mockReq({ headers: { authorization: basic('u', 'p') } }), mockReq({ path: '/api/household' })]) {
+        await run(req);
+      }
+      assert.equal(calls, 0, 'nothing before a successful session lookup asks for the cutoff');
+      const token = aToken();
+      await insertSession(token, 'an older session');
+      const started = Date.now();
+      const r = await run(mockReq({ headers: { authorization: bearer(token) } }));
+      assert.equal(calls, 1, 'a session-bearing request tries once');
+      assert.ok(Date.now() - started < 4_500, 'and waits no more than about three seconds');
+      assert.equal(r.nexted, false, 'judged fail-closed meanwhile');
+    } finally { setCleanSlateEpoch(null); }
+  });
+});
