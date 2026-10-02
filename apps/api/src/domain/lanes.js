@@ -128,6 +128,12 @@ export function localInstant(day, time = '00:00', tz = 'Europe/London') {
   return new Date(guess - (shown - guess));
 }
 
+/** Today's date where the host is, as 'YYYY-MM-DD' (UK by default). */
+export function localDay(at = new Date(), tz = 'Europe/London') {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(at).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 /** Bank holidays as a set of 'YYYY-MM-DD', with their names. */
 export const holidaySet = (list) => new Map((list ?? []).map((h) => [ymd(h.date), h.title ?? 'Bank holiday']));
 

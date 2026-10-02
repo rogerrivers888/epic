@@ -346,3 +346,10 @@ test('a per-booking price is one share however many come', async () => {
   assert.equal(priceFor({ price_mode: 'same_each', price_pence: 5000, per: 'booking' }, { heads: 3 }).pence, 5000);
   assert.equal(priceFor({ price_mode: 'same_each', price_pence: 5000, per: 'person' }, { heads: 3 }).pence, 15000);
 });
+
+test('on-request slots are listed by the host’s own date', async () => {
+  const { anytimeSlots } = await import('../src/domain/hosting.js');
+  // 02:00 UTC on Tuesday is still Monday 22:00 in New York: Monday's late slot is open.
+  const slots = anytimeSlots({ lane: 'onrequest', time_zone: 'America/New_York', free_hours: { 1: [['22:00', '23:30']] }, session_lengths: [60], notice_hours: 0 }, { from: new Date('2026-10-13T01:30:00Z'), days: 0 });
+  assert.deepEqual(slots, [{ date: '2026-10-12', times: ['22:00'] }]);
+});

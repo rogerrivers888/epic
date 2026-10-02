@@ -12,7 +12,7 @@
  * regulated cities where guiding is a licensed profession.
  */
 
-import { laneBlockers, courseRun, weeklyRun, holidaySet, slotsFor as laneSlotsFor, hostingConfig, localInstant } from './lanes.js';
+import { laneBlockers, courseRun, weeklyRun, holidaySet, slotsFor as laneSlotsFor, hostingConfig, localInstant, localDay, plusDays as lanePlusDays, dow as laneDow } from './lanes.js';
 import { knownBankHolidays } from '../sources/bankHolidays.js';
 
 /**
@@ -138,11 +138,13 @@ export function anytimeSlots(offer, { from = new Date(), days = 14, taken = new 
     const len = Math.min(...((offer.session_lengths ?? []).length ? offer.session_lengths : [60]).map(Number));
     const noticeMs = (offer.notice_hours == null ? cfg.onRequest.noticeHours : Number(offer.notice_hours)) * 3600_000;
     const out = [];
+    // Days counted where the host is: a New York evening is still that Monday (Codex, 2 Oct 2026).
+    const tz = offer.time_zone ?? 'Europe/London';
+    const startDay = localDay(new Date(from), tz);
     for (let i = 0; i <= days; i++) {
-      const d = new Date(from); d.setUTCHours(12, 0, 0, 0); d.setUTCDate(d.getUTCDate() + i);
-      const day = ymd(d);
-      const times = laneSlotsFor(offer.free_hours ?? {}, d.getUTCDay(), len)
-        .filter((t) => localInstant(day, t, offer.time_zone ?? 'Europe/London').getTime() - new Date(from).getTime() >= noticeMs)
+      const day = lanePlusDays(startDay, i);
+      const times = laneSlotsFor(offer.free_hours ?? {}, laneDow(day), len)
+        .filter((t) => localInstant(day, t, tz).getTime() - new Date(from).getTime() >= noticeMs)
         .filter((t) => !taken.has(`${day}T${t}`));
       if (times.length) out.push({ date: day, times });
     }
