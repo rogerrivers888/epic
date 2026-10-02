@@ -1402,6 +1402,7 @@ export async function settleCountriesFromAddresses(refs = null, q = query) {
                        and f.source = 'nominatim' and f.expires_at is null and f.value #>> '{}' = $3)`,
       [row.venue_ref, out.code, out.from]);
     if (rowCount) settled.push({ ref: row.venue_ref, country: out.code, from: out.from });
+    else unsettled.push({ ref: row.venue_ref, reason: 'the address or country changed while it was being read; the next pass reads it again' });
   }
   return { settled, unsettled };
 }
