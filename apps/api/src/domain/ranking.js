@@ -69,8 +69,12 @@ function accessSignal(venue, need) {
   // no, and so leave a known-stepped place in a step-free search (Codex,
   // 2 Oct 2026).
   const first = (...vals) => { for (const v of vals) { const r = read(v); if (r !== null) return r; } return null; };
-  if (need === 'step-free') return first(a.stepFree, a.wheelchair, venue.stepFree);
-  if (need === 'accessible-toilet') return first(a.wheelchairToilet, a.accessibleToilet);
+  // Google's own structured answer comes after ours, read in memory from the
+  // search result and never stored: a wheelchairAccessibleEntrance of false is
+  // a known no, and was being missed (Codex, 2 Oct 2026).
+  const g = venue.accessibilityOptions || {};
+  if (need === 'step-free') return first(a.stepFree, a.wheelchair, venue.stepFree, g.wheelchairAccessibleEntrance);
+  if (need === 'accessible-toilet') return first(a.wheelchairToilet, a.accessibleToilet, g.wheelchairAccessibleRestroom);
   if (need === 'lift') return first(a.lift);
   if (need === 'quiet') return first(a.quiet, venue.quiet);
   return null;

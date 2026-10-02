@@ -865,3 +865,16 @@ test('a compound spoken diet keeps every fact: "vegetarian halal" is both', asyn
   assert.deepEqual(dietPatch('halal'), { halal: true });
   assert.equal(dietPatch('low FODMAP'), null);
 });
+
+test("Google's wheelchair-entrance answer counts when we hold no fact of our own", () => {
+  const attendees = [{ id: 'm1', name: 'Maya', allergens: [], diets: [], dislikes: [], likes: [], access: ['step-free'] }];
+  const venues = [
+    { id: 'gno', name: 'Google says no', allergens: [], accessibilityOptions: { wheelchairAccessibleEntrance: false } },
+    { id: 'gyes', name: 'Google says yes', allergens: [], accessibilityOptions: { wheelchairAccessibleEntrance: true } },
+    { id: 'ours', name: 'Ours says yes, Google no', allergens: [], accessibility: { wheelchair: 'yes' }, accessibilityOptions: { wheelchairAccessibleEntrance: false } },
+    { id: 'none', name: 'Nobody knows', allergens: [] },
+  ];
+  const { candidates, excluded } = applyConstraints({ venues, attendees });
+  assert.deepEqual(excluded.map((v) => v.id), ['gno'], "Google's known no hides it");
+  assert.deepEqual(candidates.map((v) => v.id).sort(), ['gyes', 'none', 'ours'], 'our own fact comes first; silence never hides');
+});
