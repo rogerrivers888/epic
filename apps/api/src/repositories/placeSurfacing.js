@@ -483,10 +483,16 @@ export async function surfacingReport({ examples = 10 } = {}) {
  */
 export async function gateProof({ names = [], checkId = null } = {}) {
   const he = await heritageLoad();
-  // One completed check, named or the latest, read the same way everywhere. A
-  // check running now rewrites the stored rows as it goes, so while one runs the
-  // stored side cannot speak (Codex: never a mixed snapshot as a proof).
-  const { rows: [running] } = await query(`select id from surfacing_checks where state = 'running' limit 1`);
+  // One completed check, named or the latest, read the same way everywhere.
+  // "Held" means held back under that check now — pending or applied: the rows
+  // still carrying its id and not surfaced, which is what apply acts on — so a
+  // row since reconsidered or re-judged is honestly not held by it. A check running now
+  // rewrites those rows as it goes, so while one runs the stored side cannot speak
+  // (Codex: never a mixed snapshot as a proof); a crashed run older than the six
+  // hours `runningCheck` honours does not count as running.
+  const LIVE_RUN = `state = 'running' and started_at > now() - interval '6 hours'`;
+  const { rows: [{ latest: startedBefore } = {}] } = await query(`select max(started_at) as latest from surfacing_checks`);
+  const { rows: [running] } = await query(`select id from surfacing_checks where ${LIVE_RUN} limit 1`);
   const { rows: [done] } = await query(
     `select id from surfacing_checks where state = 'done' ${checkId ? 'and id = $1' : ''}
       order by finished_at desc nulls last limit 1`, checkId ? [checkId] : []);
@@ -545,5 +551,12 @@ export async function gateProof({ names = [], checkId = null } = {}) {
        join place_surfacing s on s.venue_ref = m.venue_ref and not s.surfaced
       where s.check_id = $1`, [readCheck]);
   const leaked = await filedElsewhere(snap.map((r) => r.ref));
+  // A check that started while this was reading may have rewritten rows between
+  // the reads above: then none of the stored side can speak.
+  const { rows: [{ latest: startedAfter } = {}] } = await query(`select max(started_at) as latest from surfacing_checks`);
+  if (String(startedAfter ?? '') !== String(startedBefore ?? '')) {
+    const why = 'a narrowing check started while the proof was reading';
+    return { checkId: null, why, places: places.map((p) => ({ ...p, held: null, heldBy: [], why })), snapshotRecords: null, filedElsewhere: null, leakedExamples: [] };
+  }
   return { checkId: readCheck, places, snapshotRecords: snap.length, filedElsewhere: leaked.size, leakedExamples: [...leaked].slice(0, 10) };
 }
