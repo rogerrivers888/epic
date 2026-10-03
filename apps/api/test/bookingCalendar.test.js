@@ -113,3 +113,48 @@ test('the email queue attaches the file to "booked" and "moved", and sends anywa
   assert.ok(again, 'the email still goes');
   assert.equal(again.attachments, undefined);
 });
+
+async function oneBooking({ lane = 'oneoff', tz = 'Europe/London', title = 'Camp', sessions }) {
+  const { household: h } = await aHousehold(query);
+  const { household: guest } = await aHousehold(query);
+  const { rows: [host] } = await query(`insert into hosts (household_id, name) values ($1, 'Tom') returning *`, [h.id]);
+  const { rows: [offer] } = await query(
+    `insert into host_offers (host_id, shape, lane, state, title, venue_area, time_zone) values ($1, 'series', $2, 'live', $3, 'Windsor', $4) returning *`,
+    [host.id, lane, title, tz],
+  );
+  const { rows: [b] } = await query(`insert into experience_bookings (offer_id, host_id, household_id, state) values ($1, $2, $3, 'confirmed') returning *`, [offer.id, host.id, guest.id]);
+  const made = [];
+  for (const [i, x] of sessions.entries()) {
+    const { rows: [s] } = await query(`insert into offer_sessions (offer_id, n, on_date, starts_at, ends_at) values ($1, $2, $3, $4, $5) returning *`, [offer.id, i + 1, x.on, x.start ?? null, x.end ?? null]);
+    await query(`insert into booking_sessions (booking_id, session_id) values ($1, $2)`, [b.id, s.id]);
+    made.push(s);
+  }
+  return { b, made };
+}
+
+test('a one-off over three days: the first from its start to midnight, the middle all day, the last from midnight to its end', async () => {
+  const d = (n) => plusDays(today(), n);
+  const { b } = await oneBooking({ sessions: [{ on: d(10), start: '15:00' }, { on: d(11) }, { on: d(12), end: '12:00' }] });
+  const ics = unfold((await bookingCalendar(b.id)).content);
+  const c = (n) => d(n).replace(/-/g, '');
+  assert.ok(ics.includes(`DTSTART;TZID=Europe/London:${c(10)}T150000\r\nDTEND;TZID=Europe/London:${c(11)}T000000`));
+  assert.ok(ics.includes(`DTSTART;VALUE=DATE:${c(11)}\r\nDTEND;VALUE=DATE:${c(12)}`));
+  assert.ok(ics.includes(`DTSTART;TZID=Europe/London:${c(12)}T000000\r\nDTEND;TZID=Europe/London:${c(12)}T120000`));
+  assert.ok(!ics.includes('DURATION'));
+});
+
+test('still to come is judged where the event is, not by the UTC date', async () => {
+  const tz = 'America/Los_Angeles';
+  // 06:30 UTC is 22:30 the evening before in Los Angeles: a session there until 23:00 is still to come, one that ended at 22:00 is not.
+  const now = new Date('2026-11-12T06:30:00Z');
+  const { b, made } = await oneBooking({ lane: 'weekly', tz, sessions: [{ on: '2026-11-11', start: '21:00', end: '23:00' }, { on: '2026-11-11', start: '20:00', end: '22:00' }] });
+  const ics = unfold((await bookingCalendar(b.id, { now })).content);
+  assert.ok(ics.includes(made[0].id) && !ics.includes(made[1].id));
+});
+
+test('a carriage return in a title cannot start a line of its own', async () => {
+  const { b } = await oneBooking({ title: 'Swim\rX-EVIL:1', sessions: [{ on: plusDays(today(), 5), start: '10:00', end: '11:00' }] });
+  const ics = (await bookingCalendar(b.id)).content;
+  assert.ok(ics.includes('SUMMARY:Swim\\nX-EVIL:1'));
+  assert.ok(!/\r(?!\n)/.test(ics));
+});
