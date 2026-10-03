@@ -112,3 +112,11 @@ test('a private event paid on the day can’t be sent without a card for Epic’
   assert.equal(checklist({ ...offer, money: 'epic' }, { host: {}, account: {} }).some((i) => i.key === 'fee_card'), false);
   assert.equal(checklist({ ...offer, price_mode: 'free' }, { host: {}, account: {} }).some((i) => i.key === 'fee_card'), false);
 });
+
+test('walk-ins only: nobody had said they were coming, so the top-up is at the event’s own price per person', async () => {
+  settings.forget();
+  const { session, host } = await anEvent({ startsInHours: -3 });
+  await query(`insert into organiser_fees (offer_id, session_id, host_id, kind, heads, base_pence, rate_pct, fee_pence, state) values ($1, $2, $3, 'upfront', 0, 0, 3, 0, 'paid')`, [session.offer_id, session.id, host.id]);
+  const r = await pod.confirmHeadcount({ sessionId: session.id, hostId: host.id, heads: 5, charge: async () => ({ id: 'pi_walk', status: 'succeeded' }) });
+  assert.equal(r.topUpPence, 300, '5 × £20 = £100, 3%');
+});

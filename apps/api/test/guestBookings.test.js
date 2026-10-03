@@ -1252,3 +1252,19 @@ test('a host removing people refunds them in full; the hook answers only to the 
     assert.deepEqual([line.cause, line.triggered_by], ['host_cancelled', 'host']);
   } finally { await srv.close(); }
 });
+
+test('paid on the day: a party change keeps the booking’s value in step, so Epic’s fee on the organiser follows it', async () => {
+  settings.forget();
+  const { o } = await anEvent({ price: 2000, priceMode: 'same_each', money: 'direct' });
+  await query(`update host_offers set visibility = 'private' where id = $1`, [o.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, linkToken: o.link_token });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.pay, null, 'nothing paid through Epic');
+    const c = await srv.send('POST', `/api/booked/${r.body.booking.id}/party`, { adults: 2 });
+    assert.equal(c.status, 200, JSON.stringify(c.body));
+    assert.equal((await query('select value_pence from experience_bookings where id = $1', [r.body.booking.id])).rows[0].value_pence, 4000);
+  } finally { await srv.close(); }
+});

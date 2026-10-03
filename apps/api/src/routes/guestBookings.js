@@ -837,6 +837,13 @@ async function quoteParty(c, b, o, body, { by = 'guest', now = new Date() } = {}
   const was = priceNow(partyOf(b));
   const will = priceNow({ adults: check.adults, children: check.children });
   const out = { party, check, fromHeads, toHeads, live, paid, chargePence: 0, feePence: 0, refundPence: 0, feeKeptPence: 0, deltaPence: will - was, cause: null };
+  // Paid on the day (L10): nothing taken through Epic, but the booking's value follows its party — Epic's fee on the
+  // organiser is worked out from it (Codex, 3 Oct 2026).
+  if (!paid && o.money === 'direct' && o.price_mode && o.price_mode !== 'free') {
+    const before = priceFor(o, kind, partyOf(b), live.length).valuePence;
+    const after = priceFor(o, kind, { adults: check.adults, children: check.children }, live.length).valuePence;
+    out.directValuePence = Math.max(0, Number(b.value_pence ?? 0) + after - before);
+  }
   if (toHeads > fromHeads) {
     for (const s of live) {
       const left = placesLeft(s, o);
@@ -944,6 +951,7 @@ export async function changeParty({ bookingId, householdId = null, hostId = null
     );
     // The places are the guest's from now: held by the head count, and given back if the payment doesn't happen.
     await setParty(c, b, q.party, q.toHeads);
+    if (q.directValuePence != null) await c.query('update experience_bookings set value_pence = $2 where id = $1', [b.id, q.directValuePence]);
     if (q.paid && q.chargePence > 0 && later) {
       // A card saved for later (L4): the later charge grows, and Epic's fee and the host's part with it.
       await c.query('update experience_bookings set value_pence = value_pence + $2, fee_pence = fee_pence + $3, host_pence = host_pence + $2 - $3 where id = $1', [b.id, q.chargePence, q.feePence]);
