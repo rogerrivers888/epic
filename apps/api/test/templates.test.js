@@ -270,3 +270,9 @@ test('a marketing e-mail whose unsubscribe link sits in a branch that is off is 
   await assert.rejects(templates.deliver({ templateKey: 'tell_me_when', fields: { what: 'Pottery', where: '', title: 'Clay', url: 'u', unsubscribeUrl: 'https://epic.day/unsubscribe/x' }, to: { email: 'branch@example.com' }, consent: { alertId: a.id } }), { code: 'needs_unsubscribe' });
   await templates.restoreVersion('tell_me_when', t.version, { who: 'Roger' });
 });
+
+test('one delivery has one recipient, whoever it is for (Codex, 3 Oct 2026)', async () => {
+  const id = '00000000-0000-0000-0000-000000000000';
+  await assert.rejects(templates.deliver({ templateKey: 'booking_confirmed', fields: { title: 'x', link: 'y' }, to: { householdId: id, email: 'x@example.com' } }), { code: 'mixed_recipient' });
+  await assert.rejects(templates.deliver({ templateKey: 'booking_confirmed', fields: { title: 'x', link: 'y' }, to: { householdId: id, accountId: id } }), { code: 'mixed_recipient' });
+});

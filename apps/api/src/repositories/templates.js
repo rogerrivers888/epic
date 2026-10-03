@@ -357,9 +357,10 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   // Whose message it is: the template's own notification kind where that is registered (a trigger like
   // booking.confirmed is shared by a guest's template and a host's), else its trigger's audience.
   const audience = notifications.KINDS[t.notificationKind]?.audience ?? TRIGGERS[t.trigger]?.audience ?? '';
-  if (/\bhost\b/.test(audience) && (to.email || to.mobile) && (to.householdId || to.accountId)) {
-    throw refuse(400, 'mixed_recipient', `“${t.name}” goes to a host: it is sent to their own address, so give the household or account and no address.`);
-  }
+  // One recipient, in one form: an account, a household, or a bare address — never two, or one delivery's
+  // channels could reach two different people (Codex, 3 Oct 2026).
+  const forms = [to.accountId, to.householdId, to.email || to.mobile].filter(Boolean).length;
+  if (forms > 1) throw refuse(400, 'mixed_recipient', `Give “${t.name}” one recipient: an account, a household, or an address — not more than one.`);
   if (/\bhost\b/.test(audience) && !to.householdId && !to.accountId) {
     throw refuse(400, 'no_recipient', `“${t.name}” goes to a host: say which household or account, so their e-mail settings are kept.`);
   }
