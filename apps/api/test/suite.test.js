@@ -439,6 +439,20 @@ test('a household keeps the price it was sold at when the price goes up', async 
       [a.id, a.status]);
     mine.history = row.id;
     assert.equal((await readStanding()).mrrPence, 899, 'sold at £8.99');
+    // A member of that household with an account of their own is not a second subscription (Roger, 3 Oct 2026).
+    {
+      const { rows: [hh] } = await query('select household_id from accounts where id = $1', [a.id]);
+      const { rows: [m] } = await query(`insert into members (household_id, name) values ($1, 'A member') returning id`, [hh.household_id]);
+      const { rows: [ma] } = await query(
+        `insert into accounts (household_id, member_id, email, name, status, plan) values ($1, $2, 'member-at@test.local', 'A member', 'invited', 'household') returning id`,
+        [hh.household_id, m.id]);
+      try {
+        assert.equal((await readStanding()).mrrPence, 899, 'still one £8.99 household, not two');
+      } finally {
+        await query('delete from accounts where id = $1', [ma.id]);
+        await query('delete from members where id = $1', [m.id]);
+      }
+    }
 
     const raised = await setPrice({ planKey: 'household', channel: 'web', amountPence: 1199, discountPct: 7, by: 'a test' });
     if (raised.row) mine.prices.push(raised.row.id);

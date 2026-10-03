@@ -5248,7 +5248,7 @@ export type AccountsResponse = {
 
 // --- the back office --------------------------------------------------------
 
-export type Access = { doors: string[]; capabilities: string[]; role: { key: string; label: string } | null; /** The owner, signed in personally (not the passcode, not an agent): what a privileged action needs — G11. */ elevated?: boolean };
+export type Access = { doors: string[]; capabilities: string[]; role: { key: string; label: string } | null; /** The account's own name; null on the shared passcode. */ name?: string | null; /** The owner, signed in personally (not the passcode, not an agent): what a privileged action needs — G11. */ elevated?: boolean };
 
 export type EstateTotals = {
   households: number; accounts: number; active_accounts: number; invited: number; suspended: number;

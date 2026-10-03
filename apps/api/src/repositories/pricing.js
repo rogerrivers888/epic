@@ -248,7 +248,8 @@ export async function readChannels() {
     // Everything Epic has is a plan somebody was put on by hand, which is the
     // website channel by default and the only one there is.
     rows: [
-      { key: 'web', label: 'Our website · Stripe', subscribers: int(counts.subscribers), pence: int(counts.pence), feePence: null },
+      // Assigned to the website by default; nothing is billed for a membership yet, so it never claims Stripe (Roger, 3 Oct 2026).
+      { key: 'web', label: 'Our website · not billed yet', subscribers: int(counts.subscribers), pence: int(counts.pence), feePence: null },
       { key: 'ios', label: 'Apple App Store', subscribers: null, pence: null, feePence: null },
       { key: 'android', label: 'Google Play', subscribers: null, pence: null, feePence: null },
     ],
@@ -290,7 +291,9 @@ export async function readStanding() {
        from accounts a
        join households h on h.id = a.household_id
        join plans p on p.key = a.plan
-      where a.status <> 'suspended' and h.origin <> 'guest_invite' and p.key = any($1::text[])`,
+      -- A household member's own account is not a second subscription: the same filter as the tier and channel
+      -- counts, or MRR doubled a single £8.99 household (Roger, 3 Oct 2026).
+      where a.status <> 'suspended' and a.member_id is null and h.origin <> 'guest_invite' and p.key = any($1::text[])`,
     [TIERS],
   );
   const mrrPence = int(sum.pence);

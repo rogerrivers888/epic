@@ -87,7 +87,8 @@ router.get('/session', async (req, res, next) => {
       // Which applications this session may enter and what it may do in them
       // (access.js). The app draws only the doors it is told it holds — and the
       // API refuses the rest whatever the app draws.
-      access: session ? summariseAccess(access) : null,
+      // …and whose session it is, so the back office can say "Roger · Owner" rather than a role alone (Roger, 3 Oct 2026).
+      access: session ? { ...summariseAccess(access), name: account?.name ?? null } : null,
     });
   } catch (err) { next(err); }
 });
