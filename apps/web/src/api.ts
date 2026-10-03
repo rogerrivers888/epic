@@ -2830,7 +2830,7 @@ export const api = {
   guestBook: (offerId: string, hostId: string | null, body: GuestBookBody) =>
     post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number; hold: boolean } | null }>(
       `/api/experiences/${encodeURIComponent(offerId)}/booking`, { ...body, hostLink: hostLinkFor(hostId) ?? undefined }),
-  guestPaid: (bookingId: string, paymentIntent: string) => post<{ booking: { id: string; state: string; paymentState: string } }>(`/api/booked/${encodeURIComponent(bookingId)}/payment`, { paymentIntent }),
+  guestPaid: (bookingId: string, paymentIntent: string) => post<{ state: string; paymentState: string; requestState: string | null }>(`/api/booked/${encodeURIComponent(bookingId)}/payment`, { paymentIntent }),
   guestWaitlist: (offerId: string, body: { party?: number; sessionId?: string | null; linkToken?: string | null; inviteToken?: string | null } = {}) => post<{ position: number }>(`/api/experiences/${encodeURIComponent(offerId)}/waitlist`, body),
   guestBooked: () => request<GuestBookedList>('/api/booked'),
   guestBooking: (id: string) => request<{ booking: GuestBooking }>(`/api/booked/${encodeURIComponent(id)}`),
@@ -6236,7 +6236,7 @@ export type GuestAction = 'book' | 'ask' | 'waitlist' | 'full' | 'finished' | 'c
 export type GuestOptions = {
   action: GuestAction; lane: GuestLane; kinds: ('whole' | 'drop_in' | 'book_ahead' | 'request')[];
   sessions: { id: string; n: number | null; date: string; time: string | null; placesLeft: number | null; topic: string | null }[];
-  slots: { date: string; times: string[]; lengths: number[] }[];
+  slots: { date: string; times: string[]; lengths: number[]; timesBy?: Record<string, string[]> }[];
   price: { mode: string; pence: number | null; childPence: number | null; per: string | null; dropInPence: number | null; bookAheadPence: number | null; totalPence: number | null; nowEach: number | null;
     groups: { dropIn: { pct: number; min: number } | null; bookAhead: { pct: number; min: number } | null }; throughEpic: boolean };
   who: { ageMin: number | null; ageMax: number | null; partyMax: number | null; dropOff: boolean; adultsOnly: boolean };

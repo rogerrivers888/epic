@@ -15,7 +15,9 @@ const CAUSE: Record<string, string> = { called_off: 'called off', host_cancelled
 
 function line(p: GuestPayment): { title: string; sub: string; value: string; color?: string } {
   const what = p.title ?? 'A booking';
-  if (p.kind === 'refund' || p.kind === 'release') {
+  // A released hold was never taken: no money back, so never "Refunded" (Codex, 3 Oct 2026).
+  if (p.kind === 'release') return { title: what, sub: `${p.state === 'succeeded' ? `Hold released ${day(p.at)} · not charged` : 'Releasing the hold'}${p.cause ? ` · ${CAUSE[p.cause] ?? p.cause.replace(/_/g, ' ')}` : ''}`, value: gbp(p.pence), color: INK_MUTED };
+  if (p.kind === 'refund') {
     const state = p.state === 'succeeded' ? `Refunded ${day(p.at)}` : p.state === 'pending' ? 'Refund on its way' : 'Refund waiting on Epic';
     return { title: what, sub: `${state}${p.cause ? ` · ${CAUSE[p.cause] ?? p.cause.replace(/_/g, ' ')}` : ''}`, value: `−${gbp(p.pence)}`, color: DEEP_GREEN };
   }

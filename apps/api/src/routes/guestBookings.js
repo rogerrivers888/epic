@@ -196,8 +196,10 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
         if (!bookableDay(day, o.free_hours ?? {}, { now, noticeHours: notice })) continue;
         const lengths = o.session_lengths?.length ? o.session_lengths : [o.duration_min ?? 60];
         // A time already gone, or inside the notice, is not offered.
-        const times = slotsFor(o.free_hours ?? {}, dow(day), Math.min(...lengths)).filter((t) => localInstant(day, t, tzOf(o)).getTime() - now.getTime() >= notice * 3_600_000);
-        if (times.length) slots.push({ date: day, times, lengths });
+        const open = (len) => slotsFor(o.free_hours ?? {}, dow(day), len).filter((t) => localInstant(day, t, tzOf(o)).getTime() - now.getTime() >= notice * 3_600_000);
+        const times = open(Math.min(...lengths));
+        // The start times each length fits, so a longer session never offers a start it would overrun (Codex, 3 Oct 2026).
+        if (times.length) slots.push({ date: day, times, lengths, timesBy: Object.fromEntries(lengths.map((l) => [l, open(l)])) });
       }
     }
     res.json({
@@ -720,14 +722,20 @@ router.get('/messages', async (_req, res, next) => {
            from experience_bookings b join host_offers o on o.id = b.offer_id
           where b.household_id = $1 and o.lane is not null group by o.id
          union
-         select t.context_id, null::uuid from chat_topics t join members m on m.id = t.author_member_id
-          where t.context_type = 'offer' and m.household_id = $1
+         select t.context_id, null::uuid from chat_topics t
+          where t.context_type = 'offer' and t.author_member_id = $2
        ), threads as (select offer_id, (array_agg(booking_id) filter (where booking_id is not null))[1] as booking_id from mine group by offer_id),
        seen as (
-         -- What this household may read on an event: its notices, and its own questions to the host.
+         -- The chat's own rule (visibleTopics in chat.js), for this member: their own questions always; what is said
+         -- to everyone only once booked, and a date's notice only to those booked on that date (Codex, 3 Oct 2026).
          select t.* from chat_topics t join threads x on x.offer_id = t.context_id
-          where t.context_type = 'offer' and not t.hidden
-            and (t.audience = 'everyone' or exists (select 1 from members m where m.id = t.author_member_id and m.household_id = $1))
+           left join lateral (
+             select array_remove(array_agg(distinct b.occurrence), null) as occ from experience_bookings b
+              where b.offer_id = x.offer_id and b.household_id = $1 and b.state in ('pending', 'confirmed', 'attended')
+           ) bk on true
+          where t.context_type = 'offer' and not t.hidden and $2::uuid is not null
+            and (t.author_member_id = $2
+                 or (t.audience = 'everyone' and cardinality(coalesce(bk.occ, '{}')) > 0 and (t.occurrence is null or t.occurrence = any(bk.occ))))
        )
        select x.offer_id, x.booking_id, o.title, h.name as host, h.photo_id,
               last.at as last_at, last.body as last_body, last.topic_id,

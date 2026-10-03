@@ -586,6 +586,11 @@ test('the guest pages’ reads: payments config, the inbox, Not this time, and w
     await query(`insert into chat_reads (target_type, target_id, member_id) values ('topic', $1, $2)`, [t.id, m.id]);
     const { rows: [hostMember] } = await query(`select m.id from members m join hosts h on h.household_id = m.household_id where h.id = $1 limit 1`, [o.host_id]);
     await query(`insert into chat_replies (topic_id, author_member_id, body) values ($1, $2, 'Yes, behind the hall')`, [t.id, hostMember.id]);
+    // What is said to everyone booked is not for somebody who only asked (Codex, 3 Oct 2026).
+    await query(
+      `insert into chat_topics (context_type, context_id, tag_kind, tag_ref, audience, author_member_id, title, created_at) values ('offer', $1, 'offer_aspect', 'offer', 'everyone', $2, 'Door code is 4417', now() + interval '1 minute')`,
+      [o.id, hostMember.id],
+    );
     const inbox = await srv.get('/api/messages');
     assert.equal(inbox.status, 200, JSON.stringify(inbox.body));
     const thread = inbox.body.threads.find((x) => x.offerId === o.id);

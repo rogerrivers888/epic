@@ -221,7 +221,16 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const done = (bookingId: string) => navigate(withQuery(paths.booking(bookingId), { done: '1' }), { replace: true });
 
   const settle = async (bookingId: string, out: PayOutcome, secret: string) => {
-    if (out.state === 'paid') { await api.guestPaid(bookingId, out.paymentIntent).catch(() => null); done(bookingId); return; }
+    if (out.state === 'paid') {
+      // "You're booked" only once Epic has the payment; if that read failed, the booking page says where it stands
+      // and the webhook finishes it (Codex, 3 Oct 2026).
+      const r = await api.guestPaid(bookingId, out.paymentIntent).catch(() => null);
+      if (r && (r.state === 'confirmed' || r.requestState === 'asked')) { done(bookingId); return; }
+      setPending(null);
+      toast.show('Paid · we’re confirming it with the host');
+      navigate(paths.booking(bookingId), { replace: true });
+      return;
+    }
     // Still with the bank: the booking page says where it stands, never "You're booked" before it is (Codex, 3 Oct 2026).
     if (out.state === 'processing') { toast.show('Your bank is still processing it'); navigate(paths.booking(bookingId), { replace: true }); return; }
     if (out.state === 'bank') { setPending({ bookingId, clientSecret: secret }); setSheet({ kind: 'bank' }); return; }
@@ -292,8 +301,11 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     blocks.push(<Kick key="d">Pick a day</Kick>, <MonthPicker key="cal" month={base} days={days} picked={day} onPick={(d) => { setDay(d); setTime(null); }}
       onPrev={month > 0 ? () => setMonth(month - 1) : null} onNext={month < 2 ? () => setMonth(month + 1) : null} />);
     const lengths = [...new Set(opt.slots.flatMap((s) => s.lengths))].sort((a, b) => a - b);
-    if (lengths.length > 1) blocks.push(<Kick key="len">How long</Kick>, <Chips key="lc" items={lengths.map((l) => ({ key: `l${l}`, label: l % 60 === 0 ? `${l / 60} hour${l === 60 ? '' : 's'}` : `${l} min`, on: (length ?? lengths[0]) === l, onPress: () => setLength(l) }))} />);
-    if (day) blocks.push(<Kick key="t">Pick a time</Kick>, <Chips key="tc" items={(opt.slots.find((s) => s.date === day)?.times ?? []).map((t) => ({ label: t, on: time === t, onPress: () => setTime(t) }))} />);
+    // A longer session fits fewer starts: changing the length clears a time it no longer fits (Codex, 3 Oct 2026).
+    const timesOf = (l: number) => { const s = opt.slots.find((x) => x.date === day); return s?.timesBy?.[String(l)] ?? s?.times ?? []; };
+    const len = length ?? lengths[0];
+    if (lengths.length > 1) blocks.push(<Kick key="len">How long</Kick>, <Chips key="lc" items={lengths.map((l) => ({ key: `l${l}`, label: l % 60 === 0 ? `${l / 60} hour${l === 60 ? '' : 's'}` : `${l} min`, on: len === l, onPress: () => { setLength(l); if (time && !timesOf(l).includes(time)) setTime(null); } }))} />);
+    if (day) blocks.push(<Kick key="t">Pick a time</Kick>, <Chips key="tc" items={timesOf(len).map((t) => ({ label: t, on: time === t, onPress: () => setTime(t) }))} />);
   }
 
   blocks.push(
