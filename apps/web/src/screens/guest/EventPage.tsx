@@ -56,7 +56,7 @@ export function whenWords(o: Experience, opt: GuestOptions | null): string {
 export function priceWords(o: Experience, opt: GuestOptions | null): { big: string; small: string } {
   const p = opt?.price;
   const mode = p?.mode ?? o.priceMode ?? 'free';
-  if (mode === 'free' || !(p?.pence || p?.totalPence)) return { big: 'Free', small: '' };
+  if (mode === 'free' || !(p?.pence || p?.totalPence || p?.dropInPence || p?.bookAheadPence)) return { big: 'Free', small: '' };
   if (mode === 'by_numbers' && p?.totalPence && p.nowEach != null) {
     const most = o.maxCount ?? null;
     return { big: gbp(p.nowEach), small: most ? `now · ${gbp(Math.ceil(p.totalPence / most))} each if ${most} come` : 'now' };

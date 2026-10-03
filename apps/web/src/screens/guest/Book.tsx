@@ -165,7 +165,10 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
 
   // ---- the price, worked out the way the server does (domain/money.js priceBooking)
   const p = opt.price;
-  const free = p.mode === 'free' || !(p.pence || p.totalPence);
+  // Free only when nothing is priced — a weekly class can be priced by drop in or book ahead alone (Codex, 3 Oct 2026).
+  const free = p.mode === 'free' || !(p.pence || p.totalPence || p.dropInPence || p.bookAheadPence);
+  // Paid to the host directly: booked here, paid there — no card asked for (Codex, 3 Oct 2026).
+  const direct = !free && !p.throughEpic;
   const sessN = lane === 'weekly' && mode === 'book_ahead' ? Math.max(1, picks.size) : 1;
   // As the server prices it (guestBookings.weeklyEach): a weekly kind's own price, or the one price of an older offer.
   const oneOnly = p.dropInPence == null && p.bookAheadPence == null;
@@ -192,7 +195,7 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const contactsOk = !who.dropOff || kids.every((k) => (contacts[k.key] ?? '').trim().length >= 9);
   const adultOk = !who.adultsOnly || over18;
   const ok = chosen.length > 0 && whenOk && (lane !== 'weekly' || mode === 'drop_in' || picks.size > 0);
-  const label = !chosen.length ? 'Choose who’s going' : !whenOk ? 'Pick a day and a time' : free ? (ask ? 'Ask to book' : 'Book') : ask ? `Ask to book · ${gbp(total)} held` : `Pay ${gbp(total)}`;
+  const label = !chosen.length ? 'Choose who’s going' : !whenOk ? 'Pick a day and a time' : free || direct ? (ask ? 'Ask to book' : 'Book') : ask ? `Ask to book · ${gbp(total)} held` : `Pay ${gbp(total)}`;
 
   const here = withQuery(paths.experienceBook(offer.id), { l: linkToken ?? null, i: inviteToken ?? null });
   const logIn = () => navigate(`${paths.login()}?next=${encodeURIComponent(here)}`);
@@ -220,6 +223,8 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     if (out.state === 'bank') { setPending({ bookingId, clientSecret: secret }); setSheet({ kind: 'bank' }); return; }
     // A decline ends that booking on the server (its places go back), so Try again makes a fresh one with every
     // answer still filled in — never a second go at the payment of a booking that's gone (Codex, 3 Oct 2026).
+    // Tell the server now, so the declined booking lets its places go before the next try (Codex, 3 Oct 2026).
+    await api.guestPaid(bookingId, '').catch(() => null);
     setPending(null);
     setSheet({ kind: out.state, message: out.message });
   };
@@ -240,7 +245,7 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     if (!adultOk) { toast.show('Tick to say you’re 18 or over'); return; }
     setBusy(true);
     try {
-      if (free) { await make(); return; }
+      if (free || direct) { await make(); return; }
       if (!stripe.current) { toast.show('Card payments aren’t switched on yet'); return; }
       if (method === 'wallet' && wallet && !pending && walletReq.current) {
         let made: { bookingId: string; secret: string | null } | null = null;
@@ -320,7 +325,8 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     blocks.push(<Kick key="pay" top={6}>Pay</Kick>, <PriceLines key="lines" items={lines} />);
     if (p.mode === 'by_numbers') blocks.push(<Notice key="nums" bg={LIME_TINT}>{`You pay ${gbp(total)} now. If more people book, you get the difference back${offer.goingAhead?.decidesOn ? ` on ${dayWords(offer.goingAhead.decidesOn)}` : ''}.`}</Notice>);
     if (ask) blocks.push(<Notice key="hold" bg={LIME_TINT}>{`Your card is held, not charged, until ${first} accepts${opt.askWindowHours ? ` (within ${opt.askWindowHours} hours)` : ''}.`}</Notice>);
-    if (payReady === false) blocks.push(<Notice key="np">Card payments aren’t switched on yet.</Notice>);
+    if (direct) blocks.push(<Notice key="direct">{`You pay ${first} directly.`}</Notice>);
+    else if (payReady === false) blocks.push(<Notice key="np">Card payments aren’t switched on yet.</Notice>);
     else {
       blocks.push(<Seg key="method" items={[
         ...(wallet ? [{ label: wallet === 'apple' ? 'Apple Pay' : 'Google Pay', on: method === 'wallet', onPress: () => setMethod('wallet') }] : []),
