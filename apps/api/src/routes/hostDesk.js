@@ -37,7 +37,7 @@ import { ladderProgress, feeWords, introState } from '../domain/money.js';
 import { localInstant, localDay, SEQ } from '../domain/lanes.js';
 import { bookingHostShare, shareForSession } from '../repositories/hostingLedger.js';
 import { mediaRef } from './hosting.js';
-import { lastDate, occurrenceDate } from '../domain/hosting.js';
+import { lastDate, occurrenceDate, seriesDates } from '../domain/hosting.js';
 import * as notifications from '../repositories/notifications.js';
 
 export const router = Router();
@@ -218,10 +218,13 @@ router.get('/host/desk', async (_req, res, next) => {
     const offers = await offersWithSessions(host.id);
     const helping = await helpingWith(account?.id);
     // A host whose offers all pre-date the lanes still has a desk, and finds them in All events.
-    if (!offers.length && !helping.length && !(await olderOffers(host.id)).length) return res.json({ home: '4e' });
+    const older = await olderOffers(host.id);
+    if (!offers.length && !helping.length && !older.length) return res.json({ home: '4e' });
+    const olderLive = older.map((o) => olderRow(o, localDay(now, 'Europe/London'))).filter((r) => r.group === 'live');
     const upcoming = offers.flatMap((o) => (o.state === 'draft' ? [] : o.sessionsList.filter((x) => x.state === 'scheduled' && endOf(x, o) > now).map((x) => ({ o, x }))))
       .sort((a, b) => startOf(a.x, a.o) - startOf(b.x, b.o));
-    const state = hostState({ offers, upcomingSessions: upcoming.length });
+    // An older offer still to come counts as something on, with its own public/private and money (Codex, 3 Oct 2026).
+    const state = hostState({ offers: [...offers, ...older.filter((o) => olderLive.some((r) => r.id === o.id))], upcomingSessions: upcoming.length + olderLive.length });
     const rating = await ratingNow(host.id);
     const [messages, todo, atRisk] = await Promise.all([waitingMessages(host.id, household.id), todoItems(host, household, offers, now, s), atRiskEvents(offers, now)]);
     const { rows: [rev] } = await query(
@@ -444,7 +447,8 @@ async function olderOffers(hostId) {
 function olderRow(o, today) {
   const last = lastDate(o, null);
   const finished = o.state === 'ended' || Boolean(last && last < today);
-  const on = finished ? null : occurrenceDate(o, null);
+  // A series under way shows its next date, not its first (Codex, 3 Oct 2026).
+  const on = finished ? null : o.shape === 'series' ? (seriesDates(o).find((d) => d >= today) ?? null) : occurrenceDate(o, null);
   return {
     id: o.id, title: o.title, lane: null, older: true, visibility: o.visibility, photo: mediaRef(o.photo_ids?.[0]),
     group: finished ? 'finished' : 'live',
@@ -462,7 +466,9 @@ async function olderBookingsAhead(hostId, c = null) {
   const q = c ? (t, p) => c.query(t, p) : query;
   const { rows } = await q(
     `select b.occurrence, o.* from experience_bookings b join host_offers o on o.id = b.offer_id
-      where b.host_id = $1 and o.lane is null and b.state in ('pending', 'confirmed')`,
+      where b.host_id = $1 and o.lane is null and b.state in ('pending', 'confirmed')
+        -- an Ask to book still asked is counted already, with the lane requests (Codex, 3 Oct 2026)
+        and not (b.request_state = 'asked' and b.state = 'pending')`,
     [hostId],
   );
   const today = localDay(new Date(), 'Europe/London');

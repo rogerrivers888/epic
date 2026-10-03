@@ -383,12 +383,20 @@ test('offers made before the lanes: in All events, counted by Stop hosting, and 
   await query(`insert into host_offers (host_id, shape, lane, state, title, visibility, starts_on) values ($1, 'oneoff', null, 'live', 'Older talk', 'public', $2)`, [host.id, plusDays(today(), -40)]);
   const srv = await server(account);
   try {
-    assert.notDeepEqual((await srv.get('/api/host/desk')).body, { home: '4e' }, 'a host with only older offers has a desk');
+    const home = (await srv.get('/api/host/desk')).body;
+    assert.equal(home.home, 'desk', 'a host with only older offers has a desk');
+    assert.notEqual(home.state, 'quiet', 'and something on');
     const ev = (await srv.get('/api/host/desk/events')).body;
     const live = ev.live.find((r) => r.title === 'Older walk');
     assert.ok(live?.older, 'still to come: Live, and it opens on its own page');
     assert.equal(live.lane, null);
     assert.ok(ev.finished.some((r) => r.title === 'Older talk' && r.older), 'past its date: Finished');
+    // A series under way: its next date, not its first.
+    await query(`insert into host_offers (host_id, shape, lane, state, title, visibility, first_date, weekday, sessions) values ($1, 'series', null, 'live', 'Older class', 'public', $2, $3, 6)`,
+      [host.id, plusDays(today(), -14), new Date(`${plusDays(today(), -14)}T12:00:00Z`).getUTCDay()]);
+    const series = (await srv.get('/api/host/desk/events')).body.live.find((r) => r.title === 'Older class');
+    assert.ok(series?.next, JSON.stringify(series));
+    assert.ok(series.next.date >= today(), `next is ${series.next.date}, not the first date`);
 
     // A booking on the older offer stops Stop hosting.
     const { household } = await aHousehold(query);
