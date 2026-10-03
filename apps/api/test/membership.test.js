@@ -345,7 +345,7 @@ test('one Checkout at a time: a second press at once is refused; a later one clo
   try {
     const [a, b] = await Promise.all([srv.send('POST', '/api/membership/checkout', { plan: 'solo' }), srv.send('POST', '/api/membership/checkout', { plan: 'solo' })]);
     assert.deepEqual([a.status, b.status].sort(), [200, 409]);
-    await query("update households set membership_checkout_at = now() - interval '1 minute' where id = $1", [household.id]);
+    await query("update households set membership_checkout_at = now() - interval '3 minutes' where id = $1", [household.id]);
     calls.length = 0;
     const third = await srv.send('POST', '/api/membership/checkout', { plan: 'household' });
     assert.equal(third.status, 200, JSON.stringify(third.body));
@@ -394,7 +394,7 @@ test('a member who cancelled can join again; a Checkout just finished and not ye
   const srv = await server(account);
   try {
     assert.equal((await srv.send('POST', '/api/membership/checkout', { plan: 'solo' })).status, 200);
-    await query("update households set membership_checkout_at = now() - interval '1 minute' where id = $1", [household.id]);
+    await query("update households set membership_checkout_at = now() - interval '3 minutes' where id = $1", [household.id]);
     // Finished, its subscription not yet heard of: they have just joined.
     const sub = aSub(household.id);
     checkoutRead = { status: 'complete', subscription: sub.id };
@@ -403,7 +403,7 @@ test('a member who cancelled can join again; a Checkout just finished and not ye
     await applyStripeEvent(event('customer.subscription.created', sub));
     sub.status = 'canceled'; sub.ended_at = secs(new Date());
     await applyStripeEvent(event('customer.subscription.deleted', sub));
-    await query("update households set membership_checkout_at = now() - interval '1 minute' where id = $1", [household.id]);
+    await query("update households set membership_checkout_at = now() - interval '3 minutes' where id = $1", [household.id]);
     const again = await srv.send('POST', '/api/membership/checkout', { plan: 'solo' });
     assert.equal(again.status, 200, JSON.stringify(again.body));
     assert.equal(again.body.trialDays, 0);
@@ -431,4 +431,33 @@ test('an annual reminder quotes Stripe’s own amount for the year, not twelve r
   assert.ok(m);
   assert.equal(m.monthly_pence, 539);
   assert.match(membership.reminderMail(m, 'https://x').text, /£64\.69 for the year/);
+});
+
+test('a plan switch never revalues the months already billed; an end on the 1st bills nothing for that month', async () => {
+  const { membershipRevenue } = await import('../src/repositories/memberships.js');
+  const { household } = await aMember();
+  const sub = aSub(household.id, { status: 'active', trialEnd: new Date('2025-01-01T00:00:00Z') });
+  await applyStripeEvent(event('customer.subscription.updated', sub));
+  // Pretend the switch happened on 1 Mar 2025, after two months at Solo.
+  sub.items.data[0].price.unit_amount = 1299; sub.items.data[0].price.metadata.epic_plan = 'pro';
+  await applyStripeEvent(event('customer.subscription.updated', sub));
+  await query("update memberships set price_history = jsonb_build_array(jsonb_build_object('until', '2025-03-01T00:00:00Z', 'monthlyPence', 599)) where stripe_subscription_id = $1", [sub.id]);
+  sub.status = 'canceled'; sub.ended_at = secs(new Date('2025-05-01T00:00:00Z'));
+  await applyStripeEvent(event('customer.subscription.deleted', sub));
+  // Jan, Feb at 599; Mar, Apr at 1299; May not at all. Nothing else in this file is dated 2025.
+  assert.equal((await membershipRevenue('2025-01-01', '2025-07-01')).pence, 2 * 599 + 2 * 1299);
+});
+
+test('a press that outlived its slot writes nothing over the press after it', async () => {
+  const { household } = await aMember();
+  const first = await billing.claimCheckout(household.id);
+  await query("update households set membership_checkout_at = now() - interval '3 minutes' where id = $1", [household.id]);
+  const aged = (await query('select membership_checkout_at::text as t from households where id = $1', [household.id])).rows[0].t;
+  const second = await billing.claimCheckout(household.id);
+  assert.ok(second.claimed);
+  assert.equal(await billing.recordCheckout(household.id, 'cs_late', aged), false);
+  assert.equal(await billing.recordCheckout(household.id, 'cs_new', second.lease), true);
+  await billing.releaseCheckout(household.id, aged);
+  assert.equal((await query('select membership_checkout_id, membership_checkout_at is not null as held from households where id = $1', [household.id])).rows[0].held, true);
+  assert.ok(first.claimed);
 });

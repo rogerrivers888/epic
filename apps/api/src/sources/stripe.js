@@ -477,8 +477,9 @@ export function retrieveSubscription(id, { householdId = null } = {}) {
  */
 export async function cancelSecondMembership(subscriptionId, { householdId = null } = {}) {
   // Marked first, so its own cancellation event is recognised and never written down as a membership.
+  // Not caught: unmarked, its cancellation would be written down as a membership — the event fails and is retried.
   await call('POST', `/subscriptions/${encodeURIComponent(subscriptionId)}`, { metadata: { epic_duplicate: 'true' } },
-    { householdId, purpose: 'membership.duplicate.mark' }).catch(() => null);
+    { householdId, purpose: 'membership.duplicate.mark' });
   const sub = await call('DELETE', `/subscriptions/${encodeURIComponent(subscriptionId)}`, { prorate: 'false', invoice_now: 'false' },
     { householdId, purpose: 'membership.duplicate.cancel', idempotencyKey: `dup-cancel-${subscriptionId}` })
     .catch(async (err) => { if (err.httpStatus === 404 || err.detail === 'resource_missing') return retrieveSubscription(subscriptionId, { householdId }); throw err; });

@@ -31,6 +31,9 @@ create table if not exists memberships (
   stripe_price_id        text,
   -- What it is billed a month, from Stripe's own price (an annual price divided by twelve).
   monthly_pence          integer not null default 0,
+  -- Earlier prices, each with when it stopped — [{until, monthlyPence}], oldest first — so a plan switch never
+  -- revalues the months already billed at the old price.
+  price_history          jsonb not null default '[]'::jsonb,
   -- What Stripe charges each interval, exactly: what a reminder quotes (a year's price is not twelve rounded months).
   amount_pence           integer not null default 0,
   interval               text not null default 'month',

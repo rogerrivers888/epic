@@ -92,6 +92,9 @@ export async function upsertFromSubscription({ householdId, subscriptionId, fact
          plan_key = excluded.plan_key,
          status = excluded.status,
          stripe_price_id = excluded.stripe_price_id,
+         price_history = case when memberships.monthly_pence is distinct from excluded.monthly_pence
+                              then memberships.price_history || jsonb_build_array(jsonb_build_object('until', now(), 'monthlyPence', memberships.monthly_pence))
+                              else memberships.price_history end,
          monthly_pence = excluded.monthly_pence,
          amount_pence = excluded.amount_pence,
          interval = excluded.interval,
@@ -219,26 +222,32 @@ export async function allMemberships() {
 
 /**
  * One Checkout at a time a household (Codex, 3 Oct 2026). Claims the household's checkout slot — refused while
- * another press is in its first half-minute — and hands back the session the last press opened, for the caller to
+ * another press is in its first two minutes — and hands back the session the last press opened, for the caller to
  * close at Stripe before opening a new one.
  */
 export async function claimCheckout(householdId) {
   const { rows: [r] } = await query(
     `with was as (select id, membership_checkout_id from households where id = $1 for update)
-     update households h set membership_checkout_at = now()
+     update households h set membership_checkout_at = clock_timestamp()
        from was
-      where h.id = was.id and (h.membership_checkout_at is null or h.membership_checkout_at < now() - interval '30 seconds')
-     returning was.membership_checkout_id as previous`,
+      where h.id = was.id and (h.membership_checkout_at is null or h.membership_checkout_at < now() - interval '2 minutes')
+     returning was.membership_checkout_id as previous, h.membership_checkout_at::text as lease`,
     [householdId],
   );
-  return r ? { claimed: true, previous: r.previous ?? null } : { claimed: false };
+  return r ? { claimed: true, previous: r.previous ?? null, lease: r.lease } : { claimed: false };
 }
 
-export async function recordCheckout(householdId, sessionId) {
-  await query('update households set membership_checkout_id = $2 where id = $1', [householdId, sessionId]);
+/**
+ * Write the new session down — only while this press still holds the slot. A press that outlived its lease, with
+ * another press since, writes nothing and is told so, to close its own session (Codex, 3 Oct 2026).
+ */
+export async function recordCheckout(householdId, sessionId, lease) {
+  const { rowCount } = await query(
+    'update households set membership_checkout_id = $2 where id = $1 and membership_checkout_at = $3::timestamptz', [householdId, sessionId, lease]);
+  return rowCount === 1;
 }
 
-/** A press that failed gives the slot back at once. */
-export async function releaseCheckout(householdId) {
-  await query('update households set membership_checkout_at = null where id = $1', [householdId]);
+/** A press that failed gives the slot back at once — its own slot, never a later press's. */
+export async function releaseCheckout(householdId, lease) {
+  await query('update households set membership_checkout_at = null where id = $1 and membership_checkout_at = $2::timestamptz', [householdId, lease]);
 }

@@ -31,7 +31,8 @@ const refuse = (status, code, message) => Object.assign(new Error(message), { st
 /** The household's Stripe customer, made the first time it is needed; its email kept in step with the account's. */
 export async function ensureCustomer({ householdId, email, name = null }) {
   const had = await billing.customerOf(householdId);
-  if (had) return had;
+  // A returning customer's email is brought up to date before Checkout, so receipts reach today's address (Codex).
+  if (had) { if (email) await stripe.updateCustomerEmail(had, email, { householdId }); return had; }
   const c = await stripe.createCustomer({ householdId, email, name });
   return billing.setCustomer(householdId, c.id);
 }
@@ -60,9 +61,13 @@ export async function startCheckout({ householdId, email, name, planKey }) {
   // two subscriptions. The second press within half a minute is refused; a later one closes the earlier session first.
   const slot = await billing.claimCheckout(householdId);
   if (!slot.claimed) throw refuse(409, 'checkout_opening', 'Opening the payment page already — give it a moment.');
+  let session = null;
   try {
     if (slot.previous) {
-      const prev = await stripe.retrieveCheckout(slot.previous, { householdId }).catch(() => null);
+      // Only a session Stripe says is not there is passed over: any other failure stops here, so a payable session is
+      // never left open beside a new one (Codex, 3 Oct 2026).
+      const prev = await stripe.retrieveCheckout(slot.previous, { householdId })
+        .catch((err) => { if (err.httpStatus === 404) return null; throw err; });
       // Finished, and its subscription not written down yet: they have just joined. Written down already (and, since
       // nothing is running, ended since): an old Checkout, and they may join again (Codex, 3 Oct 2026).
       const prevSub = typeof prev?.subscription === 'string' ? prev.subscription : prev?.subscription?.id;
@@ -73,16 +78,19 @@ export async function startCheckout({ householdId, email, name, planKey }) {
     const { priceId } = await priceFor(planKey);
     // One trial a household: a household that has had a membership before pays from the first day.
     const before = await billing.latestMembership(householdId);
-    const session = await stripe.membershipCheckout({
+    session = await stripe.membershipCheckout({
       customerId, priceId, householdId, planKey,
       trialDays: before ? 0 : TRIAL_DAYS,
       successUrl: `${appUrl()}/settings?membership=joined`,
       cancelUrl: `${appUrl()}/settings?membership=not-yet`,
     });
-    await billing.recordCheckout(householdId, session.id);
+    if (!(await billing.recordCheckout(householdId, session.id, slot.lease))) {
+      await stripe.expireCheckout(session.id, { householdId }).catch(() => null);
+      throw refuse(409, 'checkout_opening', 'Opening the payment page already — give it a moment.');
+    }
     return { url: session.url, id: session.id, trialDays: before ? 0 : TRIAL_DAYS };
   } catch (err) {
-    await billing.releaseCheckout(householdId);
+    await billing.releaseCheckout(householdId, slot.lease);
     throw err;
   }
 }

@@ -84,6 +84,8 @@ export async function billedMemberships() {
     startedAt: m.started_at,
     endedAt: m.status === 'cancelled' ? (m.ended_at ?? m.updated_at) : null,
     paidFrom: m.paid_from ?? null,
+    // Earlier prices and when each stopped, oldest first: a month is valued at the price in force when it began.
+    priceHistory: (m.price_history ?? []).map((p) => ({ until: p.until, monthlyPence: Number(p.monthlyPence) || 0 })),
     channel: m.channel,
     paused: m.status === 'paused',
     mode: m.mode,
@@ -206,7 +208,7 @@ export async function membershipRevenue(from, to) {
   const billed = await billedMemberships();
   let pence = 0;
   for (const m of months) {
-    for (const b of billed) if (paidIn(b, m)) pence += Number(b.monthlyPence) || 0;
+    for (const b of billed) if (paidIn(b, m)) pence += priceIn(b, m);
   }
   return { pence, estimated: false };
 }
@@ -225,7 +227,7 @@ export async function membershipMonths(keys) {
       month: key,
       members: running.length,
       paid: paid.length,
-      pence: paid.reduce((s, b) => s + (Number(b.monthlyPence) || 0), 0),
+      pence: paid.reduce((s, b) => s + priceIn(b, m), 0),
     };
   });
 }
@@ -269,9 +271,17 @@ function monthStarts(from, to) {
 }
 
 /** Paid in that month: from when it first became paid to its end — a cancelled membership's paid months included. */
+// An end exactly at a month's first instant is before that month: no payment for it (Codex, 3 Oct 2026).
 function paidIn(b, monthStart) {
   if (!b.paidFrom) return false;
-  return runsIn({ startedAt: b.paidFrom, endedAt: b.endedAt }, monthStart);
+  const next = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1));
+  return new Date(b.paidFrom) < next && (!b.endedAt || new Date(b.endedAt) > monthStart);
+}
+
+/** The price a month was billed at: the earliest earlier price still in force when the month began, else today's. */
+function priceIn(b, monthStart) {
+  const was = (b.priceHistory ?? []).find((p) => new Date(p.until) > monthStart);
+  return Number(was ? was.monthlyPence : b.monthlyPence) || 0;
 }
 
 function runsIn(b, monthStart) {
