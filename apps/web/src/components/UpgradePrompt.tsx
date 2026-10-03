@@ -20,8 +20,8 @@ export function UpgradePrompt() {
   return (
     <Sheet title="Planning for more than you?" onCancel={close} cancelLabel="Not now" onClose={close}>
       <Text style={type.body}>{message}</Text>
-      <Text style={[type.body, { marginTop: 8 }]}>The Household plan covers up to {cap} people, each with their own tastes and allergies.</Text>
-      <Button label="Switch to Household" onPress={() => { close(); showToast('Plan and billing is coming soon'); }} style={{ marginTop: 14 }} />
+      <Text style={[type.body, { marginTop: 8 }]}>The Household membership covers up to {cap} people, each with their own tastes and allergies.</Text>
+      <Button label="Switch to Household" onPress={() => { close(); showToast('Membership and billing is coming soon'); }} style={{ marginTop: 14 }} />
     </Sheet>
   );
 }

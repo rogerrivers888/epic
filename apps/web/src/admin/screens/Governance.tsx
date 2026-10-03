@@ -296,7 +296,7 @@ export function Plans({ canManage }: { canManage: boolean }) {
           ] as Column<any>[]}
         />
       </Panel>
-      <Text style={type.tiny}>An empty field is a free plan, which is a different statement from a plan priced at zero.</Text>
+      <Text style={type.tiny}>An empty field is a free membership, which is a different statement from a membership priced at zero.</Text>
     </AdminPage>
   );
 }
