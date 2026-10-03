@@ -788,7 +788,8 @@ router.get('/payouts/:id', requires('view_hosting'), async (req, res, next) => {
         session: p.session_id ? { id: p.session_id, n: p.session_n, date: ymd(p.on_date), time: hm(p.starts_at) } : null,
         pence: p.amount_pence + p.tips_pence, sharePence: p.amount_pence, tipsPence: p.tips_pence,
         releaseAt: p.release_at, tookPlace: p.took_place, confirmedBy: p.confirmed_by, holdReason: p.hold_reason, releasedBy: p.released_by ?? null,
-        sent: Boolean(p.stripe_transfer), attempt: p.attempt ?? null, mode: p.mode, madeAt: p.created_at, updatedAt: p.updated_at,
+        // The destination-account flow records `stripe_payout`; an older row its transfer (Codex, 3 Oct 2026).
+        sent: Boolean(p.stripe_payout || p.stripe_transfer), attempt: p.attempt ?? null, mode: p.mode, madeAt: p.created_at, updatedAt: p.updated_at,
       },
       lines: lines.map((l) => { const b = bookingOf.get(l.bookingId); return { bookingId: l.bookingId, pence: Number(l.pence) || 0, heads: b?.heads ?? null, state: b?.state ?? null, householdId: b?.household_id ?? null, household: b?.household ?? null }; }),
       tips: tips.map((t) => ({ id: t.id, bookingId: t.booking_id, pence: t.amount_pence, state: t.state, at: t.created_at, householdId: t.household_id, household: t.household })),
