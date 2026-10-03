@@ -254,6 +254,16 @@ test('a guest is only ever sent back to a guest page', () => {
   }
 });
 
+test('the sheet to reopen after sign-in is only ask or the waiting list, only on an event page', () => {
+  for (const ok of ['/experiences/e1?then=waitlist', '/experiences/e1?then=ask', '/experiences/e1?l=tok&then=waitlist']) {
+    assert.equal(guestNext(ok), ok, ok);
+  }
+  for (const bad of ['/experiences/e1?then=book', '/experiences/e1?then=pay', '/experiences/e1?then=waitlist&then=ask',
+    '/experiences/e1/book?then=waitlist', '/plans?then=ask', '/bookings/b1?then=waitlist', '/experiences/e1?then=']) {
+    assert.equal(guestNext(bad), null, bad);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // the wall
 // ---------------------------------------------------------------------------

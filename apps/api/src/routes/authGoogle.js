@@ -155,11 +155,17 @@ export function safeNext(value) {
  * safe in-app path first (`safeNext`), then one of those; anything else is
  * dropped and they land on their account page, never a guess.
  */
+const GUEST_THEN = new Set(['ask', 'waitlist']);
 const GUEST_PAGES = new Set(['experiences', 'invited', 'i', 'e', 'bookings', 'plans', 'messages', 'settings', 'account', 'hosts']);
 export function guestNext(value) {
   const s = safeNext(value);
   if (!s) return null;
   const segs = s.split('?')[0].split('/').filter(Boolean).map((x) => decodeURIComponent(x).toLowerCase());
+  // `then` names the sheet to reopen on an event page once signed in (ask, or
+  // the waiting list) — only those two, only there. It opens a sheet to
+  // confirm; it never acts by itself.
+  const then = new URLSearchParams(s.split('?')[1] ?? '').getAll('then');
+  if (then.length && !(then.length === 1 && GUEST_THEN.has(then[0]) && segs[0] === 'experiences' && segs.length === 2)) return null;
   if (GUEST_PAGES.has(segs[0])) return s;
   // The public event and host pages: /en-gb/event/<slug>-<code>, /en-gb/host/…
   if (/^[a-z]{2}(-[a-z]{2})?$/.test(segs[0] ?? '') && (segs[1] === 'event' || segs[1] === 'host')) return s;

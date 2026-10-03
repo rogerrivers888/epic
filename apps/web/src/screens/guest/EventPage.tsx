@@ -14,7 +14,7 @@
  * it allows right now (routes/guestBookings.js `booking/options`).
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Share } from 'react-native';
 import { api, type Experience, type GuestOptions, type PaymentsConfig } from '../../api';
 import { paths, withQuery } from '../../routes';
@@ -103,11 +103,11 @@ function freeWords(opt: GuestOptions | null): string | null {
 }
 
 export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: { offer: Experience; payments: PaymentsConfig } | null }) {
-  const { navigate, back, path } = useRouter();
+  const { navigate, back, path, query, setQuery } = useRouter();
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(initial?.offer.id === id ? initial : null);
   const [opt, setOpt] = useState<GuestOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'ask' | 'account' | null>(null);
+  const [sheet, setSheet] = useState<'ask' | 'account' | 'waitlist' | null>(null);
   const [question, setQuestion] = useState('');
   const [joined, setJoined] = useState<number | null>(null);
   const toast = useToast();
@@ -121,6 +121,20 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
     const t = setTimeout(() => { api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => null); }, Math.min(ms + 1000, 2_147_000_000));
     return () => clearTimeout(t);
   }, [until, id, linkToken, inviteToken]);
+  // Back from making the free account (G21): `?then=` says which sheet was open, and it opens again —
+  // ready to confirm with one tap, never acting by itself, so a link someone crafted cannot change anything.
+  // The marker leaves the address once read (a replace, not a step).
+  const then = query.get('then');
+  const thenDone = useRef(false);
+  useEffect(() => {
+    if (!then || thenDone.current || !opt) return;
+    thenDone.current = true;
+    if (signedIn()) {
+      if (then === 'ask') setSheet('ask');
+      else if (then === 'waitlist' && opt.action === 'waitlist') setSheet('waitlist');
+    }
+    setQuery({ then: null }, { replace: true });
+  }, [then, opt, setQuery]);
   useEffect(() => {
     if (initial?.offer.id !== id) api.experience(id, inviteToken, linkToken).then(setData).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
     api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => setOpt(null));
@@ -259,13 +273,18 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
         </>
       ) : (
         <>
-          <FreeAccount next={here} line={`Make a free account so ${first} can answer you. No subscription.`} />
+          <FreeAccount next={withQuery(here, { then: 'ask' })} line={`Make a free account so ${first} can answer you. No subscription.`} />
         </>
       )}
     </GuestSheet>
   ) : sheet === 'account' ? (
     <GuestSheet title="Join the waiting list" onClose={() => setSheet(null)}>
-      <FreeAccount next={here} line="Make a free account so we can tell you when a place comes free. No subscription." />
+      <FreeAccount next={withQuery(here, { then: 'waitlist' })} line="Make a free account so we can tell you when a place comes free. No subscription." />
+    </GuestSheet>
+  ) : sheet === 'waitlist' ? (
+    <GuestSheet title="Join the waiting list" onClose={() => setSheet(null)}>
+      <Para color={INK_MUTED}>We’ll tell you when a place comes free.</Para>
+      <Buttons items={[{ label: 'Join the waiting list', tone: 'ink', onPress: () => { setSheet(null); void join(); } }]} />
     </GuestSheet>
   ) : null;
 

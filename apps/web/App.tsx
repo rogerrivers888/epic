@@ -52,6 +52,7 @@ import { OrderTicketScreen } from './src/screens/OrderTicketScreen';
 import { AdminApp, firstAdminScreen } from './src/admin/AdminApp';
 import { useActivity } from './src/hooks/useActivity';
 import { LoginScreen, safeNext } from './src/screens/LoginScreen';
+import { linkLanding } from './src/linkLanding';
 import { takeRememberedNext } from './src/afterSignIn';
 import { InScreen } from './src/screens/InScreen';
 import { SiteScreen } from './src/site/SiteScreen';
@@ -414,7 +415,9 @@ function Gate({ route }: { route: Route }) {
         const screen = firstAdminScreen(st.access);
         // The page they were going to when they asked for the link, if it was
         // asked for on this device in the last hour (afterSignIn.ts).
-        const landing = takeRememberedNext(safeNext) ?? safeNext(linkNext) ?? (toAdmin
+        // Taken out of storage whichever wins, so a remembered page never fires on a later sign-in.
+        const remembered = takeRememberedNext(safeNext);
+        const landing = linkLanding(safeNext(linkNext), remembered, toAdmin
           ? (screen === 'filing' ? paths.filing('categories') : paths.admin(screen))
           : paths.account());
         navigate(landing, { replace: true });
