@@ -2764,12 +2764,6 @@ export const api = {
   becomeHost: (body: HostInput) => post<{ host: OwnHost }>('/api/host', body),
   updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected'; paySchedule?: PaySchedule; taxIsCompany?: boolean; companyNumber?: string | null; legalName?: string | null; taxAddress?: string | null }) =>
     patch<{ host: OwnHost }>('/api/host', body),
-  /** The Host tab's Money screen: fee lines, the ladder, payouts, tax (SX9/SX14/SX16–SX20). */
-  hostMoney: () => request<HostMoney>('/api/host/money'),
-  /** Make one bank the payout account (SX16). One at a time. */
-  activatePayoutAccount: (id: string) => post<{ account: PayoutAccount; payoutAccounts: PayoutAccount[] }>(`/api/host/payout-accounts/${id}/activate`, {}),
-  /** Stop hosting: the host, its offers and its videos go, and the Host tab is the invitation again. */
-  stopHosting: (force = false) => del<void>(`/api/host${force ? '?force=1' : ''}`),
   /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
   /**
    * `purpose` decides whether anybody may read it back, and it is required at

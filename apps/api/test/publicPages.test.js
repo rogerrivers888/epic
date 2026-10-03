@@ -122,7 +122,14 @@ test('finished for 90 days, called off for 30, then expired; a paused host’s e
     // A session called off for numbers is not the next date, and with nothing else on, the event is over.
     const thin = await anEvent(h, { inDays: [3] });
     await query(`update offer_sessions set state = 'called_off' where offer_id = $1`, [thin.id]);
-    assert.notEqual(await st(thin), 'live');
+    assert.equal(await st(thin), 'called_off', 'its remaining sessions called off: called off, not finished');
+    // A Weekly that ran, then had its remaining weeks called off for numbers.
+    const wk = await anEvent(h, { inDays: [-14, -7, 4, 11] });
+    await query(`update host_offers set lane = 'weekly' where id = $1`, [wk.id]);
+    await query(`update offer_sessions set state = 'done' where offer_id = $1 and on_date < current_date`, [wk.id]);
+    await query(`update offer_sessions set state = 'called_off' where offer_id = $1 and on_date >= current_date`, [wk.id]);
+    const wkPage = (await srv.get(`/api/public/events/${wk.public_code}`)).body;
+    assert.deepEqual([wkPage.status, wkPage.ended], ['called_off', 'called_off']);
     const { h: paused } = await aHost({ paused: true });
     const pe = await anEvent(paused);
     assert.equal(await st(pe), 'gone');

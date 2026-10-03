@@ -75,6 +75,13 @@ export function eventStatus(o, host, sessions, today) {
     return { status: daysBetween(on, today) > CALLED_OFF_DAYS ? 'expired' : 'called_off', on, ended: 'called_off' };
   }
   const last = live.length ? ymd(live[live.length - 1].ends_on ?? live[live.length - 1].on_date) : null;
+  // Nothing left on, and what was left was called off for numbers (a Weekly's remaining sessions, say): called off,
+  // not finished — the offer itself carries no called_off_at then (Roger, 3 Oct 2026).
+  const offAfter = sessions.filter((s) => s.state === 'called_off' && (!last || ymd(s.on_date) > last));
+  if (o.lane !== 'onrequest' && !live.some((s) => s.state === 'scheduled' && ymd(s.ends_on ?? s.on_date) >= today) && offAfter.length) {
+    const on = ymd(offAfter[offAfter.length - 1].on_date);
+    return { status: daysBetween(on, today) > CALLED_OFF_DAYS ? 'expired' : 'called_off', on, ended: 'called_off' };
+  }
   const ahead = live.some((s) => s.state === 'scheduled' && ymd(s.ends_on ?? s.on_date) >= today);
   // Dated, and nothing on still to come (every session past, called off or cancelled): over.
   const ended = o.state === 'ended' || (o.lane !== 'onrequest' && sessions.length > 0 && !ahead);
