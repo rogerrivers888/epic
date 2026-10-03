@@ -1157,7 +1157,11 @@ export async function applyStripeEvent(event) {
     if (event.type === 'account.updated' && obj.id) {
       const host = await repo.hostByStripeAccount(obj.id);
       if (host) {
-        await applyAccountFacts(host.id, stripe.hostPatchFromAccount(obj));
+        // Stripe's events can arrive out of order, so the account as it is now is read back and stored — never the
+        // event's own snapshot, which may be older than one already applied. Unreadable: the event fails and Stripe
+        // retries it (Codex, 3 Oct 2026).
+        const current = await stripe.retrieveAccount(obj.id, { householdId: host.household_id });
+        await applyAccountFacts(host.id, stripe.hostPatchFromAccount(current));
         // Stripe asking for ID from a host whose check passed is never sent to the host (L7 point 4, owner, 3 Oct
         // 2026): the requirements just stored raise it in the back office for a person (hostingAdmin › host, Safety).
       }

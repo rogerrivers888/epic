@@ -220,6 +220,16 @@ export async function refreshAccountFacts({ limit = 20, status = stripe.stripeSt
       refreshed += 1;
     } catch (err) {
       if (err.code === 'stripe_unreachable') break;
+      if (err.code === 'stripe_refused') {
+        // Stripe won't let Epic read it: deleted, or disconnected from Epic. That is trouble for a person (Safety), and
+        // the row is now whole, so it is not asked again and never holds up the accounts behind it (Codex, 3 Oct 2026).
+        await applyAccountFacts(h.id, {
+          stripeRequirements: { currentlyDue: [], eventuallyDue: [], pastDue: [], disabledReason: 'account_closed', detailsSubmitted: false, capabilities: { card_payments: null, transfers: null } },
+          stripeChargesEnabled: false, stripePayoutsEnabled: false, payoutsState: 'pending',
+        });
+        refreshed += 1;
+        continue;
+      }
       console.error(`epic-api: account facts for host ${h.id} not refreshed — ${err.code ?? err.message}`);
     }
   }

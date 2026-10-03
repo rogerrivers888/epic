@@ -27,6 +27,8 @@ const calls = [];
 let modelAnswer = {};
 let checkoutStatus = 'paid';
 let dormantRead = false;
+/** The account Stripe answers with when read back, when a test sets one. */
+let accountRead = null;
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -40,6 +42,7 @@ const fake = http.createServer((req, res) => {
     // Waking a dormant account: card payments asked for (owner, 3 Oct 2026).
     if (req.url.startsWith('/v2/core/accounts/') && req.method === 'POST') return json({ id: 'acct_test_1', object: 'v2.core.account' });
     if (req.url === '/v1/accounts' && req.method === 'POST') return json({ error: { code: 'invalid_request_error', message: 'Accounts v1 creation is refused' } }, 400);
+    if (req.url.startsWith('/v1/accounts/') && accountRead) return json(accountRead);
     if (req.url.startsWith('/v1/accounts/')) return json({ id: 'acct_test_1', details_submitted: !dormantRead, charges_enabled: !dormantRead, payouts_enabled: !dormantRead, capabilities: dormantRead ? {} : { card_payments: 'active', transfers: 'active' }, individual: { id: 'person_test_1' }, settings: { payouts: { schedule: { interval: 'manual' } } }, requirements: { currently_due: [], eventually_due: [], past_due: [] } });
     if (req.url === '/v1/account_links') return json({ url: 'https://connect.stripe.test/onboard' });
     if (req.url === '/v1/identity/verification_sessions' && req.method === 'POST') return json({ id: 'vs_test_1', url: 'https://verify.stripe.test/start' });
@@ -482,6 +485,9 @@ test('public: Verified and the video block review; Checked and tax wait; then it
 test('Stripe’s webhook: admitted by its signature, test mode only', async () => {
   const { household: h, member } = await aHousehold(query);
   const srv = await server(await anAccount(h, member));
+  // An account event is applied from the account read back from Stripe: the fake answers with this one.
+  accountRead = { id: 'acct_hook', details_submitted: true, charges_enabled: true, payouts_enabled: true, settings: { payouts: { schedule: { interval: 'manual' } } }, capabilities: { card_payments: 'active', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: null } };
+  const was = process.env.STRIPE_SECRET_KEY; process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
   try {
     const host = await repo.insertHost(h.id, { name: 'Hooked' });
     await repo.updateHost(host.id, { stripeAccountId: `acct_${host.id.slice(0, 8)}`, payoutsState: 'pending', stripeAccountModel: 'v2' });
@@ -505,7 +511,7 @@ test('Stripe’s webhook: admitted by its signature, test mode only', async () =
     // An event without Stripe's id is not one Epic can hold to once-only.
     const bare = JSON.stringify({ type: 'account.updated', livemode: false, data: { object: {} } });
     assert.equal((await srv.raw('/api/stripe/webhook', bare, { 'content-type': 'application/json', 'stripe-signature': sign(bare) })).status, 400);
-  } finally { await srv.close(); }
+  } finally { await srv.close(); accountRead = null; if (was) process.env.STRIPE_SECRET_KEY = was; else delete process.env.STRIPE_SECRET_KEY; }
 });
 
 test('a child on a booking has an age or a date of birth — exactly one', async () => {
@@ -745,20 +751,26 @@ test('L7: the host’s public page shows the day Stripe confirmed their passport
   } finally { await new Promise((r) => s.close(r)); }
 });
 
-test('L15: Stripe disabling or closing a host’s account is written down when it starts and when it ends', async () => {
+test('L15: Stripe disabling or closing a host’s account is written down when it starts and when it ends — from the account as it is now', async () => {
   const { household: h } = await aHousehold(query);
   const host = await repo.insertHost(h.id, { name: 'Troubled' });
   await repo.updateHost(host.id, { stripeAccountId: 'acct_trouble_1', stripeAccountModel: 'v2' });
   const { applyStripeEvent } = await import('../src/routes/hostLanes.js');
   const acct = (extra) => ({ id: 'acct_trouble_1', details_submitted: true, charges_enabled: true, payouts_enabled: true, settings: { payouts: { schedule: { interval: 'manual' } } }, capabilities: { card_payments: 'active', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: null }, ...extra });
+  const review = acct({ charges_enabled: false, capabilities: { card_payments: 'inactive', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: 'under_review' } });
   const log = async () => (await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'stripe_account_trouble' order by at`, [host.id])).rows.map((r) => r.after);
-  await applyStripeEvent({ type: 'account.updated', data: { object: acct() } });
+  // Each event is applied from Stripe's account as it is now (what the fake reads back), not the event's snapshot.
+  const deliver = async (now, snapshot = now) => { accountRead = now; try { await withStripe('sk_test_fake', () => applyStripeEvent({ type: 'account.updated', data: { object: snapshot } })); } finally { accountRead = null; } };
+  await deliver(acct());
   assert.deepEqual(await log(), [], 'well: nothing written');
-  await applyStripeEvent({ type: 'account.updated', data: { object: acct({ charges_enabled: false, capabilities: { card_payments: 'inactive', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: 'under_review' } }) } });
-  await applyStripeEvent({ type: 'account.updated', data: { object: acct({ charges_enabled: false, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: 'under_review' } }) } });
+  await deliver(review);
+  await deliver(review);
   assert.deepEqual((await log()).map((x) => x.reason ?? 'cleared'), ['under_review'], 'once, however often Stripe repeats it');
-  await applyStripeEvent({ type: 'account.updated', data: { object: acct() } });
+  await deliver(acct());
   assert.equal((await log()).at(-1).cleared, true, 'and when Stripe says it is well again');
+  // An old "under review" event arriving after the recovery: the account read back is well, so nothing changes.
+  await deliver(acct(), review);
+  assert.equal((await log()).length, 2, 'a late, stale event adds nothing');
   // Closed or disconnected: its own event on the Connect endpoint.
   await applyStripeEvent({ type: 'account.application.deauthorized', account: 'acct_trouble_1', data: { object: { id: 'ca_x' } } });
   assert.equal((await log()).at(-1).reason, 'account_closed');
