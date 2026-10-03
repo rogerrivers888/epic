@@ -171,11 +171,11 @@ function RevenueTab() {
         <Columns points={data.cost.map((c) => ({ label: monthLabel(c.month), value: c.cost_usd, hint: plural(c.calls, 'call') }))} format={(n) => money(n)} />
       </Panel>
 
-      <Panel padded={false} title="By plan">
+      <Panel padded={false} title="By membership">
         <DataTable
           rows={data.byPlan.map((p) => ({ ...p, id: p.key }))}
           columns={[
-            { key: 'plan', head: 'Plan', width: 3, cell: (p: any) => <Text style={type.small}>{p.label}</Text>, sort: (p: any) => p.label },
+            { key: 'plan', head: 'Membership', width: 3, cell: (p: any) => <Text style={type.small}>{p.label}</Text>, sort: (p: any) => p.label },
             { key: 'price', head: 'Price', width: 2, cell: (p: any) => <Text style={type.small}>{p.price_pence == null ? 'free' : `${pounds(p.price_pence)}/mo`}</Text>, sort: (p: any) => p.price_pence ?? 0 },
             { key: 'households', head: 'Households', width: 2, align: 'right', cell: (p: any) => <Text style={type.small}>{count(p.households)}</Text>, sort: (p: any) => p.households },
             { key: 'mrr', head: 'MRR', width: 2, align: 'right', cell: (p: any) => <Text style={type.small}>{pounds(p.mrr_pence)}</Text>, sort: (p: any) => p.mrr_pence },

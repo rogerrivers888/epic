@@ -100,7 +100,7 @@ export function ExperienceScreen({ route }: { route: Extract<Route, { name: 'exp
         <View style={{ flex: 1 }}>
           <View style={[styles.gutter, { paddingTop: spacing.md, gap: 4 }]}>
             <Press onPress={() => back(keyed(paths.experience(offer.id)))} accessibilityRole="button"><Row><Icon name="back" size={18} /><Text style={type.h3}>{offer.title}</Text></Row></Press>
-            <Text style={type.small}>Booking needs an Epic account, so the host knows who is coming and your booking lands in Trips. Log in to carry on.</Text>
+            <Text style={type.small}>Booking needs an Epic account, so the host knows who is coming and your booking lands in Plans. Log in to carry on.</Text>
           </View>
           <View style={[styles.gutter, { paddingTop: spacing.md }]}><Button label="Log in" onPress={logIn} /></View>
         </View>

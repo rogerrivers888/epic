@@ -183,7 +183,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
   { key: 'staff', label: 'Staff', icon: 'accounts', needs: 'manage_staff', sub: 'Who can log in to the back office, and what their role lets them open', group: 'Admin' },
   { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities', group: 'Admin' },
   { key: 'mail', label: 'Mail', icon: 'mail', needs: 'view_activity', sub: 'Every e-mail sent, and whether it was delivered, opened or bounced', group: 'Admin' },
-  { key: 'plans', label: 'Plans', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on', group: 'Admin' },
+  { key: 'plans', label: 'Memberships', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on', group: 'Admin' },
   // "Audit" is called Changes (hosting v4 handover §3.8); the address stays /admin/audit so every kept link lands.
   { key: 'audit', label: 'Changes', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom', group: 'Admin' },
   // No capability: the decisions behind what Epic does are not a privilege, and

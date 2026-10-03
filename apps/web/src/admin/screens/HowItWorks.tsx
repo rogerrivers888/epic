@@ -1082,7 +1082,7 @@ const SECTIONS: Section[] = [
       },
       {
         title: 'A night away is what makes a holiday',
-        rule: 'Trips is divided Day trips | Holidays on nights away. A trip that starts and ends on the same day is a day out, whatever it calls itself.',
+        rule: 'Plans is divided Day trips | Holidays on nights away, with Events beside them. A trip that starts and ends on the same day is a day out, whatever it calls itself.',
         why: 'The handover left the rule open between distance and an overnight stay. An overnight stay is a fact already in the data; a distance would be a threshold somebody has to keep tuning.',
         state: 'live',
         where: 'apps/api/src/routes/trips.js · nightsOf()',

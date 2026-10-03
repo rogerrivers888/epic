@@ -507,7 +507,7 @@ router.post('/tastes/trip', async (req, res, next) => {
     const seeded = [place.name, ...others.filter((n) => norm(n) !== norm(place.name) && !norm(place.name).includes(norm(n)))];
     place.tripId = trip.id;
     place.seeded = seeded;
-    const reply = `${title} set up for ${dayWords(date)}, with ${namesOf(seeded.map((s) => ({ name: s })))} on the shortlist. Opening it in Trips.`;
+    const reply = `${title} set up for ${dayWords(date)}, with ${namesOf(seeded.map((s) => ({ name: s })))} on the shortlist. Opening it in Plans.`;
     res.status(201).json({ tripId: trip.id, title, date, seeded, reply, existing: false });
   } catch (err) {
     next(err);

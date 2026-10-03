@@ -238,7 +238,7 @@ function FaceRow({ members, me, cap, onOpen, onAdded }: { members: Member[]; me:
         </Press>
       </ScrollView>
       <View style={styles.rule2} />
-      {atCap ? <Text style={[type.small, { marginTop: 8 }]}>Your Household plan covers up to {cap} people.</Text> : null}
+      {atCap ? <Text style={[type.small, { marginTop: 8 }]}>Your Household membership covers up to {cap} people.</Text> : null}
       {adding ? <AddPersonInline onDone={async (id) => { setAdding(false); await onAdded(); if (id) onOpen(id); }} onCancel={() => setAdding(false)} /> : null}
     </View>
   );
@@ -280,15 +280,15 @@ function SoloHousehold({ data, refresh }: { data: HouseholdResponse; refresh: ()
           <Avatar name={you.name} index={0} size={60} url={you.avatarUrl} />
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={type.h2} numberOfLines={1}>{you.name}</Text>
-            <Text style={type.small}>Solo plan · just you</Text>
+            <Text style={type.small}>Solo membership · just you</Text>
           </View>
         </Press>
       ) : null}
       {you ? <ValueRow label="Your tastes, allergies and access" onPress={() => navigate(paths.household(you.id))} /> : null}
       <View style={styles.tintBlock}>
         <Text style={styles.tintTitle}>Planning for more than you?</Text>
-        <Text style={styles.tintBody}>The Household plan covers up to {data.household.householdPlanCap ?? 6} people, each with their own tastes and allergies.</Text>
-        <Button label="Switch to Household" onPress={() => showToast('Plan and billing is coming soon')} style={{ marginTop: 10 }} />
+        <Text style={styles.tintBody}>The Household membership covers up to {data.household.householdPlanCap ?? 6} people, each with their own tastes and allergies.</Text>
+        <Button label="Switch to Household" onPress={() => showToast('Membership and billing is coming soon')} style={{ marginTop: 10 }} />
       </View>
       <SectionHead>How Epic plans</SectionHead>
       <PlanRows household={data.household} refresh={refresh} />
@@ -333,7 +333,7 @@ function MyAccountTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
       </View>
 
       <SectionHead>Account</SectionHead>
-      {isLead ? <ValueRow label="Plan and billing" value={account?.plan === 'solo' ? 'Solo' : 'Household'} onPress={() => showToast('Plan and billing is coming soon')} /> : null}
+      {isLead ? <ValueRow label="Membership and billing" value={account?.plan === 'solo' ? 'Solo' : 'Household'} onPress={() => showToast('Membership and billing is coming soon')} /> : null}
       <ValueRow label="Signed-in devices" value={devices == null ? undefined : String(devices)} onPress={() => navigate(paths.settings('devices'))} />
       {/* A plain row, no arrow: it does, it does not open (SE2). */}
       <Press onPress={async () => { await api.signOut(); if (Platform.OS === 'web' && typeof location !== 'undefined') location.reload(); }} accessibilityRole="button" style={styles.row}>

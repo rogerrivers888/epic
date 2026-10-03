@@ -1065,7 +1065,7 @@ export function TripMapScreen({ d, section, household, onBack, onChanged, onSect
         }}
         style={styles.backBare}
         accessibilityRole="button"
-        accessibilityLabel={selected ? 'Back to the list' : pill || section === 'group' ? 'Back to the trip' : 'Trips'}
+        accessibilityLabel={selected ? 'Back to the list' : pill || section === 'group' ? 'Back to the trip' : 'Plans'}
       >
         {/* Always the arrow. The "routes" glyph that stood here inside a browse
             read as nothing to anybody (handoff change log, 9 Sep 2026: "Remove

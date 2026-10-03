@@ -128,7 +128,7 @@ export function BookingScreen({ route }: { route: Extract<Route, { name: 'bookin
             <>
               <Step icon="check" title={`If it reaches ${b.minCount}`} body={`${payments.ready ? `We take ${money(b.amountPence)} and` : 'We confirm your place and'} send you ${b.venue === 'their_place' ? 'the address' : b.venue === 'online' ? 'the link' : 'the meeting point'}.`} />
               <Step icon="close" title="If it does not" body={`Nothing is taken and we tell you on the ${b.decideBy ? new Date(`${b.decideBy}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'long' }) : 'day'}.`} />
-              <Step icon="trips" title="Either way" body="It sits in Trips with the rest of your plans." />
+              <Step icon="trips" title="Either way" body="It’s in your Plans." />
             </>
           ) : (
             <>
@@ -159,7 +159,7 @@ export function BookingScreen({ route }: { route: Extract<Route, { name: 'bookin
       ) : null}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       <Press onPress={() => navigate(paths.bookings())} accessibilityRole="button" style={{ paddingVertical: 8 }}>
-        <Text style={[type.small, { color: colors.accent, fontWeight: '700', textAlign: 'center' }]}>See it with your trips ›</Text>
+        <Text style={[type.small, { color: colors.accent, fontWeight: '700', textAlign: 'center' }]}>See it in Plans ›</Text>
       </Press>
     </ScrollView>
   );

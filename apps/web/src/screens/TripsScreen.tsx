@@ -137,7 +137,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
   // Derived, not stamped into state, so a successful retry after a failed
   // prefetch clears the warning on its own rather than leaving it beside a list
   // that did load (Codex, D13).
-  const error = tripsErr ? ((tripsErr as any)?.message ?? 'Could not load your trips.') : null;
+  const error = tripsErr ? ((tripsErr as any)?.message ?? 'Could not load your plans.') : null;
   // A trip deleted since you last looked should not reopen as an error page —
   // but the cached list may have been prefetched before a trip was made
   // elsewhere (the voice flow, Inspire's "Create trip"), and that trip is
@@ -416,7 +416,7 @@ function TripPage({ id, section: asked, ideasTab, dayId: askedDay, stopRef, chat
   }, [id]);
   useEffect(() => { loadPlaces(); }, [loadPlaces, d?.shortlist.length, d?.days.length]);
 
-  if (!d) return <ScrollView contentContainerStyle={styles.page}><Button label="Trips" icon="back" kind="ghost" onPress={onBack} style={{ alignSelf: 'flex-start' }} />{error ? <StatusLine tone="warn">{error}</StatusLine> : <Text style={type.small}>Loading…</Text>}</ScrollView>;
+  if (!d) return <ScrollView contentContainerStyle={styles.page}><Button label="Plans" icon="back" kind="ghost" onPress={onBack} style={{ alignSelf: 'flex-start' }} />{error ? <StatusLine tone="warn">{error}</StatusLine> : <Text style={type.small}>Loading…</Text>}</ScrollView>;
   const { trip, days, shortlist, attendees } = d;
   const isTrip = trip.kind === 'trip';
   const isPast = new Date(trip.endDate ?? trip.returnAt) < new Date(new Date().toDateString());
@@ -527,7 +527,7 @@ function TripPage({ id, section: asked, ideasTab, dayId: askedDay, stopRef, chat
   const header = (
     <View style={{ gap: 6 }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Press onPress={onBack} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Trips"><Icon name="back" size={19} color={colors.ink} /></Press>
+        <Press onPress={onBack} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Plans"><Icon name="back" size={19} color={colors.ink} /></Press>
         <Row style={{ gap: spacing.sm }}>
           <Press onPress={() => setSection('map')} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="Map"><Icon name="map" size={18} color={colors.ink} /></Press>
           <Press onPress={() => setMenu((m) => !m)} style={styles.roundBtn} accessibilityRole="button" accessibilityLabel="More" accessibilityState={{ expanded: menu }}>

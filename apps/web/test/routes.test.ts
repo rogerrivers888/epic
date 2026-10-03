@@ -89,16 +89,16 @@ test('a country is a page of its own: its areas and its trips (handover, 5 Sep 2
 
 test('Trips: the list, where-to, the form, a trip, a trip’s tab, and one day of it', () => {
   const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
-  assert.deepEqual(roundTrip('/trips'), trips);
-  assert.deepEqual(roundTrip('/trips/search'), { ...trips, searching: true });
-  assert.deepEqual(roundTrip('/trips/new'), { ...trips, creating: true });
-  assert.deepEqual(roundTrip('/trips/abc'), { ...trips, tripId: 'abc' });
-  assert.deepEqual(roundTrip('/trips/abc/shortlist'), { ...trips, tripId: 'abc', section: 'shortlist' });
-  assert.deepEqual(roundTrip('/trips/abc/itinerary'), { ...trips, tripId: 'abc', section: 'itinerary' });
-  assert.deepEqual(roundTrip('/trips/abc/places'), { ...trips, tripId: 'abc', section: 'places' });
-  assert.deepEqual(roundTrip('/trips/abc/map'), { ...trips, tripId: 'abc', section: 'map' });
-  assert.deepEqual(roundTrip('/trips/abc/day/d1'), { ...trips, tripId: 'abc', section: 'day', dayId: 'd1' });
-  assert.equal(paths.tripsSearch(), '/trips/search');
+  assert.deepEqual(roundTrip('/plans'), trips);
+  assert.deepEqual(roundTrip('/plans/search'), { ...trips, searching: true });
+  assert.deepEqual(roundTrip('/plans/new'), { ...trips, creating: true });
+  assert.deepEqual(roundTrip('/plans/abc'), { ...trips, tripId: 'abc' });
+  assert.deepEqual(roundTrip('/plans/abc/shortlist'), { ...trips, tripId: 'abc', section: 'shortlist' });
+  assert.deepEqual(roundTrip('/plans/abc/itinerary'), { ...trips, tripId: 'abc', section: 'itinerary' });
+  assert.deepEqual(roundTrip('/plans/abc/places'), { ...trips, tripId: 'abc', section: 'places' });
+  assert.deepEqual(roundTrip('/plans/abc/map'), { ...trips, tripId: 'abc', section: 'map' });
+  assert.deepEqual(roundTrip('/plans/abc/day/d1'), { ...trips, tripId: 'abc', section: 'day', dayId: 'd1' });
+  assert.equal(paths.tripsSearch(), '/plans/search');
 });
 
 /**
@@ -109,70 +109,70 @@ test('Trips: the list, where-to, the form, a trip, a trip’s tab, and one day o
  */
 test('a trip has a chat, a way of getting there, a share sheet and a stop', () => {
   const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
-  assert.deepEqual(roundTrip('/trips/abc/chat'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'list' } });
-  assert.deepEqual(roundTrip('/trips/abc/travel'), { ...trips, tripId: 'abc', section: 'travel' });
-  assert.deepEqual(roundTrip('/trips/abc/share'), { ...trips, tripId: 'abc', section: 'share' });
+  assert.deepEqual(roundTrip('/plans/abc/chat'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'list' } });
+  assert.deepEqual(roundTrip('/plans/abc/travel'), { ...trips, tripId: 'abc', section: 'travel' });
+  assert.deepEqual(roundTrip('/plans/abc/share'), { ...trips, tripId: 'abc', section: 'share' });
   // A stop is named by its source-qualified ref, which has a colon in it and so
   // travels encoded — and comes back decoded.
-  assert.deepEqual(parseRoute('/trips/abc/stop/osm%3Anode%2F123'), { ...trips, tripId: 'abc', section: 'stop', stopRef: 'osm:node/123' });
-  assert.equal(paths.tripStop('abc', 'osm:node/123'), '/trips/abc/stop/osm%3Anode%2F123');
-  assert.equal(paths.tripChat('abc'), '/trips/abc/chat');
-  assert.equal(paths.tripTravel('abc'), '/trips/abc/travel');
-  assert.equal(paths.tripShare('abc'), '/trips/abc/share');
+  assert.deepEqual(parseRoute('/plans/abc/stop/osm%3Anode%2F123'), { ...trips, tripId: 'abc', section: 'stop', stopRef: 'osm:node/123' });
+  assert.equal(paths.tripStop('abc', 'osm:node/123'), '/plans/abc/stop/osm%3Anode%2F123');
+  assert.equal(paths.tripChat('abc'), '/plans/abc/chat');
+  assert.equal(paths.tripTravel('abc'), '/plans/abc/travel');
+  assert.equal(paths.tripShare('abc'), '/plans/abc/share');
   // Up from any of them is the trip; the tab is still Trips.
-  assert.equal(parentOf(parseRoute('/trips/abc/chat')), '/trips/abc');
-  assert.equal(parentOf(parseRoute('/trips/abc/stop/x')), '/trips/abc');
-  assert.equal(tabOf(parseRoute('/trips/abc/chat')), 'trips');
+  assert.equal(parentOf(parseRoute('/plans/abc/chat')), '/plans/abc');
+  assert.equal(parentOf(parseRoute('/plans/abc/stop/x')), '/plans/abc');
+  assert.equal(tabOf(parseRoute('/plans/abc/chat')), 'trips');
   // The chat draws its own head now (Chat screens D3, 13 Sep 2026): a list of
   // questions, not the map with a strip — so it keeps the chrome.
-  assert.equal(isFullBleed(parseRoute('/trips/abc/chat')), false);
-  assert.equal(ownsHeader(parseRoute('/trips/abc/chat')), true);
-  assert.equal(isFullBleed(parseRoute('/trips/abc/travel')), false);
-  assert.equal(isFullBleed(parseRoute('/trips/abc/stop/x')), false);
+  assert.equal(isFullBleed(parseRoute('/plans/abc/chat')), false);
+  assert.equal(ownsHeader(parseRoute('/plans/abc/chat')), true);
+  assert.equal(isFullBleed(parseRoute('/plans/abc/travel')), false);
+  assert.equal(isFullBleed(parseRoute('/plans/abc/stop/x')), false);
 });
 
 test('the trip redesign: the feed is one address per tab, the shortlist keeps its own', () => {
   const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
   // The feed carries its tab in the path (owner, 29 Sep 2026: one URL per tab).
-  assert.deepEqual(roundTrip('/trips/abc/ideas/activities'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'activities' });
-  assert.deepEqual(roundTrip('/trips/abc/ideas/food'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'food' });
+  assert.deepEqual(roundTrip('/plans/abc/ideas/activities'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'activities' });
+  assert.deepEqual(roundTrip('/plans/abc/ideas/food'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'food' });
   // The bare feed is an alias that normalises to Activities.
-  assert.deepEqual(parseRoute('/trips/abc/ideas'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'activities' });
+  assert.deepEqual(parseRoute('/plans/abc/ideas'), { ...trips, tripId: 'abc', section: 'ideas', ideasTab: 'activities' });
   // A tab nobody has heard of is not a page.
-  assert.equal(parseRoute('/trips/abc/ideas/nope').name, 'unknown');
-  assert.equal(parseRoute('/trips/abc/ideas/food/extra').name, 'unknown');
-  assert.equal(paths.tripIdeas('abc'), '/trips/abc/ideas/activities');
-  assert.equal(paths.tripIdeas('abc', 'food'), '/trips/abc/ideas/food');
-  assert.equal(paths.tripShortlist('abc'), '/trips/abc/shortlist');
+  assert.equal(parseRoute('/plans/abc/ideas/nope').name, 'unknown');
+  assert.equal(parseRoute('/plans/abc/ideas/food/extra').name, 'unknown');
+  assert.equal(paths.tripIdeas('abc'), '/plans/abc/ideas/activities');
+  assert.equal(paths.tripIdeas('abc', 'food'), '/plans/abc/ideas/food');
+  assert.equal(paths.tripShortlist('abc'), '/plans/abc/shortlist');
   // The detour band is how the feed is set, not which page it is: it is the query.
-  assert.equal(paths.tripIdeas('abc', 'food', 30), '/trips/abc/ideas/food?detour=30');
-  assert.equal(paths.tripIdeas('abc', 'food', 15), '/trips/abc/ideas/food');
+  assert.equal(paths.tripIdeas('abc', 'food', 30), '/plans/abc/ideas/food?detour=30');
+  assert.equal(paths.tripIdeas('abc', 'food', 15), '/plans/abc/ideas/food');
   // Up from the shortlist is the feed; up from the feed is the trip.
-  assert.equal(parentOf(parseRoute('/trips/abc/shortlist')), '/trips/abc/ideas/activities');
-  assert.equal(parentOf(parseRoute('/trips/abc/ideas/food')), '/trips/abc');
+  assert.equal(parentOf(parseRoute('/plans/abc/shortlist')), '/plans/abc/ideas/activities');
+  assert.equal(parentOf(parseRoute('/plans/abc/ideas/food')), '/plans/abc');
   // Both are Trips and neither is full-bleed (the band is the header). Browsing
   // a tab takes the tab bar with it now (nav 6b, 30 Sep 2026: "the tab bar hides
   // while you browse"); 6a — nothing selected — keeps it.
-  assert.equal(tabOf(parseRoute('/trips/abc/ideas/activities')), 'trips');
-  assert.equal(isFullBleed(parseRoute('/trips/abc/ideas/activities')), false);
-  assert.equal(isFullBleed(parseRoute('/trips/abc/shortlist')), false);
-  assert.equal(isImmersive(parseRoute('/trips/abc/ideas/food'), new URLSearchParams()), true);
-  assert.equal(isImmersive(parseRoute('/trips/abc/shortlist'), new URLSearchParams()), true);
-  assert.equal(titleOf(parseRoute('/trips/abc/ideas/activities')), 'Trip — Ideas · Epic');
-  assert.equal(titleOf(parseRoute('/trips/abc/shortlist')), 'Trip — Shortlist · Epic');
+  assert.equal(tabOf(parseRoute('/plans/abc/ideas/activities')), 'trips');
+  assert.equal(isFullBleed(parseRoute('/plans/abc/ideas/activities')), false);
+  assert.equal(isFullBleed(parseRoute('/plans/abc/shortlist')), false);
+  assert.equal(isImmersive(parseRoute('/plans/abc/ideas/food'), new URLSearchParams()), true);
+  assert.equal(isImmersive(parseRoute('/plans/abc/shortlist'), new URLSearchParams()), true);
+  assert.equal(titleOf(parseRoute('/plans/abc/ideas/activities')), 'Trip — Ideas · Epic');
+  assert.equal(titleOf(parseRoute('/plans/abc/shortlist')), 'Trip — Shortlist · Epic');
 });
 
 test('the retired pin-search sections redirect to their new homes (owner, 29 Sep 2026)', () => {
   // Find becomes the ideas feed; the map view becomes the explicit itinerary
   // (not the bare trip, which would loop through the remembered-section restore).
-  assert.equal(legacyHref('/trips/abc/find', new URLSearchParams()), '/trips/abc/ideas/activities');
-  assert.equal(legacyHref('/trips/abc/map', new URLSearchParams()), '/trips/abc/itinerary');
+  assert.equal(legacyHref('/plans/abc/find', new URLSearchParams()), '/plans/abc/ideas/activities');
+  assert.equal(legacyHref('/plans/abc/map', new URLSearchParams()), '/plans/abc/itinerary');
   // A place drawer over the old map is kept across the redirect.
-  assert.equal(legacyHref('/trips/abc/map', new URLSearchParams('place=osm:node/1')), '/trips/abc/itinerary?place=osm%3Anode%2F1');
+  assert.equal(legacyHref('/plans/abc/map', new URLSearchParams('place=osm:node/1')), '/plans/abc/itinerary?place=osm%3Anode%2F1');
   // An old Find category picks the feed tab.
-  assert.equal(legacyHref('/trips/abc/find', new URLSearchParams('cat=food')), '/trips/abc/ideas/food');
+  assert.equal(legacyHref('/plans/abc/find', new URLSearchParams('cat=food')), '/plans/abc/ideas/food');
   // The shortlist keeps its address — it is not redirected.
-  assert.equal(legacyHref('/trips/abc/shortlist', new URLSearchParams()), null);
+  assert.equal(legacyHref('/plans/abc/shortlist', new URLSearchParams()), null);
 });
 
 test('a trip somebody was sent has an address outside the app', () => {
@@ -187,18 +187,18 @@ test('a trip somebody was sent has an address outside the app', () => {
 test('the Trips list draws its own head now, so the shell draws none', () => {
   // The wordmark and "+ New trip" are the screen's (1a); a lime band above them
   // would be a second wordmark on the same screen.
-  assert.equal(ownsHeader(parseRoute('/trips')), true);
+  assert.equal(ownsHeader(parseRoute('/plans')), true);
   // And so does everything pushed on top of it: each has its own title and ×.
-  assert.equal(ownsHeader(parseRoute('/trips/search')), true);
-  assert.equal(ownsHeader(parseRoute('/trips/new')), true);
-  assert.equal(ownsHeader(parseRoute('/trips/abc/travel')), true);
-  assert.equal(ownsHeader(parseRoute('/trips/abc/stop/x')), true);
+  assert.equal(ownsHeader(parseRoute('/plans/search')), true);
+  assert.equal(ownsHeader(parseRoute('/plans/new')), true);
+  assert.equal(ownsHeader(parseRoute('/plans/abc/travel')), true);
+  assert.equal(ownsHeader(parseRoute('/plans/abc/stop/x')), true);
   // The rebuilt trip draws its own compact lime band (nav, 30 Sep 2026), so the
   // shell draws none — on 6a and on every tab state.
-  assert.equal(ownsHeader(parseRoute('/trips/abc')), true);
-  assert.equal(ownsHeader(parseRoute('/trips/abc/ideas/activities')), true);
-  assert.equal(ownsHeader(parseRoute('/trips/abc/shortlist')), true);
-  assert.equal(ownsHeader(parseRoute('/trips/abc/stays')), true);
+  assert.equal(ownsHeader(parseRoute('/plans/abc')), true);
+  assert.equal(ownsHeader(parseRoute('/plans/abc/ideas/activities')), true);
+  assert.equal(ownsHeader(parseRoute('/plans/abc/shortlist')), true);
+  assert.equal(ownsHeader(parseRoute('/plans/abc/stays')), true);
   // Places draws its own head at every level (handover v8): lime at the root,
   // cream below it, and the wordmark on both.
   assert.equal(ownsHeader(parseRoute('/places')), true);
@@ -208,19 +208,19 @@ test('the Trips list draws its own head now, so the shell draws none', () => {
 });
 
 test('where-to is a layer of Trips: it is on the tab, and Back is the trips', () => {
-  assert.equal(tabOf(parseRoute('/trips/search')), 'trips');
-  assert.equal(parentOf(parseRoute('/trips/search')), '/trips');
+  assert.equal(tabOf(parseRoute('/plans/search')), 'trips');
+  assert.equal(parentOf(parseRoute('/plans/search')), '/plans');
   // Not a map: the chrome stays, because this is a form and not the trip.
-  assert.equal(isFullBleed(parseRoute('/trips/search')), false);
+  assert.equal(isFullBleed(parseRoute('/plans/search')), false);
 });
 
 test('a tab is left pointing at a list, never at a record (owner, 7 Sep 2026)', () => {
   // "when I go to trips… Currently, it takes me into the last trip."
-  assert.equal(isTabHome(parseRoute('/trips/abc/itinerary')), false);
-  assert.equal(isTabHome(parseRoute('/trips/new')), false);
-  assert.equal(isTabHome(parseRoute('/trips/search')), false);
+  assert.equal(isTabHome(parseRoute('/plans/abc/itinerary')), false);
+  assert.equal(isTabHome(parseRoute('/plans/new')), false);
+  assert.equal(isTabHome(parseRoute('/plans/search')), false);
   // How the list was set is still worth coming back to (owner, 4 Sep 2026).
-  assert.equal(isTabHome(parseRoute('/trips')), true);
+  assert.equal(isTabHome(parseRoute('/plans')), true);
   assert.equal(isTabHome(parseRoute('/places/GB/London')), true);
   assert.equal(isTabHome(parseRoute('/inspire')), true);
 });
@@ -228,13 +228,13 @@ test('a tab is left pointing at a list, never at a record (owner, 7 Sep 2026)', 
 test('a day identifier only means anything under the day tab', () => {
   // /trips/abc/stay/d1 would be a shape with no meaning; the day is dropped
   // rather than remembered somewhere it can never be used.
-  assert.equal(parseRoute('/trips/abc/stay/d1').name, 'trips');
-  assert.equal((parseRoute('/trips/abc/stay/d1') as any).dayId, null);
-  assert.equal(paths.trip('abc', 'stay', 'd1'), '/trips/abc/stay');
+  assert.equal(parseRoute('/plans/abc/stay/d1').name, 'trips');
+  assert.equal((parseRoute('/plans/abc/stay/d1') as any).dayId, null);
+  assert.equal(paths.trip('abc', 'stay', 'd1'), '/plans/abc/stay');
 });
 
 test('a trip tab nobody has heard of is not a page', () => {
-  assert.equal(parseRoute('/trips/abc/elsewhere').name, 'unknown');
+  assert.equal(parseRoute('/plans/abc/elsewhere').name, 'unknown');
 });
 
 test('Household, Settings, Prototypes and the back office', () => {
@@ -544,9 +544,9 @@ test('the query is never part of which page it is', () => {
 test('the addresses Epic used to have still land somewhere', () => {
   const q = (s: string) => new URLSearchParams(s);
   assert.equal(legacyHref('/', q('tab=places')), '/places');
-  assert.equal(legacyHref('/', q('tab=trips')), '/trips');
-  assert.equal(legacyHref('/', q('tab=trips&trip=abc')), '/trips/abc');
-  assert.equal(legacyHref('/', q('tab=trips&trip=abc&section=group')), '/trips/abc/group');
+  assert.equal(legacyHref('/', q('tab=trips')), '/plans');
+  assert.equal(legacyHref('/', q('tab=trips&trip=abc')), '/plans/abc');
+  assert.equal(legacyHref('/', q('tab=trips&trip=abc&section=group')), '/plans/abc/group');
   assert.equal(legacyHref('/', q('tab=plan')), '/plan');
   assert.equal(legacyHref('/', q('join=tok')), '/join/tok');
 });
@@ -556,7 +556,7 @@ test('a magic link travels across the redirect rather than being dropped', () =>
 });
 
 test('an address that is already the new shape is left alone', () => {
-  assert.equal(legacyHref('/trips/abc', new URLSearchParams('tab=places')), null);
+  assert.equal(legacyHref('/plans/abc', new URLSearchParams('tab=places')), null);
   assert.equal(legacyHref('/', new URLSearchParams('')), null);
   assert.equal(legacyHref('/', new URLSearchParams('signin=abc')), null);
 });
@@ -564,17 +564,17 @@ test('an address that is already the new shape is left alone', () => {
 // --- what the shell needs from a route -------------------------------------
 
 test('every route knows which tab it lights up', () => {
-  assert.equal(tabOf(parseRoute('/trips/abc/day/d1')), 'trips');
+  assert.equal(tabOf(parseRoute('/plans/abc/day/d1')), 'trips');
   assert.equal(tabOf(parseRoute('/places/home')), 'places');
   assert.equal(tabOf(parseRoute('/admin/audit')), null);
   assert.equal(tabOf(parseRoute('/join/x')), null);
 });
 
 test('Back has somewhere to go for somebody who arrived on a shared link', () => {
-  assert.equal(parentOf(parseRoute('/trips/abc/day/d1')), '/trips/abc/day');
+  assert.equal(parentOf(parseRoute('/plans/abc/day/d1')), '/plans/abc/day');
   // The shortlist's back arrow goes to the feed now (owner, 29 Sep 2026).
-  assert.equal(parentOf(parseRoute('/trips/abc/shortlist')), '/trips/abc/ideas/activities');
-  assert.equal(parentOf(parseRoute('/trips/abc')), '/trips');
+  assert.equal(parentOf(parseRoute('/plans/abc/shortlist')), '/plans/abc/ideas/activities');
+  assert.equal(parentOf(parseRoute('/plans/abc')), '/plans');
   assert.equal(parentOf(parseRoute('/places/GB/London')), '/places/GB');
   assert.equal(parentOf(parseRoute('/places/GB')), '/places');
   assert.equal(parentOf(parseRoute('/places/home')), '/places');
@@ -688,10 +688,10 @@ test('the sheet’s three detents fit the screen they are on', async () => {
  * addresses they belong to rather than to a screen's own idea of itself.
  */
 test('the trip draws its own band; its browse tabs take the tab bar', () => {
-  const trip = parseRoute('/trips/abc');
-  const group = parseRoute('/trips/abc/group');
-  const shortlist = parseRoute('/trips/abc/shortlist');
-  const newTrip = parseRoute('/trips/new');
+  const trip = parseRoute('/plans/abc');
+  const group = parseRoute('/plans/abc/group');
+  const shortlist = parseRoute('/plans/abc/shortlist');
+  const newTrip = parseRoute('/plans/new');
 
   // The rebuilt trip is not full-bleed — the compact band is its header (nav, 30
   // Sep 2026); only the retired map-pin group screen still runs edge to edge.
@@ -928,7 +928,7 @@ test('a host and an experience have public addresses; a booking is ours', () => 
   assert.equal(parentOf(parseRoute('/hosts/h1/trust')), '/hosts/h1');
   assert.equal(parentOf(parseRoute('/experiences/e1/book')), '/experiences/e1');
   assert.equal(parentOf(parseRoute('/bookings/b1/rate')), '/bookings/b1');
-  assert.equal(parentOf(parseRoute('/bookings/b1')), '/trips?when=hosts');
+  assert.equal(parentOf(parseRoute('/bookings/b1')), '/plans?when=hosts');
   assert.equal(titleOf(parseRoute('/experiences/e1/book')), 'Book this · Epic');
   // The sheet is a form and takes the phone whole; the page draws its own head.
   assert.equal(isImmersive(parseRoute('/experiences/e1/book')), true);
@@ -943,8 +943,8 @@ test('who near a trip does what you love is a page of Inspire', () => {
 });
 
 test('Booked with hosts is how the Trips list is set, not a page of its own', () => {
-  assert.equal(paths.bookings(), '/trips?when=hosts');
-  assert.deepEqual(parseRoute('/trips?when=hosts'), { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null });
+  assert.equal(paths.bookings(), '/plans?when=hosts');
+  assert.deepEqual(parseRoute('/plans?when=hosts'), { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null });
 });
 
 
@@ -952,15 +952,15 @@ test('Booked with hosts is how the Trips list is set, not a page of its own', ()
 
 test('a conversation has four layers wherever it is mounted: the list, a question, asking, the bell', () => {
   const trips = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null };
-  assert.deepEqual(roundTrip('/trips/abc/chat/ask'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'ask' } });
-  assert.deepEqual(roundTrip('/trips/abc/chat/bell'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'bell' } });
-  assert.deepEqual(roundTrip('/trips/abc/chat/11111111-2222-3333-4444-555555555555'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'topic', topicId: '11111111-2222-3333-4444-555555555555' } });
-  assert.equal(parseRoute('/trips/abc/chat/ask/more').name, 'unknown', 'a layer is the last segment');
-  assert.equal(paths.tripChatTopic('abc', 't1'), '/trips/abc/chat/t1');
-  assert.equal(paths.tripChatAsk('abc'), '/trips/abc/chat/ask');
+  assert.deepEqual(roundTrip('/plans/abc/chat/ask'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'ask' } });
+  assert.deepEqual(roundTrip('/plans/abc/chat/bell'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'bell' } });
+  assert.deepEqual(roundTrip('/plans/abc/chat/11111111-2222-3333-4444-555555555555'), { ...trips, tripId: 'abc', section: 'chat', chat: { page: 'topic', topicId: '11111111-2222-3333-4444-555555555555' } });
+  assert.equal(parseRoute('/plans/abc/chat/ask/more').name, 'unknown', 'a layer is the last segment');
+  assert.equal(paths.tripChatTopic('abc', 't1'), '/plans/abc/chat/t1');
+  assert.equal(paths.tripChatAsk('abc'), '/plans/abc/chat/ask');
   // How the composer is set is the query: which stop it was opened from.
-  assert.equal(paths.tripChatAsk('abc', 'stop:osm:node/1'), '/trips/abc/chat/ask?tag=stop%3Aosm%3Anode%2F1');
-  assert.equal(paths.tripChatBell('abc'), '/trips/abc/chat/bell');
+  assert.equal(paths.tripChatAsk('abc', 'stop:osm:node/1'), '/plans/abc/chat/ask?tag=stop%3Aosm%3Anode%2F1');
+  assert.equal(paths.tripChatBell('abc'), '/plans/abc/chat/bell');
 
   // A hosted date (C8): the same four under the booking.
   assert.deepEqual(roundTrip('/bookings/b1/chat'), { name: 'booking', id: 'b1', rate: false, chat: { page: 'list' } });
@@ -989,14 +989,14 @@ test('a conversation has four layers wherever it is mounted: the list, a questio
 });
 
 test('a question open takes the phone whole; the list keeps the tab bar', () => {
-  assert.equal(isImmersive(parseRoute('/trips/abc/chat')), false);
-  assert.equal(isImmersive(parseRoute('/trips/abc/chat/t1')), true);
-  assert.equal(isImmersive(parseRoute('/trips/abc/chat/ask')), true);
-  assert.equal(isImmersive(parseRoute('/trips/abc/chat/bell')), true);
-  assert.equal(parentOf(parseRoute('/trips/abc/chat/t1')), '/trips/abc/chat');
-  assert.equal(parentOf(parseRoute('/trips/abc/chat')), '/trips/abc');
-  assert.equal(titleOf(parseRoute('/trips/abc/chat/t1')), 'Trip — A question · Epic');
-  assert.equal(titleOf(parseRoute('/trips/abc/chat/bell')), 'Trip — What you get told about · Epic');
+  assert.equal(isImmersive(parseRoute('/plans/abc/chat')), false);
+  assert.equal(isImmersive(parseRoute('/plans/abc/chat/t1')), true);
+  assert.equal(isImmersive(parseRoute('/plans/abc/chat/ask')), true);
+  assert.equal(isImmersive(parseRoute('/plans/abc/chat/bell')), true);
+  assert.equal(parentOf(parseRoute('/plans/abc/chat/t1')), '/plans/abc/chat');
+  assert.equal(parentOf(parseRoute('/plans/abc/chat')), '/plans/abc');
+  assert.equal(titleOf(parseRoute('/plans/abc/chat/t1')), 'Trip — A question · Epic');
+  assert.equal(titleOf(parseRoute('/plans/abc/chat/bell')), 'Trip — What you get told about · Epic');
 });
 
 test('every collection a household can heart is a page of Inspire, one layer under it', () => {
@@ -1007,4 +1007,17 @@ test('every collection a household can heart is a page of Inspire, one layer und
   assert.equal(isTabHome(parseRoute('/inspire/collections')), false);
   assert.equal(titleOf(parseRoute('/inspire/collections')), 'Collections · Epic');
   assert.equal(parseRoute('/inspire/collections/x').name, 'unknown');
+});
+
+test('Trips is Plans: every old /trips address lands on its /plans twin, query and all (guest handoff, 3 Oct 2026)', () => {
+  assert.equal(legacyHref('/trips', new URLSearchParams()), '/plans');
+  assert.equal(legacyHref('/trips/abc/day/d1', new URLSearchParams()), '/plans/abc/day/d1');
+  assert.equal(legacyHref('/trips', new URLSearchParams('when=hosts')), '/plans?when=hosts');
+  assert.equal(legacyHref('/trips/new', new URLSearchParams('place=Rome')), '/plans/new?place=Rome');
+  // The retired sections still go straight to their new homes from the old prefix.
+  assert.equal(legacyHref('/trips/abc/map', new URLSearchParams()), '/plans/abc/itinerary');
+  // Nothing loops: a /plans address is not redirected, and /tripsy is not Trips.
+  assert.equal(legacyHref('/plans/abc', new URLSearchParams()), null);
+  assert.equal(legacyHref('/tripsy', new URLSearchParams()), null);
+  assert.equal(paths.trips(), '/plans');
 });

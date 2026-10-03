@@ -103,8 +103,8 @@ export function AccountScreen() {
           )) : <Text style={styles.detailValue}>Just you, so far.</Text>}
         </Column>
 
-        <Column wide={wide} last title="Plan">
-          <Detail label="You're on" value={planLabel || 'Free trial'} />
+        <Column wide={wide} last title="Membership">
+          <Detail label="Your membership" value={planLabel || 'Free trial'} />
           <Detail label="Ends" value={fullDate(account?.trialEndsOn)} />
           <Press onPress={() => logOut(true)} effect="none"><Text style={styles.action}>Log out on every device</Text></Press>
         </Column>

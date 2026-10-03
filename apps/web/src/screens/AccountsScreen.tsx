@@ -194,7 +194,7 @@ export function AccountsScreen() {
       {wide && customers.length ? (
         <Row style={styles.headings}>
           <Text style={[type.tiny, { flex: 3 }]}>Person</Text>
-          <Text style={[type.tiny, { flex: 2 }]}>Plan</Text>
+          <Text style={[type.tiny, { flex: 2 }]}>Membership</Text>
           <Text style={[type.tiny, { flex: 2 }]}>Here since</Text>
           <Text style={[type.tiny, { flex: 3 }]}>Last in</Text>
           <Text style={[type.tiny, { flex: 3 }]}>This month</Text>
@@ -335,7 +335,7 @@ function AccountRow({ account: a, wide, open, onOpen, busy, plans, defaultBound,
             ) : null}
           </Wrap>
 
-          <FoldLine label="Plan" value={plans.find((p) => p.key === a.plan)?.label ?? a.plan} icon="money">
+          <FoldLine label="Membership" value={plans.find((p) => p.key === a.plan)?.label ?? a.plan} icon="money">
             <Wrap>
               {plans.filter((p) => p.key !== 'owner' || a.role === 'owner').map((p) => (
                 <Chip key={p.key} label={p.label} selected={p.key === a.plan} onPress={() => void onPatch({ plan: p.key })} />

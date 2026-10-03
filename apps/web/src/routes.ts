@@ -20,19 +20,19 @@
  *   /places/GB                            …one country: its areas, its trips
  *   /places/GB/London                     …one area
  *   /places/GB/London?place=<ref>         …a place's drawer
- *   /trips                             the trips
- *   /trips/search                         …where are you going? (a trip begins here)
- *   /trips/new                            …the new-trip form
- *   /trips/<id>                           …one trip
- *   /trips/<id>/places                    …on one of its tabs
- *   /trips/<id>/chat                      …the group's questions and notices
- *   /trips/<id>/chat/<topicId>              …one question, open
- *   /trips/<id>/chat/ask                    …asking one
- *   /trips/<id>/chat/bell                   …what you get told about here
- *   /trips/<id>/travel                    …getting there: flights, trains, the drive
- *   /trips/<id>/share                     …who is coming, and the link
- *   /trips/<id>/stop/<ref>                …one stop, and its Ask thread
- *   /trips/<id>/day/<dayId>               …on one day of it
+ *   /plans                             the plans: day trips, holidays and events
+ *   /plans/search                         …where are you going? (a trip begins here)
+ *   /plans/new                            …the new-trip form
+ *   /plans/<id>                           …one trip
+ *   /plans/<id>/places                    …on one of its tabs
+ *   /plans/<id>/chat                      …the group's questions and notices
+ *   /plans/<id>/chat/<topicId>              …one question, open
+ *   /plans/<id>/chat/ask                    …asking one
+ *   /plans/<id>/chat/bell                   …what you get told about here
+ *   /plans/<id>/travel                    …getting there: flights, trains, the drive
+ *   /plans/<id>/share                     …who is coming, and the link
+ *   /plans/<id>/stop/<ref>                …one stop, and its Ask thread
+ *   /plans/<id>/day/<dayId>               …on one day of it
  *   /household/<id>                    one person in the household (the list is Settings now)
  *   /host                              hosting: learn (three ways to host), or your dashboard
  *   /host/learn/<shape>                   …how a one-off / series / anytime works, with worked examples
@@ -233,12 +233,12 @@ export type TripSection =
    *   share   who is coming and the link (3b)
    */
   | 'chat' | 'travel' | 'share'
-  /** One stop's Ask thread — `/trips/<id>/stop/<ref>` (3d). */
+  /** One stop's Ask thread — `/plans/<id>/stop/<ref>` (3d). */
   | 'stop'
   /**
    * The trip redesign (owner, 29 Sep 2026). `ideas` is the image-led feed the
-   * X-ray search hands over to — `/trips/<id>/ideas/activities` and
-   * `/trips/<id>/ideas/food`, one address per tab so the back button and a
+   * X-ray search hands over to — `/plans/<id>/ideas/activities` and
+   * `/plans/<id>/ideas/food`, one address per tab so the back button and a
    * shared link land on the right one. `shortlist` is the reworked shortlist,
    * kept at its old address so links do not break. `find` and `map` are the
    * retired pin-search sections: they still parse (an old link resolves) and
@@ -551,7 +551,7 @@ export function parseRoute(path: string): Route {
       return { name: 'places', scope: { country: a.toUpperCase(), city: b } };
     }
 
-    case 'trips': {
+    case 'plans': {
       const list = { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null } as const;
       if (!a) return { ...list };
       /**
@@ -575,7 +575,7 @@ export function parseRoute(path: string): Route {
       // The chat's layers: the list, asking, the bell, one question (Chat screens, 13 Sep 2026).
       if (section === 'chat') return segments[4] ? { name: 'unknown', path } : { ...parsed, chat: chatLayerOf(c) };
       // The feed's tab is a path segment (owner, 29 Sep 2026: one URL per tab).
-      // The bare `/trips/<id>/ideas` is an alias that normalises to Activities.
+      // The bare `/plans/<id>/ideas` is an alias that normalises to Activities.
       if (section === 'ideas') {
         if (segments[4]) return { name: 'unknown', path };
         const tab = oneOf(IDEAS_TABS, c);
@@ -786,10 +786,10 @@ export function hrefOf(route: Route): string {
         : 'home' in route.scope ? '/places/home'
           : buildHref(['places', route.scope.country, route.scope.city]);
     case 'trips':
-      return route.searching ? '/trips/search'
-        : route.creating ? '/trips/new'
-          : route.tripId == null ? '/trips'
-            : buildHref(['trips', route.tripId, route.section,
+      return route.searching ? '/plans/search'
+        : route.creating ? '/plans/new'
+          : route.tripId == null ? '/plans'
+            : buildHref(['plans', route.tripId, route.section,
               route.section === 'day' ? route.dayId : route.section === 'stop' ? route.stopRef : route.section === 'chat' ? chatSegment(route.chat) : route.section === 'ideas' ? (route.ideasTab ?? 'activities') : null]);
     case 'household': return buildHref(['household', route.memberId, route.memberId ? route.voice : null]);
     case 'host':
@@ -867,29 +867,29 @@ export const paths = {
   placesHome: () => '/places/home',
   placesCountry: (country: string) => buildHref(['places', country]),
   placesCity: (country: string, city: string) => buildHref(['places', country, city]),
-  trips: () => '/trips',
-  tripsSearch: () => '/trips/search',
-  newTrip: () => '/trips/new',
+  trips: () => '/plans',
+  tripsSearch: () => '/plans/search',
+  newTrip: () => '/plans/new',
   trip: (id: string, section?: TripSection | null, dayId?: string | null) =>
-    buildHref(['trips', id, section, section === 'day' ? dayId : null]),
+    buildHref(['plans', id, section, section === 'day' ? dayId : null]),
   /**
    * The trip redesign's three addresses (owner, 29 Sep 2026). The feed carries
    * its tab in the path; `?detour=` (10/15/30, default 15) is how it is set and
    * travels as the query. The shortlist keeps its old address.
    */
   tripIdeas: (id: string, tab: IdeasTab = 'activities', detour?: number | null) =>
-    buildHref(['trips', id, 'ideas', tab], detour && detour !== 15 ? { detour: String(detour) } : undefined),
-  tripShortlist: (id: string) => buildHref(['trips', id, 'shortlist']),
+    buildHref(['plans', id, 'ideas', tab], detour && detour !== 15 ? { detour: String(detour) } : undefined),
+  tripShortlist: (id: string) => buildHref(['plans', id, 'shortlist']),
   /** The three layers the trip rebuild adds, and the Ask thread on one stop. */
-  tripChat: (id: string) => buildHref(['trips', id, 'chat']),
+  tripChat: (id: string) => buildHref(['plans', id, 'chat']),
   /**
    * The chat module's layers (13 Sep 2026): one question open, asking, the
    * bell. `tag` on Ask is how the composer is set — `stop:<ref>` from a stop's
    * own Ask tab — and is the query, not the page.
    */
-  tripChatTopic: (id: string, topicId: string) => buildHref(['trips', id, 'chat', topicId]),
-  tripChatAsk: (id: string, tag?: string | null) => buildHref(['trips', id, 'chat', 'ask'], { tag }),
-  tripChatBell: (id: string) => buildHref(['trips', id, 'chat', 'bell']),
+  tripChatTopic: (id: string, topicId: string) => buildHref(['plans', id, 'chat', topicId]),
+  tripChatAsk: (id: string, tag?: string | null) => buildHref(['plans', id, 'chat', 'ask'], { tag }),
+  tripChatBell: (id: string) => buildHref(['plans', id, 'chat', 'bell']),
   /** The same four on a hosted date — a booking of ours (C8) — and on the host's own offer. */
   bookingChat: (id: string) => buildHref(['bookings', id, 'chat']),
   bookingChatTopic: (id: string, topicId: string) => buildHref(['bookings', id, 'chat', topicId]),
@@ -905,9 +905,9 @@ export const paths = {
   experienceAsk: (id: string) => buildHref(['experiences', id, 'ask']),
   /** Every trip and hosted date in one list, plus the digest time and quiet hours (E5). */
   settingsNotifications: () => '/settings/notifications',
-  tripTravel: (id: string) => buildHref(['trips', id, 'travel']),
-  tripShare: (id: string) => buildHref(['trips', id, 'share']),
-  tripStop: (id: string, venueRef: string) => buildHref(['trips', id, 'stop', venueRef]),
+  tripTravel: (id: string) => buildHref(['plans', id, 'travel']),
+  tripShare: (id: string) => buildHref(['plans', id, 'share']),
+  tripStop: (id: string, venueRef: string) => buildHref(['plans', id, 'stop', venueRef]),
   /** A person's page. The household list itself is Settings now. */
   household: (memberId?: string | null) => (memberId ? buildHref(['household', memberId]) : '/settings'),
   // Hosting.
@@ -984,7 +984,7 @@ export const paths = {
   /** A tag's page: everyone on Epic listed for it (S14). A facet has its own word in the path. */
   tag: (key: string, vocab: 'tag' | 'facet' = 'tag') => buildHref([vocab === 'facet' ? 'places-known' : 'tags', key]),
   /** Trips › Booked with hosts. */
-  bookings: () => '/trips?when=hosts',
+  bookings: () => '/plans?when=hosts',
   /** The spoken layer over one person: the recording, then the card of what was heard (D3, D4). */
   householdTell: (memberId: string) => buildHref(['household', memberId, 'tell']),
   householdReview: (memberId: string) => buildHref(['household', memberId, 'review']),
@@ -1191,7 +1191,7 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // The trip's browse tabs take the phone whole (nav 6b, 30 Sep 2026: "the tab
   // bar hides while you browse"). 6a — nothing selected — keeps it.
   if (route.section === 'ideas' || route.section === 'shortlist' || route.section === 'stays') return true;
-  // The bare `/trips/<id>` is the map, and parses with no section at all.
+  // The bare `/plans/<id>` is the map, and parses with no section at all.
   const onTheMap = route.section == null || route.section === 'map' || route.section === 'itinerary';
   // "Hidden during any trip browse, place view or full view" (handover v8,
   // §1): a place open over the map is a place view whether or not a browse
@@ -1266,7 +1266,7 @@ export function parentOf(route: Route): string {
       if (route.section === 'ideas') return paths.trip(route.tripId!);
       // Up from a stop's Ask, or from Getting there, is the trip itself.
       if (route.section) return paths.trip(route.tripId!);
-      if (route.tripId || route.creating || route.searching) return '/trips';
+      if (route.tripId || route.creating || route.searching) return '/plans';
       return '/inspire';
     case 'household': return route.voice ? paths.household(route.memberId) : '/settings';
     // A settings sub-screen (devices, providers, notifications) goes back to Settings.
@@ -1326,7 +1326,7 @@ export function titleOf(route: Route): string {
     case 'trips': {
       if (route.searching) return epic('Where are you going?');
       if (route.creating) return epic('A new trip');
-      if (!route.tripId) return epic('Trips');
+      if (!route.tripId) return epic('Plans');
       const layer = route.section === 'chat' ? (route.chat?.page === 'topic' ? 'A question' : route.chat?.page === 'ask' ? 'Ask something' : route.chat?.page === 'bell' ? 'What you get told about' : 'Chat')
         : route.section === 'ideas' ? 'Ideas'
           : route.section === 'shortlist' ? 'Shortlist'
@@ -1386,7 +1386,7 @@ export function legacyHref(path: string, query: URLSearchParams): string | null 
    * last-seen section, which for someone whose last section was `map` would
    * bounce straight back here in a loop (Codex).
    */
-  const retired = path.match(/^\/trips\/([^/]+)\/(find|map)\/?$/);
+  const retired = path.match(/^\/(?:trips|plans)\/([^/]+)\/(find|map)\/?$/);
   if (retired) {
     if (retired[2] === 'map') {
       // A map link could carry a place drawer over it; keep it (the trip stage reads ?place).
@@ -1396,6 +1396,13 @@ export function legacyHref(path: string, query: URLSearchParams): string | null 
     }
     return paths.tripIdeas(retired[1], query.get('cat') === 'food' ? 'food' : 'activities');
   }
+  /**
+   * Trips is Plans (guest handoff, 3 Oct 2026): every `/trips…` address — on
+   * phones, in old notifications and shared links — lands on its `/plans…` twin,
+   * query and all.
+   */
+  const trips = path.match(/^\/trips(\/.*)?$/);
+  if (trips) { const q = query.toString(); return `/plans${trips[1] ?? ''}${q ? `?${q}` : ''}`; }
   if (path !== '/' && path !== '') return null;
   const join = query.get('join');
   if (join) return paths.join(join);

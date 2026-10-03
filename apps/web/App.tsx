@@ -71,7 +71,7 @@ import { isFullBleed, isImmersive, isTabHome, legacyHref, ownsHeader, parseRoute
 const TABS: { key: Tab; label: string; icon: IconName; href: string; owner?: true }[] = [
   { key: 'inspire', label: 'Inspire', icon: 'inspire', href: paths.inspire() },
   { key: 'places', label: 'Places', icon: 'places', href: paths.places() },
-  { key: 'trips', label: 'Trips', icon: 'trips', href: paths.trips() },
+  { key: 'trips', label: 'Plans', icon: 'trips', href: paths.trips() },
   // Five in the bar (owner, 12 Sep 2026): Household folded into Settings to
   // make room for Host. The Host tab is hosting only — guests find experiences
   // in Inspire and Places and book them into Trips.

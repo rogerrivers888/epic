@@ -786,12 +786,12 @@ export function InspireMe({ query, setQuery, attendingIds, who, whoLabel = 'The 
                   {/* One call to action (owner, 4 Sep 2026: "It should just be
                       1 call to action: 'Plan the day', not 2"). */}
                   <Chip
-                    label={isOpening ? 'Setting up the day…' : done ? 'Open in Trips' : 'Plan the day'}
+                    label={isOpening ? 'Setting up the day…' : done ? 'Open in Plans' : 'Plan the day'}
                     icon={done ? 'trips' : 'plan'} tone="accent"
                     onPress={() => (idea.place ? openTrip(idea) : planIdea(idea))}
                   />
                 </Row>
-                {done ? <Text style={[type.tiny, { paddingLeft: 84 + spacing.md }]} numberOfLines={1}>In Trips as {done.title}.</Text> : null}
+                {done ? <Text style={[type.tiny, { paddingLeft: 84 + spacing.md }]} numberOfLines={1}>In Plans as {done.title}.</Text> : null}
               </View>
             );
           })}

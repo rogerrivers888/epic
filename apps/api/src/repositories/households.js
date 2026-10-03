@@ -188,7 +188,7 @@ export async function membersOf(householdId) {
   return rows;
 }
 
-/** The Household plan covers six people, counted here where every door can see it. */
+/** The Household membership covers six people, counted here where every door can see it. */
 export const HOUSEHOLD_PLAN_CAP = Number(process.env.EPIC_HOUSEHOLD_PLAN_CAP || 6);
 
 /**
@@ -209,8 +209,8 @@ export async function planCapFor(householdId, client) {
 /** The one refusal every door gives at the cap — on Solo it says to upgrade. */
 export function planCapRefusal({ cap, plan }) {
   const err = new Error(plan === 'solo'
-    ? 'Solo is just you. Adding people needs the Household plan.'
-    : `Your Household plan covers up to ${cap} people.`);
+    ? 'Solo is just you. Adding people needs the Household membership.'
+    : `Your Household membership covers up to ${cap} people.`);
   err.status = 403;
   err.code = 'plan_cap';
   err.details = { plan, cap, upgrade: plan === 'solo', householdCap: HOUSEHOLD_PLAN_CAP };

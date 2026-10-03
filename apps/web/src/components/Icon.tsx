@@ -25,7 +25,7 @@ import { colors, spacing, type } from '../theme';
  */
 const ICONS = {
   // navigation
-  inspire: Sparkles, plan: Sparkles, places: Compass, trips: Route, household: Users, settings: Settings,
+  inspire: Sparkles, plan: Sparkles, places: Compass, trips: CalendarCheck, household: Users, settings: Settings,
   /**
    * The fifth tab. The open door (Hosts and Events, 13 Sep 2026: "you let
    * people in — closest to the actual act"; unique in the bar, and it survives

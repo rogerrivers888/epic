@@ -15,7 +15,7 @@ type Section = PrototypeSection;
 const SECTIONS: { key: Section; label: string; icon: IconName }[] = [
   { key: 'plan', label: 'Plan', icon: 'plan' },
   { key: 'places', label: 'Places', icon: 'places' },
-  { key: 'trips', label: 'Trips', icon: 'trips' },
+  { key: 'trips', label: 'Plans', icon: 'trips' },
   { key: 'household', label: 'Household', icon: 'household' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
 ];

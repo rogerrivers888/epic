@@ -76,7 +76,7 @@ export function People({ canManageRoles }: { canManageRoles: boolean }) {
         </Wrap>
       ),
     },
-    { key: 'plan', head: 'Plan', width: 2, sort: (p) => p.plan, cell: (p) => <Text style={type.small}>{p.plan}</Text> },
+    { key: 'plan', head: 'Membership', width: 2, sort: (p) => p.plan, cell: (p) => <Text style={type.small}>{p.plan}</Text> },
     {
       key: 'joined', head: 'Here since', width: 2, wideOnly: true, sort: (p) => p.createdAt,
       cell: (p) => <Text style={type.small}>{ago(p.createdAt)}</Text>,

@@ -184,7 +184,7 @@ function Revenue({ suite, fmt }: { suite: any; fmt: Fmt }) {
         <Bars rows={r.byStream} gap={r.byStreamGap} format={(v) => fmt.revenue.money(typeof v === 'number' ? v : null)} />
       </SuitePanel>
 
-      <SuitePanel title="MRR by plan">
+      <SuitePanel title="MRR by membership">
         {r.mrrByPlan.map((p: any) => <Kv key={p.label} label={p.label} value={fmt.revenue.money(p.value)} />)}
         <Kv label="MRR" value={fmt.revenue.money(r.mrr)} strong last />
       </SuitePanel>

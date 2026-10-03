@@ -740,7 +740,7 @@ test('Solo is just you: every door refuses a second person and says to upgrade',
     const viaSettings = await srv.send('POST', '/api/household/members', { name: 'Partner' });
     assert.equal(viaSettings.status, 403);
     assert.equal(viaSettings.body.error, 'plan_cap');
-    assert.match(viaSettings.body.message, /Household plan/, 'the refusal names the upgrade');
+    assert.match(viaSettings.body.message, /Household membership/, 'the refusal names the upgrade');
     const hh = (await srv.get('/api/household')).body.household;
     assert.equal(hh.planCap, 1, 'the screen is told the cap the door enforces');
     const viaVoice = await srv.send('POST', '/api/voice/household/who/apply', { people: [{ name: 'Kid', role: 'child', age: 6 }] });
@@ -839,7 +839,7 @@ test('a founding account with no person linked is still the lead', async () => {
   const srv = await server({ ...acct, status: 'active' });
   try {
     const body = (await srv.get('/api/household')).body;
-    assert.equal(body.meIsLead, true, 'Delete household and Plan and billing are theirs');
+    assert.equal(body.meIsLead, true, 'Delete household and Membership and billing are theirs');
   } finally { await srv.close(); }
 });
 

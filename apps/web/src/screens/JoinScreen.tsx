@@ -204,7 +204,7 @@ export function JoinScreen({ token, preview, onExit }: {
     ) : stage === 'full' ? (
       <FullPage v={v} token={token} narrow={!wide} onLook={() => go('landing')} />
     ) : stage === 'off' ? (
-      <CalledOff v={v} narrow={!wide} onBack={() => { const w = typeof window !== 'undefined' ? window : null; if (w) w.location.assign('/trips'); }} />
+      <CalledOff v={v} narrow={!wide} onBack={() => { const w = typeof window !== 'undefined' ? window : null; if (w) w.location.assign(paths.trips()); }} />
     ) : stage === 'household' ? (
       <HouseholdStep
         v={v} account={account} busy={busy}

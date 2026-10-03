@@ -1907,7 +1907,7 @@ router.post('/inspire/trip', async (req, res, next) => {
     idea.tripId = trip.id;
     idea.seeded = seeded;
     await saveSession(session.id, state, trip.id);
-    const reply = `${title} set up for ${dayWords(date)}${seeded.length ? `, with ${seeded.join(', ')} on the shortlist` : ''}. Opening it in Trips.`;
+    const reply = `${title} set up for ${dayWords(date)}${seeded.length ? `, with ${seeded.join(', ')} on the shortlist` : ''}. Opening it in Plans.`;
     res.status(201).json({ tripId: trip.id, title, date, seeded, reply, existing: false });
   } catch (err) {
     next(err);
@@ -1971,8 +1971,8 @@ router.post('/go', async (req, res, next) => {
         const filled = first ? (await commitOption({ household, session, optionId: first.id })).stops.map((x) => x.name) : [];
         const title = state.outcome.handoff.title || 'The day';
         const reply = filled.length
-          ? `Same ${state.pool.length} places, nothing new looked up — ${title} is ${filled.join(', ')}. Opening it in Trips.`
-          : `Same ${state.pool.length} places, nothing new looked up. Opening ${title} in Trips.`;
+          ? `Same ${state.pool.length} places, nothing new looked up — ${title} is ${filled.join(', ')}. Opening it in Plans.`
+          : `Same ${state.pool.length} places, nothing new looked up. Opening ${title} in Plans.`;
         state.outcome = { kind: 'handoff', reply, handoff: { ...state.outcome.handoff, section: filled.length ? 'day' : 'shortlist' } };
         state.transcript.push({ role: 'assistant', text: reply });
         await saveSession(session.id, state, null);
@@ -2067,7 +2067,7 @@ async function executePlan({ household, members, session, state, res }) {
             const { options } = await recompose(r.session, household);
             if (options[0]) { const opt = await commitOption({ household, session: r.session, optionId: options[0].id }); filled.push({ date: d.date, stops: opt.stops.map((x) => x.name) }); }
           }
-        } catch { /* the trip stands; that day can be planned from Trips */ }
+        } catch { /* the trip stands; that day can be planned from Plans */ }
       }
       const city = where.locality || where.label;
       const reply = [
@@ -2075,7 +2075,7 @@ async function executePlan({ household, members, session, state, res }) {
         seeded.length ? `${seeded.map((x) => x.label).join(', ')} on the shortlist as a must.` : '',
         ...filled.map((f) => `${dayWords(f.date)}: ${f.stops.join(', ')}.`),
         found ? `${dayWords(days[0].date)} is left open for when you arrive, with the same places near ${city} ready to add.` : '',
-        'Opening it in Trips.',
+        'Opening it in Plans.',
       ].filter(Boolean).join(' ');
       state.transcript.push({ role: 'assistant', text: reply });
       await saveSession(session.id, state, trip.id);
@@ -2206,8 +2206,8 @@ async function executePlan({ household, members, session, state, res }) {
     for (const st of first?.stops ?? []) { const c = pool.candidates.find((x) => x.key === st.id || `${x.source}:${x.sourcePlaceId}` === st.venueRef); if (c) await shortlist(c, state.pinned.includes(c.key)); }
     for (const c of pool.candidates) { if (onList.size >= 12) break; if (!c.fixed) await shortlist(c, false); }
     const reply = filled.length
-      ? `${trip.title || trip.base_label} is set up for ${dayWords(trip.day.date)}: ${filled.join(', ')}. ${onList.size} places on the shortlist to swap in. Opening it in Trips.`
-      : `${trip.title || trip.base_label} is set up for ${dayWords(trip.day.date)}, with ${onList.size} places on the shortlist — nothing fitted the window yet. Opening it in Trips.`;
+      ? `${trip.title || trip.base_label} is set up for ${dayWords(trip.day.date)}: ${filled.join(', ')}. ${onList.size} places on the shortlist to swap in. Opening it in Plans.`
+      : `${trip.title || trip.base_label} is set up for ${dayWords(trip.day.date)}, with ${onList.size} places on the shortlist — nothing fitted the window yet. Opening it in Plans.`;
     state.transcript.push({ role: 'assistant', text: reply });
     await saveSession(session.id, state, trip.id);
     return { kind: 'handoff', reply, handoff: { tripId: trip.id, title: trip.title || trip.base_label, section: filled.length ? 'day' : 'shortlist' } };

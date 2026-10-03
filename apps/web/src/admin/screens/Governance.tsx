@@ -254,7 +254,7 @@ export function Plans({ canManage }: { canManage: boolean }) {
 
   return (
     <AdminPage>
-      <PageHead title="Plans" sub="What a household can be on, and what it is priced at." />
+      <PageHead title="Memberships" sub="What a household can be on, and what it is priced at." />
       {error ? <Banner tone="crit">{error}</Banner> : null}
 
       <Aside tone="warn" says="A price here is not a charge."
@@ -265,7 +265,7 @@ export function Plans({ canManage }: { canManage: boolean }) {
           rows={plans.map((p) => ({ ...p, id: p.key }))}
           columns={[
             {
-              key: 'plan', head: 'Plan', width: 3,
+              key: 'plan', head: 'Membership', width: 3,
               cell: (p: any) => (
                 <View style={{ gap: 2 }}>
                   <Text style={[type.small, { fontWeight: '700', color: colors.ink }]}>{p.label}</Text>

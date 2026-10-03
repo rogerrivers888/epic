@@ -169,7 +169,7 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
         />
       ),
     },
-    { key: 'plan', label: 'Plan', width: 92, align: 'left', sort: 'plan', cell: (h) => <Cell muted left>{h.plan}</Cell> },
+    { key: 'plan', label: 'Membership', width: 100, align: 'left', sort: 'plan', cell: (h) => <Cell muted left>{h.plan}</Cell> },
     {
       key: 'mo', label: '£ / mo', width: 66, sort: 'monthPence',
       cell: (h) => (canSeeMoney
@@ -248,7 +248,7 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
         </Text>
       )}>
         <SearchBox value={q} onChange={(v) => setQ(v, { replace: true })} placeholder="Search a name or an area" />
-        <ChipGroup label="Plan">
+        <ChipGroup label="Membership">
           {PLANS.map((p) => <Chip key={p} label={p} on={plan === p} onPress={() => setPlan(p, { replace: true })} />)}
         </ChipGroup>
         <ChipGroup label="Status">
@@ -407,7 +407,7 @@ function Invite({ plans, busy, onInvite, invitation, onDone }: {
         />
       </View>
       {plans.length ? (
-        <ChipGroup label="Plan">
+        <ChipGroup label="Membership">
           {plans.map((p) => <Chip key={p.key} label={p.label} on={plan === p.key} onPress={() => setPlan(plan === p.key ? null : p.key)} />)}
         </ChipGroup>
       ) : null}

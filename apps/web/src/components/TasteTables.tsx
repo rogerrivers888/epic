@@ -194,7 +194,7 @@ function Place({ table, place, open, onToggle, sessionId, attendingIds, onOpenTr
           {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
           <Wrap>
             <Chip label={reading ? 'Reading the menu…' : menu ? 'Read it again' : 'Check the menu'} icon="search" onPress={reading ? undefined : readMenu} />
-            <Chip label={busy ? 'Setting up the day…' : trip ? 'Open in Trips' : 'Things to do and see'} tone="accent" icon={trip ? 'trips' : 'more'} onPress={busy ? undefined : openDay} />
+            <Chip label={busy ? 'Setting up the day…' : trip ? 'Open in Plans' : 'Things to do and see'} tone="accent" icon={trip ? 'trips' : 'more'} onPress={busy ? undefined : openDay} />
             {place.website ? <Chip label="Their website" icon="external" onPress={() => Linking.openURL(place.website!)} /> : null}
           </Wrap>
           {place.address ? <Text style={type.tiny}>{place.address}</Text> : null}

@@ -1362,7 +1362,7 @@ function Done({ offer: o }: { offer: OwnOffer }) {
       link ? { icon: 'link', t: copied ? 'Copied' : 'The link to copy', s: shortUrl(o.linkUrl), onPress: () => void share() } : { icon: 'household', t: 'Send the invitations', s: 'By name, by text or by link — only they can open it.', onPress: () => navigate(paths.hostOfferEdit(o.id, 'invite')) },
       { icon: 'calendar', t: 'RSVPs come back with numbers', s: 'Yes, no, and how many they are bringing. Chased for you.' },
       ...(moneyRow ? [moneyRow] : []),
-      { icon: 'address', t: 'It sits in Trips', s: 'With the travel, the stay and the rest of the weekend.' },
+      { icon: 'address', t: 'It sits in Plans', s: 'With the travel, the stay and the rest of the weekend.' },
     ];
   return (
     <View>
