@@ -24,18 +24,16 @@
  * Guest-invite households (`households.origin = 'guest_invite'`) are never
  * members or customers, so they are not classified at all.
  *
- * **Billing is built, and waits to be switched on.** Memberships are billed
- * through Stripe (L8, Phase 4): Stripe's events write `memberships`, and
- * `billedMemberships()` reads it. `MEMBERSHIP_BILLING` stays false until that is
- * proven live in the sandbox, and says so in every payload (`billed: false`) so
- * a screen can say "Not billed yet" rather than draw a £0 that reads as
- * "nobody pays".
+ * **Memberships are billed through Stripe** (L8, Phase 4, live in the sandbox
+ * 3 Oct 2026): Stripe's events write `memberships`, and `billedMemberships()`
+ * reads it. `MEMBERSHIP_BILLING` is true, so a £0 or a nought now means nobody
+ * has joined yet — a measurement — and no payload says "Not billed yet".
  */
 
 import { query } from '../db.js';
 
-/** False until household memberships are proven live through Stripe in the sandbox. */
-export const MEMBERSHIP_BILLING = false;
+/** True from 3 Oct 2026: memberships are billed through Stripe (sandbox), and a nought here is a real nought. */
+export const MEMBERSHIP_BILLING = true;
 
 /** Plans an administrator gives away by hand. Not `trial`, not `standard`. */
 export const COMPLIMENTARY_PLANS = ['owner', 'friend'];

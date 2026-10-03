@@ -869,15 +869,16 @@ test('a family of six is one household, never six members', async () => {
   assert.deepEqual(doubled, [], 'a household has one account of its own');
 
   // And every figure the suite counts members with must agree with that
-  // number rather than with the login count — and, with no membership billed,
-  // there are none at all (Roger, 3 Oct 2026: "Count memberships, not accounts").
+  // number rather than with the login count — and, with no membership bought
+  // through Stripe, there are none at all (Roger, 3 Oct 2026: "Count memberships,
+  // not accounts"). Billing is on, so that nought is a measurement.
   const tiers = await readTiers();
   const standing = await readStanding();
   const counted = tiers.reduce((n, t) => n + t.members, 0);
   assert.ok(counted <= r.leads, `tiers counted ${counted} of at most ${r.leads} households`);
-  assert.equal(counted, 0, 'nothing is billed, so no tier has a member');
+  assert.equal(counted, 0, 'nobody has bought a membership here, so no tier has a member');
   assert.equal(standing.mrrPence, 0);
-  assert.equal(standing.billed, false);
+  assert.equal(standing.billed, true);
 });
 
 test('a health rate is over the calls that were watched, never over the rows', async () => {

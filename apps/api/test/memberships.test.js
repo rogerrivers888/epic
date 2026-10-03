@@ -86,9 +86,10 @@ test('with no paid members, MRR is nought and the average is null', async () => 
   await household({ plan: 'household', status: 'active' });
   await household({ plan: 'solo', status: 'active' });
   const m = await memberships.readMemberships();
-  assert.equal(memberships.MEMBERSHIP_BILLING, false);
-  assert.equal(m.billed, false);
-  assert.equal(m.billedNote, 'Not billed yet');
+  // Billed through Stripe since 3 Oct 2026: nought members is a measurement, not "not billed yet".
+  assert.equal(memberships.MEMBERSHIP_BILLING, true);
+  assert.equal(m.billed, true);
+  assert.equal(m.billedNote, null);
   assert.equal(m.members, 0);
   assert.equal(m.paid, 0);
   assert.equal(m.trialling, 0);
@@ -99,7 +100,7 @@ test('with no paid members, MRR is nought and the average is null', async () => 
   const standing = await pricing.readStanding();
   assert.equal(standing.mrrPence, 0);
   assert.equal(standing.averagePaidPence, null);
-  assert.equal(standing.billed, false);
+  assert.equal(standing.billed, true);
   for (const t of await pricing.readTiers()) assert.equal(t.members, 0, t.key);
 
   const byPlan = await insights.mrrByPlan();
