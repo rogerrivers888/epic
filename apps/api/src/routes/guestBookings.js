@@ -671,12 +671,14 @@ router.delete('/experiences/:id/waitlist', async (req, res, next) => {
     const { rows } = await query(
       `update offer_waitlist w set state = 'left' from offer_waitlist was where was.id = w.id
           and w.offer_id = $1 and w.household_id = $2 and w.state in ('waiting', 'offered') and ($3::uuid is null or w.session_id = $3)
-        returning was.state as was`,
+        returning was.state as was, was.offer_expires_at > now() as live`,
       [req.params.id, household.id, sessionId],
     );
     // Passing on a place that was offered (G18 "Pass"): it goes to the next person now, not at the job's next run.
-    if (rows.some((r) => r.was === 'offered')) await offerFreedPlaces().catch(() => 0);
-    res.json({ left: rows.length > 0, passed: rows.some((r) => r.was === 'offered') });
+    // Passed only while the offer still stood: one past its deadline had already gone (Codex, 3 Oct 2026).
+    const passed = rows.some((r) => r.was === 'offered' && r.live);
+    if (passed) await offerFreedPlaces().catch(() => 0);
+    res.json({ left: rows.length > 0, passed });
   } catch (err) { next(err); }
 });
 
