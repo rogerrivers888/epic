@@ -251,15 +251,20 @@ async function addressFor(to = {}) {
  * list of a sign-up on epic.day (interest_signups). An account has no
  * marketing consent of its own yet, and SMS has none at all.
  */
-export async function hasMarketingConsent(email, trigger = 'interest.signed_up') {
+export async function hasMarketingConsent(email, trigger = 'interest.signed_up', { alertId = null } = {}) {
   if (!email) return false;
-  const sql = {
-    'tell_me_when.match': 'select 1 as yes from guide_alerts where lower(email) = lower($1) and unsubscribed_at is null limit 1',
-    'interest.signed_up': 'select 1 as yes from interest_signups where lower(email) = lower($1) limit 1',
-  }[trigger];
-  if (!sql) return false;
-  const { rows: [r] } = await query(sql, [String(email)]);
-  return Boolean(r);
+  // A "Tell me when" message is about one alert, and only that alert's yes counts: unsubscribing from it
+  // stops it even while the address keeps other alerts (Codex, 3 Oct 2026).
+  if (trigger === 'tell_me_when.match') {
+    if (!alertId) return false;
+    const { rows: [r] } = await query('select 1 as yes from guide_alerts where id::text = $2 and lower(email) = lower($1) and unsubscribed_at is null', [String(email), String(alertId)]);
+    return Boolean(r);
+  }
+  if (trigger === 'interest.signed_up') {
+    const { rows: [r] } = await query('select 1 as yes from interest_signups where lower(email) = lower($1) limit 1', [String(email)]);
+    return Boolean(r);
+  }
+  return false;
 }
 
 async function logSend({ t, version = t.version, channel, purpose, toKind, toRef, result, by, dedupeKey = null }) {
@@ -293,9 +298,13 @@ async function settle(t, channel, dedupeKey, result) {
 }
 
 /** Whether a host switched this kind's e-mail off (E13); a guest's e-mail is never switched off here. */
-async function hostSwitchedOff(t, householdId) {
+async function hostSwitchedOff(t, to = {}) {
   const kind = t.notificationKind;
-  if (!kind || !householdId || notifications.KINDS[kind]?.audience !== 'host') return false;
+  if (!kind || notifications.KINDS[kind]?.audience !== 'host') return false;
+  // Sent to an account, the preference is its household's host (Codex, 3 Oct 2026).
+  let householdId = to.householdId ?? null;
+  if (!householdId && to.accountId) householdId = (await query('select household_id from accounts where id = $1', [to.accountId])).rows[0]?.household_id ?? null;
+  if (!householdId) return false;
   const { rows: [h] } = await query('select notification_prefs from hosts where household_id = $1', [householdId]);
   return h?.notification_prefs?.[kind] === false;
 }
@@ -308,9 +317,10 @@ async function hostSwitchedOff(t, householdId) {
  * e-mail switched off there, because this sends the template's own e-mail);
  * a dedupe key already used stops every channel, so a repeat sends nothing.
  * Push is refused. A marketing template goes only by e-mail, only to an
- * address that said yes, and only with its unsubscribe link filled in.
+ * address that said yes, and only with its unsubscribe link filled in; a
+ * "Tell me when" names the alert it is about (`consent: { alertId }`).
  */
-export async function deliver({ templateKey, fields = {}, to = {}, channels = null, dedupeKey = null, link = null, by = null } = {}) {
+export async function deliver({ templateKey, fields = {}, to = {}, channels = null, dedupeKey = null, link = null, by = null, consent = null } = {}) {
   const t = await getTemplate(templateKey);
   if (!t) throw refuse(404, 'not_found', `There is no “${templateKey}” template.`);
   const has = Object.keys(t.channels);
@@ -331,7 +341,7 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
     if (want.some((c) => c !== 'email')) throw refuse(403, 'no_consent', 'A marketing message goes by e-mail only: nobody has said yes to it anywhere else.');
     if (!fieldsOf(parse(t.channels.email.body)).has(UNSUBSCRIBE_FIELD)) throw refuse(409, 'needs_unsubscribe', `“${t.name}” is marketing and its e-mail has no unsubscribe link yet, so it cannot be sent from here.`);
     if (empty(values[UNSUBSCRIBE_FIELD])) throw refuse(400, 'needs_unsubscribe', 'A marketing e-mail needs its unsubscribe link filled in.');
-    if (!(await hasMarketingConsent(addr.email, t.trigger))) throw refuse(403, 'no_consent', 'That address has not said yes to marketing from Epic.');
+    if (!(await hasMarketingConsent(addr.email, t.trigger, { alertId: consent?.alertId ?? null }))) throw refuse(403, 'no_consent', 'That address has not said yes to marketing from Epic.');
   }
   const out = renderChannels(t.channels, values, want);
   const sent = {};
@@ -348,7 +358,7 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   }
   if (want.includes('email')) {
     if (!addr.email) sent.email = { sent: false, reason: 'no_address' };
-    else if (await hostSwitchedOff(t, to.householdId)) sent.email = { sent: false, reason: 'switched_off' };
+    else if (await hostSwitchedOff(t, to)) sent.email = { sent: false, reason: 'switched_off' };
     else if (!(await claim(t, 'email', dedupeKey, 'email', addr.email, by))) sent.email = { sent: false, reason: 'already_sent' };
     else {
       sent.email = await senders.mail({ to: addr.email, subject: out.email.subject, text: out.email.body, purpose: `template_${t.key}` }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));

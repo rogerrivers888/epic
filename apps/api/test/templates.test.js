@@ -133,10 +133,14 @@ test('e-mail and SMS deliveries keep to their once-only key; a test is logged un
 });
 
 test('marketing consent is asked of the sign-up the message is for', async () => {
-  await query(`insert into guide_alerts (email, subcategory, place_typed, place_key, within_miles, locale, consent_wording) values ('alert@example.com', 'pottery', 'Bath', 'bath', 10, 'en-GB', 'Yes')`);
-  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match'), true);
+  const { rows: [pottery] } = await query(`insert into guide_alerts (email, subcategory, place_typed, place_key, within_miles, locale, consent_wording) values ('alert@example.com', 'pottery', 'Bath', 'bath', 10, 'en-GB', 'Yes') returning id`);
+  const { rows: [climbing] } = await query(`insert into guide_alerts (email, subcategory, place_typed, place_key, within_miles, locale, consent_wording) values ('alert@example.com', 'climbing', 'Bath', 'bath', 10, 'en-GB', 'Yes') returning id`);
+  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match', { alertId: pottery.id }), true);
+  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match'), false, 'no alert named, no yes');
   assert.equal(await templates.hasMarketingConsent('alert@example.com', 'interest.signed_up'), false);
-  await query(`update guide_alerts set unsubscribed_at = now() where email = 'alert@example.com'`);
-  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match'), false);
+  // Unsubscribed from pottery, still on climbing: pottery stops, climbing does not.
+  await query(`update guide_alerts set unsubscribed_at = now() where id = $1`, [pottery.id]);
+  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match', { alertId: pottery.id }), false);
+  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match', { alertId: climbing.id }), true);
   assert.equal(await templates.hasMarketingConsent('alert@example.com', 'booking.confirmed'), false);
 });
