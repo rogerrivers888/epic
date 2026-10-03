@@ -568,6 +568,7 @@ export async function offerPeople(offerId) {
     `select m.id as member_id, m.name, m.is_minor, m.avatar_url, m.household_id,
             array_remove(array_agg(distinct b.occurrence), null) as occurrences,
             bool_or(h.household_id = m.household_id) as is_host,
+            bool_or(b.household_id = m.household_id) as has_booking,
             min(b.created_at) as booked_at
        from host_offers o
        join hosts h on h.id = o.host_id

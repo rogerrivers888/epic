@@ -1505,7 +1505,7 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
     // token, or the host's own invitation link, which they pass round themselves.
     if (o.visibility === 'invite') {
       const invite = req.query.i ? await repo.inviteByToken(String(req.query.i)) : null;
-      if (!opensPrivately(o, { linkToken: str(req.query.l, 64), invite })) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
+      if (!opensPrivately(o, { linkToken: str(req.query.l, 64), invite, hasBooking: await repo.holdsBooking(o.id, currentAccount()?.household_id) })) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
     }
     const h = await repo.hostById(o.host_id);
     await attachSkills([o]);

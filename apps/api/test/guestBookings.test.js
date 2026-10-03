@@ -654,3 +654,19 @@ test('a tip whose card failed and then went through on the same payment is paid 
     assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'tip' and stripe_ref = $1`, [pi.id])).rows[0].n, 1, 'credited once');
   } finally { await srv.close(); }
 });
+
+test('Codex: a lane booking is booked — the host’s notice reaches its inbox, and a private event opens again without its link', async () => {
+  const { o, h } = await anEvent();
+  await query(`update host_offers set visibility = 'invite' where id = $1`, [o.id]);
+  const a = await aPerson();
+  await query(`insert into experience_bookings (offer_id, host_id, household_id, state) values ($1, $2, $3, 'confirmed')`, [o.id, h.id, a.household.id]);
+  const { rows: [hostMember] } = await query(`select m.id from members m join hosts x on x.household_id = m.household_id where x.id = $1 limit 1`, [h.id]);
+  await query(`insert into chat_topics (context_type, context_id, tag_kind, tag_ref, audience, author_member_id, title) values ('offer', $1, 'offer_aspect', 'offer', 'everyone', $2, 'Bring wellies')`, [o.id, hostMember.id]);
+  const srv = await server(a.account);
+  try {
+    const inbox = await srv.get('/api/messages');
+    assert.equal(inbox.body.threads.find((x) => x.offerId === o.id)?.last, 'Bring wellies');
+    const opt = await srv.get(`/api/experiences/${o.id}/booking/options`);
+    assert.equal(opt.status, 200, JSON.stringify(opt.body));
+  } finally { await srv.close(); }
+});

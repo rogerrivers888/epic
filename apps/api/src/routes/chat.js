@@ -179,7 +179,7 @@ export async function offerContext(offer, me, { household } = {}) {
   const [host, rows] = await Promise.all([hosting.hostById(offer.host_id), chat.offerPeople(offer.id)]);
   const people = rows.map((r) => ({
     memberId: r.member_id, guestId: null, name: r.name, avatarUrl: r.avatar_url ?? null, householdId: r.household_id,
-    isHost: Boolean(r.is_host), occurrences: r.occurrences ?? [], bookedAt: r.booked_at,
+    isHost: Boolean(r.is_host), occurrences: r.occurrences ?? [], bookedAt: r.booked_at, hasBooking: Boolean(r.has_booking),
   }));
   const hostMember = people.find((p) => p.isHost) ?? null;
   const isHost = Boolean(me && host && household && host.household_id === household.id);
@@ -194,7 +194,8 @@ export async function offerContext(offer, me, { household } = {}) {
   const mine = me ? people.find((p) => p.memberId === me.memberId) : null;
   const meRow = me ? {
     ...me, isHost, contextType: 'offer',
-    booked: isHost || Boolean(mine && mine.occurrences.length),
+    // A lane booking keeps its dates in booking_sessions, with no occurrence: it is booked all the same (Codex, 3 Oct 2026).
+    booked: isHost || Boolean(mine && (mine.occurrences.length || mine.hasBooking)),
     occurrences: mine?.occurrences ?? [],
     bookedAt: mine?.bookedAt ?? null,
   } : null;

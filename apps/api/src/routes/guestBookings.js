@@ -177,7 +177,7 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
     // A private event opens only with its link or an invitation, as its page does (Codex, 2 Oct 2026).
     if (e.offer.visibility !== 'public') {
       const invite = typeof req.query.i === 'string' ? await repo.inviteByToken(req.query.i.slice(0, 64)) : null;
-      if (!opensPrivately(e.offer, { linkToken: typeof req.query.l === 'string' ? req.query.l.slice(0, 64) : null, invite })) throw refuse(404, 'not_found', 'This one is invitation only.');
+      if (!opensPrivately(e.offer, { linkToken: typeof req.query.l === 'string' ? req.query.l.slice(0, 64) : null, invite, hasBooking: await repo.holdsBooking(e.offer.id, currentAccount()?.household_id) })) throw refuse(404, 'not_found', 'This one is invitation only.');
     }
     const { offer: o, sessions, host } = e;
     const now = new Date();
@@ -278,7 +278,7 @@ router.post('/experiences/:id/booking/quote', async (req, res, next) => {
     if (!e || e.offer.state !== 'live') throw refuse(404, 'not_found', 'That event isn’t open.');
     if (e.offer.visibility !== 'public') {
       const invite = typeof req.body?.inviteToken === 'string' ? await repo.inviteByToken(req.body.inviteToken.slice(0, 64)) : null;
-      if (!opensPrivately(e.offer, { linkToken: typeof req.body?.linkToken === 'string' ? req.body.linkToken.slice(0, 64) : null, invite })) throw refuse(404, 'not_found', 'This one is invitation only.');
+      if (!opensPrivately(e.offer, { linkToken: typeof req.body?.linkToken === 'string' ? req.body.linkToken.slice(0, 64) : null, invite, hasBooking: await repo.holdsBooking(e.offer.id, currentAccount()?.household_id) })) throw refuse(404, 'not_found', 'This one is invitation only.');
     }
     const when = parseWhen(e.offer, ahead(e.sessions, e.offer), req.body?.when);
     const party = parseParty(req.body?.party);
@@ -563,7 +563,7 @@ router.post('/experiences/:id/waitlist', async (req, res, next) => {
     // A private event's list only with its link or an invitation (Codex, 2 Oct 2026).
     if (o.visibility !== 'public') {
       const invite = typeof req.body?.inviteToken === 'string' ? await repo.inviteByToken(req.body.inviteToken.slice(0, 64)) : null;
-      if (!opensPrivately(o, { linkToken: typeof req.body?.linkToken === 'string' ? req.body.linkToken.slice(0, 64) : null, invite })) throw refuse(404, 'not_found', 'This one is invitation only.');
+      if (!opensPrivately(o, { linkToken: typeof req.body?.linkToken === 'string' ? req.body.linkToken.slice(0, 64) : null, invite, hasBooking: await repo.holdsBooking(o.id, household.id) })) throw refuse(404, 'not_found', 'This one is invitation only.');
     }
     const party = Math.max(1, Math.min(o.party_max ?? 20, Math.floor(Number(req.body?.party) || 1)));
     // Never more than the event could ever hold, or it would stand at the front for good (Codex, 2 Oct 2026).
@@ -731,12 +731,13 @@ router.get('/messages', async (_req, res, next) => {
          -- to everyone only once booked, and a date's notice only to those booked on that date (Codex, 3 Oct 2026).
          select t.* from chat_topics t join threads x on x.offer_id = t.context_id
            left join lateral (
-             select array_remove(array_agg(distinct b.occurrence), null) as occ from experience_bookings b
+             -- Booked is any live booking: a lane booking keeps its dates in booking_sessions and has no occurrence (Codex, 3 Oct 2026).
+             select count(*) > 0 as booked, array_remove(array_agg(distinct b.occurrence), null) as occ from experience_bookings b
               where b.offer_id = x.offer_id and b.household_id = $1 and b.state in ('pending', 'confirmed', 'attended')
            ) bk on true
           where t.context_type = 'offer' and not t.hidden and $2::uuid is not null
             and (t.author_member_id = $2
-                 or (t.audience = 'everyone' and cardinality(coalesce(bk.occ, '{}')) > 0 and (t.occurrence is null or t.occurrence = any(bk.occ))))
+                 or (t.audience = 'everyone' and bk.booked and (t.occurrence is null or cardinality(bk.occ) = 0 or t.occurrence = any(bk.occ))))
        )
        select x.offer_id, x.booking_id, o.title, h.name as host, h.photo_id,
               last.at as last_at, last.body as last_body, last.topic_id,

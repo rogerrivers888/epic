@@ -995,3 +995,13 @@ export async function ratedEventsOf(hostId) {
   );
   return { ratedEvents: r?.rated_events ?? 0, avg: r?.avg ?? null };
 }
+
+/**
+ * Whether the signed-in household already holds a live booking on an offer: on a private event that is its own
+ * way back in, so "Book more sessions" needs no link (Codex, 3 Oct 2026). False signed out.
+ */
+export async function holdsBooking(offerId, householdId) {
+  if (!householdId) return false;
+  const { rows: [r] } = await query(`select 1 from experience_bookings where offer_id = $1 and household_id = $2 and state <> 'cancelled' limit 1`, [offerId, householdId]);
+  return Boolean(r);
+}

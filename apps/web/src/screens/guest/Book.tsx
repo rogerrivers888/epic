@@ -21,6 +21,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import { api, ApiError, type Experience, type GuestBookBody, type GuestOptions, type HouseholdResponse, type Member } from '../../api';
 import { CompactBand } from '../../components/Band';
 import { BirthdayPicker } from '../../components/BirthdayPicker';
@@ -261,7 +262,8 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
     setBusy(true);
     try {
       if (free || direct) { await make(); return; }
-      if (!stripe.current) { toast.show('Card payments aren’t switched on yet'); return; }
+      // The phone apps have no card form yet: a paid booking is made on epic.day (Codex, 3 Oct 2026).
+      if (!stripe.current) { toast.show(Platform.OS === 'web' ? 'Card payments aren’t switched on yet' : 'Book this one on epic.day for now'); return; }
       if (method === 'wallet' && wallet && !pending && walletReq.current) {
         let made: { bookingId: string; secret: string | null } | null = null;
         const out = await payWithWallet(stripe.current, walletReq.current, { start: async () => { made = await make(); return made?.secret ?? null; } });
