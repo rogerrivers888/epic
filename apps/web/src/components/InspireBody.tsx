@@ -246,10 +246,15 @@ const pounds = (p: number) => `£${(p / 100).toFixed(p % 100 ? 2 : 0)}`;
 /** "£12 a child", "£84", "Free". */
 export function eventPrice(e: EventNear): string {
   const p = e.price;
-  if (p.mode === 'free' || !(p.pence || p.nowEach)) return 'Free';
+  if (p.mode === 'free') return 'Free';
   if (p.mode === 'by_numbers' && p.nowEach != null) return pounds(p.nowEach);
+  // Children only: the child rate is what is charged, so it is what is shown (Codex, 3 Oct 2026).
   const kidsOnly = e.who.dropOff || (e.who.ageMax != null && e.who.ageMax < 18);
-  return `${pounds(p.pence ?? 0)}${kidsOnly ? ' a child' : ''}`;
+  if (kidsOnly && (p.childPence || p.pence)) return `${pounds((p.childPence || p.pence) ?? 0)} a child`;
+  if (p.pence) return pounds(p.pence);
+  // A weekly class priced by how it is booked: its lower price, as from.
+  const kinds = [p.dropInPence, p.bookAheadPence].filter((n): n is number => typeof n === 'number' && n > 0);
+  return kinds.length ? `from ${pounds(Math.min(...kinds))}` : 'Free';
 }
 
 /** The badge on the photo (G1b): places left in lime, Needs N more in amber, Full in warm grey; none when there's room. */

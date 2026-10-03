@@ -27,7 +27,16 @@ type FilterKey = keyof typeof FILTERS;
 const LANE_OF: Record<string, string> = { 'One-off': 'oneoff', Weekly: 'weekly', Course: 'course', 'On request': 'onrequest' };
 
 const daysTo = (ymd: string | null) => (ymd ? Math.round((new Date(`${ymd}T12:00:00Z`).getTime() - new Date(new Date().toISOString().slice(0, 10) + 'T12:00:00Z').getTime()) / 86_400_000) : null);
-const each = (e: EventNear) => (e.price.mode === 'free' ? 0 : e.price.nowEach ?? e.price.pence ?? 0);
+// The price a card shows, for the Price filter: the child rate on children-only events, a weekly class's lower kind price.
+const each = (e: EventNear) => {
+  const p = e.price;
+  if (p.mode === 'free') return 0;
+  if (p.nowEach != null) return p.nowEach;
+  if ((e.who.dropOff || (e.who.ageMax != null && e.who.ageMax < 18)) && p.childPence) return p.childPence;
+  if (p.pence) return p.pence;
+  const kinds = [p.dropInPence, p.bookAheadPence].filter((n): n is number => typeof n === 'number' && n > 0);
+  return kinds.length ? Math.min(...kinds) : 0;
+};
 
 function passes(e: EventNear, f: Record<FilterKey, string>): boolean {
   if (f.kind !== FILTERS.kind.all && e.lane !== LANE_OF[f.kind]) return false;
