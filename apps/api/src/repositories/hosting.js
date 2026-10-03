@@ -118,21 +118,6 @@ export async function payoutAccountsOf(hostId) {
   return rows;
 }
 
-/** Make one account the payout account; the partial unique index keeps it to one. */
-export async function setActivePayoutAccount(hostId, accountId) {
-  return withTransaction(async (client) => {
-    // Check it is this host's account BEFORE touching anything — otherwise a
-    // stale or foreign id would deactivate every valid account and then fail,
-    // leaving the host with no payout destination (Codex).
-    const { rowCount } = await client.query('select 1 from host_payout_accounts where id = $1 and host_id = $2', [accountId, hostId]);
-    if (!rowCount) return null;
-    await client.query('update host_payout_accounts set is_active = false where host_id = $1', [hostId]);
-    const { rows } = await client.query(
-      'update host_payout_accounts set is_active = true where id = $1 and host_id = $2 returning *', [accountId, hostId]);
-    return rows[0] ?? null;
-  });
-}
-
 /** Stop hosting: the host row goes, and its offers and bookings with it (cascade). */
 export async function deleteHost(id, householdId, client) {
   await on(client)('delete from hosts where id = $1 and household_id = $2', [id, householdId]);

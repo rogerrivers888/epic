@@ -714,41 +714,12 @@ test('the dormant account wakes when its host first takes money: card payments a
   } finally { await srv.close(); }
 });
 
-test('L7: Stripe asking a verified host for ID again tells the owner once, and asks the host nothing', async () => {
+test('L7: what counts as Stripe asking for ID — a document, proof of liveness, or a risk review’s identity check', async () => {
   const stripe = await import('../src/sources/stripe.js');
   assert.deepEqual(stripe.asksForIdAgain({ requirements: { currently_due: ['external_account', 'individual.verification.document'], eventually_due: ['individual.verification.document'] } }), ['individual.verification.document']);
   assert.deepEqual(stripe.asksForIdAgain({ requirements: { currently_due: ['external_account', 'individual.address.city'] } }), []);
-
-  const { household: h } = await aHousehold(query);
-  const host = await repo.insertHost(h.id, { name: 'Twice Asked' });
-  await repo.updateHost(host.id, { identityState: 'verified', identityVerifiedAt: new Date('2026-09-20T09:00:00Z') });
-  const { rows: [owner] } = await query(`select email from accounts where role = 'owner' and status = 'active' limit 1`);
-  const ownerAlert = await import('../src/sources/ownerAlert.js');
-  if (!owner) {
-    const { household: oh, member: om } = await aHousehold(query);
-    await query("insert into accounts (household_id, member_id, email, role, status, name) values ($1,$2,'owner-test@epic.day','owner','active','Owner')", [oh.id, om.id]);
-  }
-  const sent = [];
-  const deps = { send: async (m) => { sent.push(m); }, configured: () => true };
-  const args = { key: `stripe-asks-id:${host.id}:individual.verification.document`, subjectId: host.id, subject: 'Stripe is asking Twice Asked for ID again', text: 'x' };
-  assert.equal((await ownerAlert.alertOwner(args, deps)).sent, true);
-  assert.equal((await ownerAlert.alertOwner(args, deps)).sent, false, 'once');
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].to, await ownerAlert.ownerEmail());
-  // Two deliveries of the same event at once: one e-mail (Codex, 3 Oct 2026).
-  const slow = { send: async (m) => { await new Promise((r) => setTimeout(r, 50)); sent.push(m); }, configured: () => true };
-  const both = await Promise.allSettled([ownerAlert.alertOwner({ ...args, key: 'race' }, slow), ownerAlert.alertOwner({ ...args, key: 'race' }, slow)]);
-  assert.deepEqual(both.map((x) => (x.status === 'fulfilled' ? `sent:${x.value.sent}` : x.reason.code)).sort(), ['owner_alert_in_flight', 'sent:true'],
-    'the second is told to try again later, not that it is done');
-  assert.equal((await ownerAlert.alertOwner({ ...args, key: 'race' }, deps)).reason, 'already_sent', 'once it has gone, it is done');
-  // The mail service turning it down ({ sent: false }) is a failure too: nothing recorded, retried next time.
-  await assert.rejects(ownerAlert.alertOwner({ ...args, key: 'refused' }, { send: async () => ({ sent: false, reason: 'suppressed' }), configured: () => true }), (e) => e.code === 'owner_alert_not_sent');
-  assert.equal((await ownerAlert.alertOwner({ ...args, key: 'refused' }, deps)).sent, true);
-  // A send that fails leaves nothing written, so the next delivery tries again.
-  await assert.rejects(ownerAlert.alertOwner({ ...args, key: 'bounce' }, { send: async () => { throw new Error('smtp down'); }, configured: () => true }));
-  assert.equal((await ownerAlert.alertOwner({ ...args, key: 'bounce' }, deps)).sent, true);
-  // No mail set up: said in the log, never silent, and nothing recorded as sent.
-  assert.deepEqual(await ownerAlert.alertOwner({ ...args, key: 'other' }, { send: deps.send, configured: () => false }), { sent: false, reason: 'no_mail' });
+  assert.deepEqual(stripe.storedIdAsks({ currentlyDue: ['person_1.proof_of_liveness'], eventuallyDue: ['interv_1.identity_verification.challenge'] }), ['person_1.proof_of_liveness', 'interv_1.identity_verification.challenge']);
+  assert.deepEqual(stripe.storedIdAsks(null), []);
 });
 
 test('L7: the host’s public page shows the day Stripe confirmed their passport, and nothing else of the check', async () => {

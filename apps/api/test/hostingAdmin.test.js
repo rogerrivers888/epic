@@ -348,3 +348,23 @@ test('a setting change is undone by the owner signed in personally, only while i
     assert.equal((await owner.send('POST', `/api/admin/hosting/changes/${c.id}/undo`)).status, 409);
   } finally { await staff.close(); await owner.close(); }
 });
+
+test('L7 point 4: Stripe asking a verified host for ID is raised in the back office for a person, and clears when Stripe stops', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [h] } = await query(
+    `insert into hosts (household_id, name, identity_state, identity_verified_at, stripe_account_id, stripe_account_model, stripe_requirements)
+     values ($1, 'Asked Again', 'verified', now(), 'acct_asked', 'v2', $2::jsonb) returning *`,
+    [household.id, JSON.stringify({ currentlyDue: ['external_account', 'individual.verification.document'], eventuallyDue: [], pastDue: [] })],
+  );
+  const staff = await server(STAFF);
+  try {
+    const page = (await staff.get(`/api/admin/hosting/hosts/${h.id}`)).body;
+    assert.deepEqual(page.trust.verified.stripeAsksAgain, ['individual.verification.document']);
+    const before = (await staff.get('/api/admin/hosting/health')).body;
+    assert.ok(before.idAskedAgain >= 1);
+    // Stripe stops asking (its next account.updated is stored): the item goes by itself.
+    await query(`update hosts set stripe_requirements = $2::jsonb where id = $1`, [h.id, JSON.stringify({ currentlyDue: [], eventuallyDue: [], pastDue: [] })]);
+    assert.deepEqual((await staff.get(`/api/admin/hosting/hosts/${h.id}`)).body.trust.verified.stripeAsksAgain, []);
+    assert.equal((await staff.get('/api/admin/hosting/health')).body.idAskedAgain, before.idAskedAgain - 1);
+  } finally { await staff.close(); }
+});

@@ -485,22 +485,8 @@ router.delete('/host', async (req, res, next) => {
 // money (Settings revised v2 · the Host tab's Money screen, SX9/SX14/SX16–SX20)
 // ---------------------------------------------------------------------------
 
-/**
- * POST /api/host/payout-accounts/:id/activate — make one bank the payout
- * account (SX16). One at a time: the partial unique index keeps it so, and the
- * repo deactivates the rest in the same transaction. Adding an account is
- * Stripe's own onboarding and is out of this build.
- */
-router.post('/host/payout-accounts/:id/activate', async (req, res, next) => {
-  try {
-    const { host } = await myHost();
-    if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
-    const active = await repo.setActivePayoutAccount(host.id, req.params.id);
-    if (!active) throw refuse(404, 'account_not_found', 'That bank account is not one of yours.');
-    const payoutAccounts = await repo.payoutAccountsOf(host.id);
-    res.json({ account: payoutAccountPayload(active), payoutAccounts: payoutAccounts.map(payoutAccountPayload) });
-  } catch (err) { next(err); }
-});
+// The payout-account switch (POST /api/host/payout-accounts/:id/activate) is gone: a host never changes where or
+// when they are paid through Epic — Stripe holds their bank and Epic sets the timing (register L3; owner, 3 Oct 2026).
 
 /**
  * Every fee shown on the Money screen comes from one place (SX14): the host's

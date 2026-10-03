@@ -207,7 +207,7 @@ async function lanePayload(offer, host, account, { holidays } = {}) {
 }
 
 /** What the screens need to know before anything is drawn: prices, terms, defaults, and the bank holidays. */
-function configPayload(holidays) {
+function configPayload(holidays, { identityLicence = false } = {}) {
   const cfg = hostingConfig();
   return {
     privateEventPence: cfg.privateEventPence, proMonthlyPence: cfg.proMonthlyPence, privateCollectPct: cfg.privateCollectPct,
@@ -218,6 +218,8 @@ function configPayload(holidays) {
     seq: SEQ, prompts: PROMPTS, diet: DIET_TICKS,
     bankHolidays: holidays,
     stripe: stripe.stripeStatus(), listening: openaiEnabled(),
+    // Which ID the check takes: a passport, and a UK licence only while the owner's setting allows it (L7).
+    identityDocuments: identityLicence ? ['passport', 'driving_licence'] : ['passport'],
   };
 }
 
@@ -231,7 +233,7 @@ router.get('/host/lanes', async (req, res, next) => {
     const holidays = await bankHolidays({ householdId: household.id });
     const drafts = host ? await repo.laneDraftsOf(host.id) : [];
     res.json({
-      config: configPayload(holidays),
+      config: configPayload(holidays, { identityLicence: (await hostingSettings.current()).identity_driving_licence === true }),
       drafts: drafts.map((o) => ({ id: o.id, lane: o.lane, title: o.title, whatLabel: o.what_label, step: o.draft_step, updatedAt: o.updated_at, missing: missingSteps(o, hostingConfig()).length })),
       host: hostSheet(host, account), isPro: await hostingPro(account, household.id),
     });
@@ -1127,19 +1129,8 @@ export async function applyStripeEvent(event) {
       const host = await repo.hostByStripeAccount(obj.id);
       if (host) {
         await repo.updateHost(host.id, stripe.hostPatchFromAccount(obj));
-        // Stripe asking for ID from a host whose passport check passed: the owner is told, and the host is not sent round
-        // again (brief §3, L7: "never asked for ID twice").
-        const asks = stripe.asksForIdAgain(obj);
-        if (asks.length && host.identity_state === 'verified') {
-          const { alertOwner } = await import('../sources/ownerAlert.js');
-          await alertOwner({
-            key: `stripe-asks-id:${host.id}:${asks.sort().join(',')}`, subjectId: host.id,
-            subject: `Stripe is asking ${host.name ?? 'a host'} for ID again`,
-            text: [`Stripe's onboarding lists ${asks.join(', ')} for ${host.name ?? 'a host'} (${obj.id}), although their passport check passed on ${host.identity_verified_at ? new Date(host.identity_verified_at).toISOString().slice(0, 10) : 'an earlier date'}.`,
-              'The host has not been asked to do anything. Epic hosting › the host, or the Stripe sandbox dashboard, shows the account.'].join('\n\n'),
-          });
-          // A failure to send is not caught: the event is then not marked processed, and Stripe's retry sends it (Codex, 3 Oct 2026).
-        }
+        // Stripe asking for ID from a host whose check passed is never sent to the host (L7 point 4, owner, 3 Oct
+        // 2026): the requirements just stored raise it in the back office for a person (hostingAdmin › host, Safety).
       }
     } else if ((event.type === 'payout.paid' || event.type === 'payout.failed') && obj.id && typeof event.account === 'string') {
       // A released payout reaching the host's bank, or bouncing: the host's own account's event (Connect endpoint).

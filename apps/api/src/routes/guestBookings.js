@@ -424,7 +424,7 @@ async function book({ offerId, body, household, account, invite = null }) {
     let pi;
     try {
       pi = await stripe.paymentIntent({
-        amountPence: b.value_pence, destination: host.stripe_account_id, applicationFeePence: b.fee_pence ?? 0,
+        amountPence: b.value_pence, destination: host.stripe_account_id, applicationFeePence: b.fee_pence ?? 0, hostName: host.name,
         bookingId: b.id, offerId: o.id, householdId: b.household_id, hold: asked, email: account?.email ?? null, idempotencyKey: `booking-${b.id}`,
       });
     } catch (err) {
@@ -1247,7 +1247,7 @@ router.post('/booked/:id/tip', async (req, res, next) => {
       throw refuse(409, 'tipped', 'You’ve tipped on this one.');
     }
     let pi;
-    try { pi = await stripe.paymentIntent({ amountPence: amount + fee, destination: tipHost.stripe_account_id, applicationFeePence: fee, bookingId: b.id, offerId: b.offer_id, householdId: household.id, idempotencyKey: `tip-${t.id}`, kind: 'tip', tipId: t.id }); }
+    try { pi = await stripe.paymentIntent({ amountPence: amount + fee, destination: tipHost.stripe_account_id, applicationFeePence: fee, hostName: tipHost.name, bookingId: b.id, offerId: b.offer_id, householdId: household.id, idempotencyKey: `tip-${t.id}`, kind: 'tip', tipId: t.id }); }
     catch (err) {
       // A tip that never reached Stripe is not a tip: the guest may try again (Codex, 2 Oct 2026).
       await query(`update booking_tips set state = 'failed' where id = $1 and stripe_ref is null`, [t.id]);

@@ -66,7 +66,10 @@ test('L2 / L6 / L11: a host’s account is made by Accounts v2, merchant of reco
   assert.equal(body.dashboard, 'express');
   assert.deepEqual(body.defaults.responsibilities, { fees_collector: 'application', losses_collector: 'application' });
   assert.deepEqual(body.configuration.merchant.capabilities, { card_payments: { requested: true } });
-  assert.equal(body.configuration.recipient, undefined, 'recipient is the separate-charges configuration; not used');
+  // A destination charge needs transfers on the host's account as well, which Accounts v2 keeps on the recipient
+  // configuration — the sandbox refused a booking without it (3 Oct 2026). Never on a dormant account.
+  assert.deepEqual(body.configuration.recipient, { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } });
+  assert.equal(stripe.connectAccountBody({ hostId: 'h', dormant: true }).configuration.recipient, undefined);
   assert.equal(body.configuration.merchant.statement_descriptor.prefix, 'EPIC');
   assert.deepEqual([body.identity.country, body.identity.entity_type], ['gb', 'individual']);
   assert.deepEqual(body.identity.individual, { email: 'kate@example.com', given_name: 'Kate Anne', surname: 'Morris', date_of_birth: { day: 9, month: 7, year: 1984 } });
@@ -115,4 +118,14 @@ test('L7: the verified day is Stripe’s — the report’s time, else the event
   assert.equal(at([{ last_verification_report: { created: 1790000000 } }]), new Date(1790000000 * 1000).toISOString());
   assert.equal(at([{ last_verification_report: 'vr_123' }, 1790003600]), new Date(1790003600 * 1000).toISOString(), 'an unexpanded report: the event’s time');
   assert.equal(at([{}]), null, 'nothing to say: the caller decides');
+});
+
+test('L11: the guest’s statement reads "EPIC* <host>" — 16 characters at most, letters and numbers only', () => {
+  assert.equal(stripe.statementSuffix('Kate Morris'), 'KATE MORRIS');
+  assert.equal(stripe.statementSuffix('Zoë O’Brien-Smythe & Co.'), 'ZOE O BRIEN SMYT');
+  assert.equal(stripe.statementSuffix('12345'), null, 'at least one letter, or none at all');
+  assert.equal(stripe.statementSuffix(null), null);
+  const body = stripe.paymentIntentBody({ amountPence: 1000, destination: 'acct_h', applicationFeePence: 100, bookingId: 'b', hostName: 'Kate Morris' });
+  assert.equal(body.statement_descriptor_suffix, 'KATE MORRIS');
+  assert.equal(stripe.paymentIntentBody({ amountPence: 1000, destination: 'acct_h', applicationFeePence: 100, bookingId: 'b' }).statement_descriptor_suffix, undefined);
 });

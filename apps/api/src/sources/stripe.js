@@ -153,7 +153,12 @@ export function connectAccountBody({ hostId, email = null, legalName = null, dat
     identity: { country: 'gb', entity_type: 'individual', individual: prefillIndividual({ email, legalName, dateOfBirth }) },
     // Merchant, not recipient: the host is merchant of record on a destination charge with on_behalf_of (L2).
     // Guests' statements read "EPIC* <host>" (L11).
-    configuration: { merchant: { ...(dormant ? {} : { capabilities: { card_payments: { requested: true } } }), statement_descriptor: { prefix: 'EPIC' } } },
+    // A destination charge needs the transfers capability too, which Accounts v2 keeps on the recipient configuration:
+    // without it Stripe refuses the booking (insufficient_capabilities_for_transfer, sandbox 3 Oct 2026).
+    configuration: {
+      merchant: { ...(dormant ? {} : { capabilities: { card_payments: { requested: true } } }), statement_descriptor: { prefix: 'EPIC' } },
+      ...(dormant ? {} : { recipient: { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } } }),
+    },
     metadata: { epic_host_id: hostId },
   };
 }
@@ -165,7 +170,10 @@ export function connectAccountBody({ hostId, email = null, legalName = null, dat
  */
 export function wakeAccount(accountId, { householdId = null, businessUrl = null } = {}) {
   return call('POST', `/v2/core/accounts/${encodeURIComponent(accountId)}`, {
-    configuration: { merchant: { capabilities: { card_payments: { requested: true } }, mcc: '7999' } },
+    configuration: {
+      merchant: { capabilities: { card_payments: { requested: true } }, mcc: '7999' },
+      recipient: { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } },
+    },
     ...(businessUrl ? { defaults: { profile: { business_url: businessUrl } } } : {}),
   }, { householdId, purpose: 'host.payouts.wake', idempotencyKey: `wake-${accountId}`, v2: true });
 }
@@ -225,11 +233,20 @@ export function hostPatchFromAccount(a) {
   };
 }
 
+/** What in Stripe's requirements is an ID request: a document, proof of liveness, or a risk review's identity check. */
+const ID_ASK = /((^|\.)verification\.(additional_)?document$|proof_of_liveness|\.identity_verification\.)/;
+
 /** Identity documents Stripe's onboarding still lists for the account's person — what L7 means never to ask twice. */
 export function asksForIdAgain(a) {
   const r = a?.requirements ?? {};
   const all = [...(r.currently_due ?? []), ...(r.eventually_due ?? []), ...(r.past_due ?? [])];
-  return [...new Set(all.filter((x) => /(^|\.)verification\.(additional_)?document$/.test(x)))];
+  return [...new Set(all.filter((x) => ID_ASK.test(x)))];
+}
+
+/** The same, read from the facts Epic stored (hosts.stripe_requirements, accountFacts below). */
+export function storedIdAsks(facts) {
+  const all = [...(facts?.currentlyDue ?? []), ...(facts?.eventuallyDue ?? []), ...(facts?.pastDue ?? [])];
+  return [...new Set(all.filter((x) => ID_ASK.test(x)))];
 }
 
 /** The only facts Epic keeps about a host's account (brief §2): never bank details. */
@@ -338,7 +355,16 @@ export const checkoutPaid = (s) => s?.payment_status === 'paid';
  * a booking or tip charged to Epic's own balance is the one thing L1 forbids,
  * so there is no fallback that would make one.
  */
-export function paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, kind = 'booking', tipId = null }) {
+/**
+ * The host's part of the guest's statement: "EPIC* KATE MORRIS" (L11). Card networks allow 22 characters in all
+ * and the prefix and "* " take six, so at most 16 here, letters and numbers only, and at least one letter.
+ */
+export function statementSuffix(name) {
+  const clean = String(name ?? '').normalize('NFKD').replace(/[^A-Za-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 16).trim();
+  return /[A-Z]/.test(clean) ? clean : null;
+}
+
+export function paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, kind = 'booking', tipId = null, hostName = null }) {
   if (!/^acct_/.test(String(destination ?? ''))) throw Object.assign(new Error('This host can’t take payments yet.'), { status: 409, code: 'host_not_ready' });
   const fee = Math.round(Number(applicationFeePence));
   if (!Number.isInteger(fee) || fee < 0 || fee > amountPence) throw Object.assign(new Error('Epic’s fee on this booking is not right.'), { status: 500, code: 'bad_application_fee' });
@@ -351,13 +377,14 @@ export function paymentIntentBody({ amountPence, destination, applicationFeePenc
     transfer_data: { destination },
     on_behalf_of: destination,
     ...(fee > 0 ? { application_fee_amount: fee } : {}),
+    ...(statementSuffix(hostName) ? { statement_descriptor_suffix: statementSuffix(hostName) } : {}),
     metadata: { epic_kind: kind, epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId, epic_charge_model: 'destination', ...(tipId ? { epic_tip_id: tipId } : {}) },
   };
 }
 
 /** A guest's payment for a booking or a tip. `hold` holds the card without charging it. */
-export function paymentIntent({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey, kind = 'booking', tipId = null }) {
-  const body = paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold, email, kind, tipId });
+export function paymentIntent({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey, kind = 'booking', tipId = null, hostName = null }) {
+  const body = paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold, email, kind, tipId, hostName });
   return call('POST', '/payment_intents', body, { householdId, purpose: kind === 'tip' ? 'booking.tip' : hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
 }
 

@@ -49,31 +49,12 @@ test('the pay schedule and company tax fields round-trip, and ownHost carries th
   await assert.rejects(repo.updateHost(host.id, { paySchedule: 'fortnightly' }), /pay_schedule/i, 'only weekly/weekday/monthly');
 });
 
-test('one bank is the payout account at a time', async () => {
-  const { household } = await aHousehold(query, 'a host with two banks');
-  const host = await repo.insertHost(household.id, { name: 'Pay Me', type: 'skill' });
-  const monzo = await addAccount(host.id, 'Monzo', '42', true);
-  const starling = await addAccount(host.id, 'Starling', '07', false);
-
-  let accounts = await repo.payoutAccountsOf(host.id);
-  assert.equal(accounts.filter((a) => a.is_active).length, 1);
-  assert.equal(accounts.find((a) => a.is_active).id, monzo.id);
-
-  const active = await repo.setActivePayoutAccount(host.id, starling.id);
-  assert.equal(active.id, starling.id);
-  accounts = await repo.payoutAccountsOf(host.id);
-  assert.equal(accounts.filter((a) => a.is_active).length, 1, 'still only one is active');
-  assert.equal(accounts.find((a) => a.is_active).id, starling.id, 'the second one now, the first stood down');
-
-  // A bank that is not this host's cannot be made the payout account.
-  const other = await aHousehold(query, 'someone else');
-  const otherHost = await repo.insertHost(other.household.id, { name: 'Not you', type: 'skill' });
-  const theirs = await addAccount(otherHost.id, 'Lloyds', '99', true);
-  assert.equal(await repo.setActivePayoutAccount(host.id, theirs.id), null, 'not one of yours');
-  // And a rejected activation must not have stood the real one down (Codex).
-  accounts = await repo.payoutAccountsOf(host.id);
-  assert.equal(accounts.filter((a) => a.is_active).length, 1, 'a failed activation leaves exactly one active');
-  assert.equal(accounts.find((a) => a.is_active).id, starling.id, 'the host still has their payout account');
+test('a host can’t change their payout account: the old switch is gone (register L3)', async () => {
+  const hosting = await import('../src/routes/hosting.js');
+  const repo2 = await import('../src/repositories/hosting.js');
+  assert.equal(typeof repo2.setActivePayoutAccount, 'undefined');
+  const routes = hosting.default.stack.filter((l) => l.route).map((l) => `${Object.keys(l.route.methods)[0]} ${l.route.path}`);
+  assert.ok(!routes.some((r) => r.includes('payout-accounts')), 'no route changes a payout account');
 });
 
 test("a booking remembers it came through the host's own link (the 5% fee); otherwise false", async () => {

@@ -191,6 +191,8 @@ export type LaneConfig = {
   videoSeconds: { min: number; max: number; hello: number }; epicVideoPhotos: { min: number; max: number };
   diet: string[]; bankHolidays: { date: string; title: string }[];
   stripe: { ready: boolean; mode: 'test' | 'live' | null; note: string | null }; listening: boolean;
+  /** The ID the check takes: a passport, and a UK licence only while the owner's setting allows it (L7). */
+  identityDocuments?: ('passport' | 'driving_licence')[];
 };
 export type HostSheet = {
   name: string | null; line: string | null; photo: string | null; photoId?: string | null; dateOfBirth: string | null;

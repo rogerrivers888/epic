@@ -27,7 +27,7 @@ import { checklist, laneBlockers, hostingConfig, localDay, localInstant, SEQ, ag
 import { ladderProgress, introState } from '../domain/money.js';
 import { standingOf } from '../domain/hostDesk.js';
 import { mediaRef } from './hosting.js';
-import { stripeMode } from '../sources/stripe.js';
+import { stripeMode, storedIdAsks } from '../sources/stripe.js';
 import * as ledger from '../repositories/hostingLedger.js';
 
 export const router = Router();
@@ -284,7 +284,8 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
     );
     res.json({
       host: { id: h.id, name: h.name, town: h.location_label, photo: mediaRef(h.photo_id), since: h.created_at, paused: Boolean(h.paused), stopped: Boolean(h.stopped_at), adult: h.date_of_birth ? ageOn(h.date_of_birth) >= 18 : null },
-      trust: { verified: { state: h.identity_state, on: ymd(h.identity_verified_at) }, checked: { state: h.checked_state, level: h.checked_level ?? null, on: ymd(h.checked_on), submittedAt: h.checked_submitted_at ?? null }, insurance: { expires: ymd(h.insurance_expires) } },
+      // A verified host Stripe is asking for ID again: for a person here, never sent to the host (L7 point 4).
+      trust: { verified: { state: h.identity_state, on: ymd(h.identity_verified_at), stripeAsksAgain: h.identity_state === 'verified' ? storedIdAsks(h.stripe_requirements) : [] }, checked: { state: h.checked_state, level: h.checked_level ?? null, on: ymd(h.checked_on), submittedAt: h.checked_submitted_at ?? null }, insurance: { expires: ymd(h.insurance_expires) } },
       money: { stripe: h.payouts_state, tax: mask(h.tax_reference), takenPence: m.taken, epicPence: m.epic, paidOutPence: m.paid_out, nextPayout: nextPayout ? { pence: nextPayout.pence, on: ymd(nextPayout.release_at), state: nextPayout.state, holdReason: nextPayout.hold_reason } : null },
       fee: (() => {
         const intro = introState(s.intro_zero, { hostStartedAt: h.created_at, bookingsSoFar: introUsedN });
@@ -766,6 +767,8 @@ router.get('/health', requires('view_hosting'), async (_req, res, next) => {
               (select mismatched from stripe_reconciliations order by ran_at desc limit 1)::int as mismatches,
               (select count(*) from hosting_complaints where state = 'open')::int as complaints,
               (select count(*) from host_payouts where state in ('held', 'failed'))::int as payouts_waiting,
+              (select count(*) from hosts where identity_state = 'verified' and stripe_requirements is not null
+                 and stripe_requirements::text ~ '(verification\\.(additional_)?document|proof_of_liveness|\\.identity_verification\\.)')::int as id_asked_again,
               (select count(*) from hosting_payments where kind in ('refund', 'release', 'tip_refund') and state = 'failed' and voided_at is null)::int as refunds_waiting,
               (select count(*) from session_incidents where created_at > now() - interval '7 days')::int as incidents7,
               (select count(*) from host_reports where resolved_at is null)::int as reports`,
@@ -777,7 +780,8 @@ router.get('/health', requires('view_hosting'), async (_req, res, next) => {
       stripeMismatches: r.mismatches, openComplaints: r.complaints,
       payoutsWaiting: r.payouts_waiting, refundsWaiting: r.refunds_waiting,
       // What waits on a person in each sub-tab: the lime count beside Review, Safety and Money (BO8 §2).
-      tabs: { review: r.in_review, safety: r.complaints + r.incidents7 + r.reports, money: r.payouts_waiting + r.refunds_waiting + (r.mismatches ?? 0) },
+      idAskedAgain: r.id_asked_again,
+      tabs: { review: r.in_review, safety: r.complaints + r.incidents7 + r.reports + r.id_asked_again, money: r.payouts_waiting + r.refunds_waiting + (r.mismatches ?? 0) },
     });
   } catch (err) { next(err); }
 });
