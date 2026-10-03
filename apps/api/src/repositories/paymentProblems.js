@@ -14,6 +14,10 @@
  */
 
 import { query } from '../db.js';
+import { stripeMode } from '../sources/stripe.js';
+
+/** The mode the reports read: test rows never sit in live totals, nor live in test ones (Codex, 3 Oct 2026). */
+const currentMode = () => stripeMode() ?? 'test';
 
 export const GROUPS = Object.freeze({
   guest_payments: ['hold_expired', 'later_charge_failed', 'payment_failed', 'refund_failed'],
@@ -61,6 +65,12 @@ export async function record({ kind, dedupeKey, amountPence = null, currency = '
          stage = coalesce(excluded.stage, payment_problems.stage),
          detail = payment_problems.detail || excluded.detail,
          stripe_ref = coalesce(excluded.stripe_ref, payment_problems.stripe_ref),
+         -- A later sighting fills in a link the first could not find yet (Codex, 3 Oct 2026); never clears one.
+         booking_id = coalesce(payment_problems.booking_id, excluded.booking_id),
+         household_id = coalesce(payment_problems.household_id, excluded.household_id),
+         host_id = coalesce(payment_problems.host_id, excluded.host_id),
+         offer_id = coalesce(payment_problems.offer_id, excluded.offer_id),
+         membership_id = coalesce(payment_problems.membership_id, excluded.membership_id),
          status = case when $16 then 'open' else payment_problems.status end,
          resolution = case when $16 then null else payment_problems.resolution end,
          resolved_by = case when $16 then null else payment_problems.resolved_by end,
@@ -111,7 +121,7 @@ export async function resolveLike(prefix, { resolution, by = 'epic' }, client = 
 }
 
 /** Problems, newest first, with their links in words. Filtered by kind, group or status. */
-export async function list({ kind = null, group = null, status = null, bookingId = null, hostId = null, limit = 100, offset = 0 } = {}) {
+export async function list({ kind = null, group = null, status = null, bookingId = null, hostId = null, limit = 100, offset = 0, mode = currentMode() } = {}) {
   const kinds = kind ? [kind] : group ? GROUPS[group] ?? [] : KINDS;
   const { rows } = await query(
     `select p.*, o.title as offer_title, h.name as host_name, g.name as household_name
@@ -120,10 +130,10 @@ export async function list({ kind = null, group = null, status = null, bookingId
        left join hosts h on h.id = p.host_id
        left join households g on g.id = p.household_id
       where p.kind = any($1::text[]) and ($2::text is null or p.status = $2)
-        and ($3::uuid is null or p.booking_id = $3) and ($4::uuid is null or p.host_id = $4)
+        and ($3::uuid is null or p.booking_id = $3) and ($4::uuid is null or p.host_id = $4) and p.mode = $7
       order by p.occurred_at desc, p.id
       limit $5 offset $6`,
-    [kinds, status, bookingId, hostId, Math.min(500, Math.max(1, limit)), Math.max(0, offset)],
+    [kinds, status, bookingId, hostId, Math.min(500, Math.max(1, limit)), Math.max(0, offset), mode],
   );
   return rows;
 }
@@ -132,7 +142,7 @@ export async function list({ kind = null, group = null, status = null, bookingId
  * Per kind: transactions, money, open, resolved, and the trend — this 30 days against the 30 before. A kind with
  * nothing in either window says so (null), rather than a trend of nought.
  */
-export async function summary({ now = new Date() } = {}) {
+export async function summary({ now = new Date(), mode = currentMode() } = {}) {
   const { rows } = await query(
     `select kind,
             coalesce(sum(tx_count), 0)::int as transactions,
@@ -141,8 +151,8 @@ export async function summary({ now = new Date() } = {}) {
             count(*) filter (where status = 'resolved')::int as resolved,
             count(*) filter (where occurred_at > $1::timestamptz - interval '30 days')::int as last30,
             count(*) filter (where occurred_at <= $1::timestamptz - interval '30 days' and occurred_at > $1::timestamptz - interval '60 days')::int as prior30
-       from payment_problems group by kind`,
-    [now],
+       from payment_problems where mode = $2 group by kind`,
+    [now, mode],
   );
   const by = new Map(rows.map((r) => [r.kind, r]));
   return Object.entries(GROUPS).map(([group, kinds]) => ({

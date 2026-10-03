@@ -14,6 +14,8 @@ import express from 'express';
 // --- a fake Stripe: PaymentIntents whose state the test sets ---------------
 const intents = new Map();
 let failIntents = false;
+const setups = new Map();
+let declineLater = false;
 const calls = [];
 let n = 0;
 const fake = http.createServer((req, res) => {
@@ -23,6 +25,29 @@ const fake = http.createServer((req, res) => {
     calls.push({ method: req.method, url: req.url, body, idem: req.headers['idempotency-key'] ?? null });
     const json = (o, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     const form = new URLSearchParams(body);
+    // A booking far ahead (L4): the household's customer and the card saved, for the host as merchant.
+    if (req.url === '/v1/customers' && req.method === 'POST') return json({ id: `cus_${calls.length}` });
+    if (req.url === '/v1/setup_intents' && req.method === 'POST') {
+      if (!/^acct_/.test(form.get('on_behalf_of') ?? '') || form.get('usage') !== 'off_session' || !/^cus_/.test(form.get('customer') ?? '')) return json({ error: { code: 'bad_setup' } }, 400);
+      n += 1;
+      const meta = {}; for (const [k, v] of form) { const mm = /^metadata\[(.+)\]$/.exec(k); if (mm) meta[mm[1]] = v; }
+      const si = { id: `seti_${n}`, object: 'setup_intent', client_secret: `seti_${n}_secret`, status: 'requires_payment_method', metadata: meta };
+      setups.set(si.id, si);
+      return json(si);
+    }
+    const sm = /^\/v1\/setup_intents\/([^/?]+)$/.exec(req.url);
+    if (sm) return setups.has(sm[1]) ? json(setups.get(sm[1])) : json({ error: { code: 'resource_missing' } }, 404);
+    // The later charge, off-session on the saved card: declined when the test says so (Stripe answers 402).
+    if (req.url === '/v1/payment_intents' && req.method === 'POST' && form.get('off_session') === 'true') {
+      const dest = form.get('transfer_data[destination]');
+      if (!/^acct_/.test(dest ?? '') || form.get('on_behalf_of') !== dest || form.get('confirm') !== 'true' || !form.get('payment_method') || !form.get('customer')) return json({ error: { code: 'l1_no_destination' } }, 400);
+      if (declineLater) return json({ error: { type: 'card_error', code: 'card_declined', decline_code: 'insufficient_funds' } }, 402);
+      n += 1;
+      const meta = {}; for (const [k, v] of form) { const mm = /^metadata\[(.+)\]$/.exec(k); if (mm) meta[mm[1]] = v; }
+      const pi = { id: `pi_${n}`, object: 'payment_intent', status: 'succeeded', amount: Number(form.get('amount')), amount_received: Number(form.get('amount')), metadata: meta };
+      intents.set(pi.id, pi);
+      return json(pi);
+    }
     if (req.url === '/v1/payment_intents' && req.method === 'POST') {
       // L1, held for every test in this file: a guest's payment is a destination charge to the host's own account,
       // with the host as merchant of record. A payment without them is refused here, so no test can pass making one.
@@ -956,5 +981,113 @@ test('G18: passing on a place offered from the waiting list hands it to the next
     assert.deepEqual([out.body.left, out.body.passed], [true, true]);
     const { rows: [next] } = await query(`select state from offer_waitlist where offer_id = $1 and household_id = $2`, [o.id, second.household.id]);
     assert.equal(next.state, 'offered', 'the next in line is offered it now');
+  } finally { await srv.close(); }
+});
+
+// ---------------------------------------------------------------------------
+// Bookings more than 80 days ahead (register L4, Phase 5)
+// ---------------------------------------------------------------------------
+
+test('L4: when the money is taken — 80 days before, or decides-by if earlier; nearer than two days, now', () => {
+  const now = new Date('2026-10-03T12:00:00Z');
+  const day = 86_400_000;
+  assert.equal(guest.laterChargeDue({ start: new Date(now.getTime() + 60 * day), now }), null, 'within 80 days: charged now');
+  assert.equal(guest.laterChargeDue({ start: new Date(now.getTime() + 81 * day), now }), null, 'a day short of the window: charged now');
+  assert.equal(guest.laterChargeDue({ start: new Date(now.getTime() + 100 * day), now }).toISOString(), new Date(now.getTime() + 20 * day).toISOString());
+  const decides = new Date(now.getTime() + 10 * day);
+  assert.equal(guest.laterChargeDue({ start: new Date(now.getTime() + 100 * day), decidesAt: decides, now }).toISOString(), decides.toISOString(), 'decides-by first');
+});
+
+test('L4: a booking 100 days ahead saves the card, is confirmed, and is charged on its day — the same destination charge', async () => {
+  settings.forget();
+  const { o, h } = await anEvent({ price: 4000, priceMode: 'same_each', firstIn: 100 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    calls.length = 0;
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.match(r.body.pay.setupIntent, /^seti_/);
+    assert.match(r.body.pay.clientSecret, /^seti_/);
+    assert.ok(r.body.pay.later.chargeOn);
+    assert.equal(calls.some((c) => c.url === '/v1/payment_intents'), false, 'nothing charged at booking');
+    const setup = calls.find((c) => c.url === '/v1/setup_intents');
+    assert.equal(setup.idem, `setup-${r.body.booking.id}`);
+    assert.match(decodeURIComponent(setup.body), new RegExp(`on_behalf_of=${h.stripe_account_id}`));
+    // The card saved (Stripe's word, read back): confirmed, nothing charged.
+    const si = setups.get(r.body.pay.setupIntent);
+    Object.assign(si, { status: 'succeeded', payment_method: 'pm_saved_1' });
+    const paid = await srv.send('POST', `/api/booked/${r.body.booking.id}/payment`, { paymentIntent: si.id });
+    assert.deepEqual([paid.body.state, paid.body.paymentState], ['confirmed', 'card_saved']);
+    const { rows: [b] } = await query('select * from experience_bookings where id = $1', [r.body.booking.id]);
+    assert.deepEqual([b.saved_payment_method, b.charged_pence ?? 0], ['pm_saved_1', 0]);
+    assert.ok(Math.abs(new Date(b.charge_due_at).getTime() - (Date.now() + 20 * 86_400_000)) < 2 * 86_400_000, 'about 20 days from now');
+
+    // Not yet due: nothing happens. Due: charged off-session on that card, to the host's account, once.
+    const ready = () => ({ ready: true, mode: 'test' });
+    assert.equal((await engine.chargeLaterDue({ status: ready })).charged, 0);
+    calls.length = 0;
+    const later = new Date(new Date(b.charge_due_at).getTime() + 3_600_000);
+    const out = await engine.chargeLaterDue({ now: later, status: ready });
+    assert.equal(out.charged, 1);
+    const charge = calls.find((c) => c.url === '/v1/payment_intents');
+    assert.equal(charge.idem, `booking-later-${b.id}`);
+    const f = new URLSearchParams(charge.body);
+    assert.deepEqual([f.get('amount'), f.get('transfer_data[destination]'), f.get('payment_method'), f.get('off_session')], ['4000', h.stripe_account_id, 'pm_saved_1', 'true']);
+    const { rows: [after] } = await query('select payment_state, charged_pence, state from experience_bookings where id = $1', [b.id]);
+    assert.deepEqual([after.payment_state, after.charged_pence, after.state], ['charged', 4000, 'confirmed']);
+    assert.equal((await query(`select state from hosting_payments where booking_id = $1 and kind = 'charge'`, [b.id])).rows[0].state, 'succeeded');
+    assert.equal((await engine.chargeLaterDue({ now: later, status: ready })).charged, 0, 'never twice');
+  } finally { await srv.close(); }
+});
+
+test('L4: a later charge the card refuses keeps the place, asks the guest, opens a problem — and paying puts it right', async () => {
+  settings.forget();
+  const { o } = await anEvent({ price: 4000, priceMode: 'same_each', firstIn: 100 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    Object.assign(setups.get(r.body.pay.setupIntent), { status: 'succeeded', payment_method: 'pm_saved_2' });
+    await srv.send('POST', `/api/booked/${r.body.booking.id}/payment`, {});
+    const id = r.body.booking.id;
+    const { rows: [b] } = await query('select charge_due_at from experience_bookings where id = $1', [id]);
+    declineLater = true;
+    try { assert.equal((await engine.chargeLaterDue({ now: new Date(new Date(b.charge_due_at).getTime() + 1000), status: () => ({ ready: true }) })).failed, 1); } finally { declineLater = false; }
+    const { rows: [after] } = await query('select state, payment_state from experience_bookings where id = $1', [id]);
+    assert.deepEqual([after.state, after.payment_state], ['confirmed', 'charge_failed'], 'not cancelled (L4 is open)');
+    const [problem] = (await query(`select kind, status, amount_pence from payment_problems where booking_id = $1`, [id])).rows;
+    assert.deepEqual([problem.kind, problem.status, problem.amount_pence], ['later_charge_failed', 'open', 4000]);
+    assert.equal((await query(`select count(*)::int as n from notifications where household_id = $1 and kind = 'payment_needed'`, [a.household.id])).rows[0].n, 1);
+    // The guest pays from the booking: a new payment, in the browser, the same destination charge.
+    const pay = await srv.send('POST', `/api/booked/${id}/pay-now`, {});
+    assert.equal(pay.status, 200, JSON.stringify(pay.body));
+    pays(pay.body.pay.paymentIntent);
+    const done = await srv.send('POST', `/api/booked/${id}/payment`, {});
+    assert.deepEqual([done.body.state, done.body.paymentState], ['confirmed', 'charged']);
+    assert.equal((await query(`select status from payment_problems where booking_id = $1`, [id])).rows[0].status, 'resolved');
+    assert.equal((await srv.send('POST', `/api/booked/${id}/pay-now`, {})).status, 409, 'nothing left to pay');
+  } finally { await srv.close(); }
+});
+
+test('L4: a booking far ahead cancelled before its charge is never charged, and keeps no fee', async () => {
+  settings.forget();
+  const { o } = await anEvent({ price: 4000, priceMode: 'same_each', firstIn: 100 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    Object.assign(setups.get(r.body.pay.setupIntent), { status: 'succeeded', payment_method: 'pm_saved_3' });
+    await srv.send('POST', `/api/booked/${r.body.booking.id}/payment`, {});
+    const quote = await srv.get(`/api/booked/${r.body.booking.id}/cancel-quote`);
+    assert.equal(quote.status, 200);
+    const c = await srv.send('POST', `/api/booked/${r.body.booking.id}/cancel`, {});
+    assert.equal(c.status, 200, JSON.stringify(c.body));
+    const { rows: [b] } = await query('select state, charge_due_at, cancellation_fee_pence from experience_bookings where id = $1', [r.body.booking.id]);
+    assert.deepEqual([b.state, b.cancellation_fee_pence], ['cancelled', 0]);
+    assert.equal((await query(`select count(*)::int as n from hosting_payments where booking_id = $1`, [r.body.booking.id])).rows[0].n, 0, 'no refund line: nothing was taken');
+    calls.length = 0;
+    await engine.chargeLaterDue({ now: new Date(new Date(b.charge_due_at).getTime() + 1000), status: () => ({ ready: true }) });
+    assert.equal(calls.some((x) => x.url === '/v1/payment_intents'), false);
   } finally { await srv.close(); }
 });

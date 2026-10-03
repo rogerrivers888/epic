@@ -25,7 +25,7 @@ import * as notifications from '../repositories/notifications.js';
 import * as problems from '../repositories/paymentProblems.js';
 import * as stripe from './stripe.js';
 import { payoutDecision } from '../domain/money.js';
-import { decideDue, warnUnderMinimum, processRefunds } from './bookingMoney.js';
+import { decideDue, warnUnderMinimum, processRefunds, chargeLaterDue } from './bookingMoney.js';
 
 const HELD_WORDS = {
   complaint: 'A guest raised a problem with this session. The payout waits until it is sorted.',
@@ -181,7 +181,11 @@ export async function processRecoveries({ status = stripe.stripeStatus, balance 
   const out = { recovered: 0, waiting: 0, failed: 0 };
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
   for (const x of await ledger.recoveriesDue()) {
-    if (!x.stripe_account_id || x.stripe_account_model !== 'v2') { out.waiting += 1; continue; }
+    if (!x.stripe_account_id || x.stripe_account_model !== 'v2') {
+      await problems.record({ kind: 'host_recovery_waiting', dedupeKey: `host_recovery:${x.id}`, amountPence: x.amount_pence, bookingId: x.booking_id, hostId: x.host_id, offerId: x.offer_id, stage: 'waiting', detail: { line: x.id, why: 'no_account' } });
+      out.waiting += 1;
+      continue;
+    }
     try {
       // A debit already asked for (its reply lost, or the write after it failed) is asked again with the same key before
       // anything else: Stripe answers with the debit it made, or makes it once — never held up by the balance it already
@@ -206,6 +210,7 @@ export async function processRecoveries({ status = stripe.stripeStatus, balance 
       if (['balance_insufficient', 'insufficient_funds'].includes(err.detail)) {
         // A definite no: nothing moved, so the balance is checked again next time.
         await query(`update hosting_payments set reason = null, updated_at = now() where id = $1 and state = 'pending' and reason = 'debit_sent'`, [x.id]);
+        await problems.record({ kind: 'host_recovery_waiting', dedupeKey: `host_recovery:${x.id}`, amountPence: x.amount_pence, bookingId: x.booking_id, hostId: x.host_id, offerId: x.offer_id, stage: 'waiting', detail: { line: x.id, why: 'balance' } });
         out.waiting += 1;
         continue;
       }
@@ -332,6 +337,9 @@ export async function moneyTick({ now = new Date() } = {}) {
   await (await import('../routes/hostingAdmin.js')).releaseApproved();
   await warnUnderMinimum({ now });
   await decideDue({ now });
+  // Bookings far ahead whose day has come are charged on their saved card (L4) — after decides-by, so one called off
+  // is never charged.
+  await chargeLaterDue({ now }).catch((err) => console.error(`epic-api: later charges — ${err.message}`));
   await processRefunds();
   await refreshAccountFacts().catch((err) => console.error(`epic-api: account facts refresh — ${err.message}`));
   // What hosts owe back is collected before anything is paid out to them (L5).

@@ -616,6 +616,42 @@ export function paymentIntent({ amountPence, destination, applicationFeePence, b
   return call('POST', '/payment_intents', body, { householdId, purpose: kind === 'tip' ? 'booking.tip' : hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
 }
 
+/**
+ * A booking far ahead (L4): the guest's card saved now, for one off-session charge later. On Epic's own account
+ * (the household's customer), for the host as merchant (`on_behalf_of`), so the later charge is the same
+ * destination charge as any other. Refuses outright without the host's account, as a payment does.
+ */
+export function setupIntentBody({ customerId, destination, bookingId, offerId, householdId }) {
+  if (!/^acct_/.test(String(destination ?? ''))) throw Object.assign(new Error('This host can’t take payments yet.'), { status: 409, code: 'host_not_ready' });
+  if (!/^cus_/.test(String(customerId ?? ''))) throw Object.assign(new Error('There’s no customer to save the card for.'), { status: 500, code: 'no_customer' });
+  return {
+    customer: customerId,
+    usage: 'off_session',
+    payment_method_types: ['card'],
+    on_behalf_of: destination,
+    metadata: { epic_kind: 'booking_later', epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId, epic_charge_model: 'destination' },
+  };
+}
+
+export function setupIntent(args) {
+  return call('POST', '/setup_intents', setupIntentBody(args), { householdId: args.householdId, purpose: 'booking.card_saved', idempotencyKey: `setup-${args.bookingId}` });
+}
+
+export function retrieveSetupIntent(id, { householdId } = {}) {
+  return call('GET', `/setup_intents/${encodeURIComponent(id)}`, null, { householdId, purpose: 'booking.card_saved.read' });
+}
+
+/** The later charge: the booking's destination charge, made off-session on the card saved for it. */
+export function laterChargeBody({ customerId, paymentMethod, ...args }) {
+  const body = paymentIntentBody(args);
+  delete body.automatic_payment_methods;
+  return { ...body, payment_method_types: ['card'], customer: customerId, payment_method: paymentMethod, off_session: true, confirm: true, metadata: { ...body.metadata, epic_later: 'true' } };
+}
+
+export function laterCharge(args) {
+  return call('POST', '/payment_intents', laterChargeBody(args), { householdId: args.householdId, purpose: 'booking.later_charge', idempotencyKey: `booking-later-${args.bookingId}` });
+}
+
 export function retrievePaymentIntent(id, { householdId } = {}) {
   return call('GET', `/payment_intents/${encodeURIComponent(id)}`, null, { householdId, purpose: 'booking.read' });
 }

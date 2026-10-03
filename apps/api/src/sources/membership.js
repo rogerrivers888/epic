@@ -201,7 +201,7 @@ async function noteProblem(m, { pauseReason = null } = {}) {
   const key = `membership:${m.stripe_subscription_id}`;
   if (m.status === 'paused') {
     await problems.record({ kind: 'membership_payment_failed', dedupeKey: key, amountPence: m.amount_pence || m.monthly_pence, householdId: m.household_id, membershipId: m.id,
-      stripeRef: m.stripe_subscription_id, stage: 'retrying', detail: { plan: m.plan_key, reason: pauseReason ?? m.pause_reason ?? null }, at: m.paused_at, reopen: true });
+      stripeRef: m.stripe_subscription_id, stage: 'retrying', detail: { plan: m.plan_key, reason: pauseReason ?? m.pause_reason ?? null }, at: m.paused_at, reopen: true, mode: m.mode });
   } else if (m.status === 'active') {
     await problems.resolve({ dedupeKey: key, resolution: 'Paid on a retry', by: 'stripe', stage: 'paid' });
   } else if (m.status === 'cancelled') {

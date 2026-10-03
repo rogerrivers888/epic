@@ -1251,6 +1251,10 @@ export async function applyStripeEvent(event) {
     } else if (event.type === 'customer.subscription.deleted' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
       // Pro cancelled or lapsed: it stops counting for hosting from now.
       await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and reason = $2 and state = 'succeeded'", [obj.metadata.epic_household_id, `sub:${obj.id}`]);
+    } else if (event.type?.startsWith('setup_intent.') && obj.object === 'setup_intent' && obj.id) {
+      // A booking far ahead (L4): the card saved, or not. Read back from Stripe, as a payment is.
+      const { applySetupIntent } = await import('./guestBookings.js');
+      await applySetupIntent(await stripe.retrieveSetupIntent(obj.id, { householdId: obj.metadata?.epic_household_id ?? null }));
     } else if (event.type?.startsWith('payment_intent.') && obj.object === 'payment_intent' && obj.id) {
       // Hosting v4: a guest's booking or tip. Read back from Stripe rather than trusting the event body's state.
       const { applyPaymentIntent } = await import('./guestBookings.js');

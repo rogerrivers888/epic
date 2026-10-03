@@ -32,6 +32,8 @@ export const KINDS = Object.freeze({
   waitlist_offered: { audience: 'guest', email: true },
   after_event: { audience: 'guest', email: true },
   event_changed: { audience: 'guest', email: false },
+  // A booking far ahead whose later charge the card refused (L4): asked to pay; the place is kept.
+  payment_needed: { audience: 'guest', email: true },
   // hosts
   new_booking: { audience: 'host', email: true },
   ask_to_book_request: { audience: 'host', email: true },

@@ -38,7 +38,7 @@ import { logChange } from '../repositories/hostingSettings.js';
 import { currentAccount } from '../context.js';
 import { householdOnPublicPath } from '../auth.js';
 import { currentHousehold } from './household.js';
-import { owe, shareOf, movedSinceBooking } from '../sources/bookingMoney.js';
+import { owe, shareOf, movedSinceBooking, chargeBasis } from '../sources/bookingMoney.js';
 import { feeFor, priceBooking, tipFee, numbersSettlement } from '../domain/money.js';
 import { mainAction, placesLeft, sessionsForBooking, KINDS_BY_LANE, checkParty, childAge, cancelQuote, answersEditable, tipOpen, guestChip } from '../domain/booking.js';
 import { localInstant, localDay, plusDays, slotsFor, bookableDay, dow, perPersonAt, refundWords, hostingConfig } from '../domain/lanes.js';
@@ -402,6 +402,9 @@ async function book({ offerId, body, household, account, invite = null }) {
           paid && typeof s.cancellation_fee_pct === 'number' ? s.cancellation_fee_pct : null],
       );
       for (const id of when.sessionIds) await c.query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, id]);
+      // Far ahead (L4): the card is saved now and charged later, so no charge waits more than 90 days for its payout.
+      const dueAt = paid ? laterChargeDue({ start: first ? startOf(first, o) : when.slot ? localInstant(when.slot.date, when.slot.time ?? '00:00', tzOf(o)) : null, decidesAt: first?.decides_at ?? null }) : null;
+      if (dueAt) { await c.query('update experience_bookings set charge_due_at = $2 where id = $1', [b.id, dueAt]); b.charge_due_at = dueAt; }
       // A one-session booking names its session too, so each weekly session is its own rated event on the fee ladder (Codex, 2 Oct 2026).
       if (when.sessionIds.length === 1) await c.query('update experience_bookings set session_id = $2 where id = $1', [b.id, when.sessionIds[0]]);
       for (const k of party.children) {
@@ -425,6 +428,7 @@ async function book({ offerId, body, household, account, invite = null }) {
       else await notifications.notify({ householdId: host.household_id, kind: 'ask_to_book_request', title: `Ask to book: ${o.title ?? 'your offer'}`, link: hostLink(o.id), dedupeKey: `ask:${b.id}` }).catch(() => null);
       return { booking: { id: b.id, state: asked ? 'requested' : 'confirmed' }, pay: null };
     }
+    if (b.charge_due_at) return saveCardForLater({ b, o, host, asked, account, invite });
     let pi;
     try {
       pi = await stripe.paymentIntent({
@@ -483,6 +487,83 @@ async function confirmed(b, o, host) {
  * failed → the place is let go. The webhook and the return trip both land here.
  */
 /**
+ * When a booking's money is taken, if not now (register L4): 80 days before it starts, or at the decides-by date if
+ * that is earlier — but only when that is more than two days off; nearer than that it is simply charged now. Null:
+ * charge now.
+ */
+export const LATER_DAYS = 80;
+export function laterChargeDue({ start, decidesAt = null, now = new Date() }) {
+  if (!start) return null;
+  const eighty = new Date(new Date(start).getTime() - LATER_DAYS * 86_400_000);
+  const due = decidesAt && new Date(decidesAt) < eighty ? new Date(decidesAt) : eighty;
+  return due.getTime() - now.getTime() > 2 * 86_400_000 ? due : null;
+}
+
+/**
+ * The booking far ahead: the household's card saved through a SetupIntent (on Epic's own account, for the host as
+ * merchant), nothing charged. The guest's browser confirms it as it would a payment; Stripe's event (or the
+ * read-back) then confirms the booking with the card saved.
+ */
+async function saveCardForLater({ b, o, host, asked, account, invite }) {
+  let si;
+  try {
+    const { ensureCustomer } = await import('../sources/membership.js');
+    const customerId = await ensureCustomer({ householdId: b.household_id, email: account?.email ?? null, name: account?.name ?? null });
+    si = await stripe.setupIntent({ customerId, destination: host.stripe_account_id, bookingId: b.id, offerId: o.id, householdId: b.household_id });
+  } catch (err) {
+    // As for a payment that can't start: the places go back at once.
+    await query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'payment_setup_failed' where id = $1 and state = 'pending'`, [b.id]);
+    await query(`update booking_sessions set state = 'cancelled' where booking_id = $1`, [b.id]);
+    if (invite) await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where id = $1 and booking_id = $2`, [invite.id, b.id]);
+    await restoreWaitlist(b.id);
+    throw err;
+  }
+  await query('update experience_bookings set stripe_setup_intent = $2 where id = $1 and stripe_setup_intent is null', [b.id, si.id]);
+  return { booking: { id: b.id, state: 'pending_payment' }, pay: { clientSecret: si.client_secret ?? null, setupIntent: si.id, amountPence: b.value_pence, hold: asked, later: { chargeOn: b.charge_due_at } } };
+}
+
+/**
+ * The card saved, or not (Stripe's event or the read-back; never the browser's word). Saved: the place is the
+ * guest's, nothing charged — or, asked to book, the host is asked. Refused: the places go back, as a payment's do.
+ */
+export async function applySetupIntent(si) {
+  const bookingId = si?.metadata?.epic_booking_id;
+  if (si?.metadata?.epic_kind !== 'booking_later' || !bookingId || !UUID.test(bookingId)) return null;
+  await query('update experience_bookings set stripe_setup_intent = $2 where id = $1 and stripe_setup_intent is null', [bookingId, si.id]);
+  const { rows: [b] } = await query('select * from experience_bookings where id = $1 and stripe_setup_intent = $2', [bookingId, si.id]);
+  if (!b) return null;
+  if (si.status === 'succeeded') {
+    const pm = typeof si.payment_method === 'string' ? si.payment_method : si.payment_method?.id ?? null;
+    const outcome = await withTransaction(async (c) => {
+      const { rows: [now] } = await c.query('select * from experience_bookings where id = $1 for update', [b.id]);
+      if (!now || now.payment_state !== 'none' || !pm) return null;
+      const { rows: [saved] } = await c.query(
+        `update experience_bookings set payment_state = 'card_saved', saved_payment_method = $2,
+                state = case when state = 'pending' and request_state is null then 'confirmed' else state end
+          where id = $1 returning *`, [b.id, pm]);
+      await logChange({ subjectKind: 'booking', subjectId: b.id, field: 'card_saved', after: { chargeOn: saved.charge_due_at }, byLabel: 'stripe' }, c);
+      return saved.state === 'cancelled' ? null : saved.request_state === 'asked' ? 'asked' : 'confirmed';
+    });
+    const o = await repo.offerById(b.offer_id);
+    const host = await repo.hostById(b.host_id);
+    if (outcome === 'confirmed') await confirmed(b, o, host);
+    if (outcome === 'asked') await notifications.notify({ householdId: host.household_id, kind: 'ask_to_book_request', title: `Ask to book: ${o?.title ?? 'your offer'}`, link: hostLink(b.offer_id), dedupeKey: `ask:${b.id}` }).catch(() => null);
+    return b.id;
+  }
+  if (b.payment_state === 'none' && (si.status === 'canceled' || (si.status === 'requires_payment_method' && si.last_setup_error))) {
+    const e = si.last_setup_error ?? {};
+    if (si.last_setup_error) {
+      await problems.record({ kind: e.decline_code === 'fraudulent' ? 'blocked_fraud' : 'payment_failed', dedupeKey: `setup_failed:${si.id}`, amountPence: b.value_pence, bookingId: b.id, householdId: b.household_id, hostId: b.host_id, offerId: b.offer_id, stripeRef: si.id, detail: { for: 'card_saved', code: e.code ?? null, declineCode: e.decline_code ?? null } });
+    }
+    await query(`update experience_bookings set payment_state = 'failed', state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'payment_failed' where id = $1 and payment_state = 'none'`, [b.id]);
+    await query(`update booking_sessions set state = 'cancelled' where booking_id = $1`, [b.id]);
+    await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where booking_id = $1`, [b.id]);
+    await restoreWaitlist(b.id);
+  }
+  return b.id;
+}
+
+/**
  * A payment that went wrong, in the payment problems log: blocked as fraud when Stripe's screening (Radar) or the
  * bank called it fraudulent, otherwise failed — with the bank's own code, never its message to the guest.
  */
@@ -514,7 +595,8 @@ export async function applyPaymentIntent(pi) {
   if (pi.status === 'succeeded') {
     const outcome = await withTransaction(async (c) => {
       const { rows: [now] } = await c.query('select * from experience_bookings where id = $1 for update', [b.id]);
-      if (!now || !['none', 'held', 'failed'].includes(now.payment_state)) return null;
+      if (!now || !['none', 'held', 'failed', 'card_saved', 'charge_failed'].includes(now.payment_state)) return null;
+      const later = ['card_saved', 'charge_failed'].includes(now.payment_state);
       const { rows: [charged] } = await c.query(
         `update experience_bookings set payment_state = 'charged', charged_pence = $2,
                 state = case when state = 'pending' then 'confirmed' else state end,
@@ -529,9 +611,12 @@ export async function applyPaymentIntent(pi) {
         await owe(c, charged, { amountPence: charged.charged_pence, cause: 'paid_after_cancel', key: `paid_after_cancel:${b.id}`, wholeBooking: true, triggeredBy: 'epic' });
         return 'refunded';
       }
-      return 'confirmed';
+      // The later charge of a booking already confirmed when its card was saved: nobody is told it is on again.
+      return later ? 'later' : 'confirmed';
     });
     if (outcome === 'confirmed') await confirmed(b, o, host);
+    // Paid after the card had been refused: that problem is put right.
+    if (outcome === 'later') await problems.resolve({ dedupeKey: `later_charge_failed:${b.id}`, resolution: 'Paid', by: 'guest' });
     return b.id;
   }
   if (pi.status === 'requires_capture') {
@@ -575,7 +660,11 @@ async function applyTipIntent(pi) {
   await query('update booking_tips set stripe_ref = $2 where id = $1 and stripe_ref is null', [tipId, pi.id]);
   // A tip whose payment failed or was abandoned frees the booking for another try (Codex, 2 Oct 2026).
   if (pi.status === 'canceled' || (pi.status === 'requires_payment_method' && pi.last_payment_error)) {
-    if (pi.last_payment_error) await recordFailedPayment(pi, { bookingId: pi.metadata?.epic_booking_id ?? null, householdId: pi.metadata?.epic_household_id ?? null, offerId: pi.metadata?.epic_offer_id ?? null, kind: 'tip' });
+    if (pi.last_payment_error) {
+      // The tip's own host, so the host's view of the log shows it (Codex, 3 Oct 2026).
+      const { rows: [tb] } = await query('select b.id, b.host_id, b.offer_id, b.household_id from booking_tips t join experience_bookings b on b.id = t.booking_id where t.id = $1', [tipId]);
+      await recordFailedPayment(pi, { bookingId: tb?.id ?? pi.metadata?.epic_booking_id ?? null, householdId: tb?.household_id ?? pi.metadata?.epic_household_id ?? null, hostId: tb?.host_id ?? null, offerId: tb?.offer_id ?? pi.metadata?.epic_offer_id ?? null, kind: 'tip' });
+    }
     await query(`update booking_tips set state = 'failed' where id = $1 and stripe_ref = $2 and state = 'pending'`, [tipId, pi.id]);
     return null;
   }
@@ -634,13 +723,43 @@ router.post('/booked/:id/payment', async (req, res, next) => {
   try {
     const { household } = await me();
     const b = await ownBooking(req.params.id, household.id);
-    if (!b.stripe_payment_intent) throw refuse(409, 'nothing_to_pay', 'There’s nothing to pay on this one.');
-    const pi = await stripe.retrievePaymentIntent(b.stripe_payment_intent, { householdId: household.id });
-    await applyPaymentIntent(pi);
+    // A booking far ahead whose card was being saved: read the SetupIntent back instead (L4).
+    if (!b.stripe_payment_intent && b.stripe_setup_intent) await applySetupIntent(await stripe.retrieveSetupIntent(b.stripe_setup_intent, { householdId: household.id }));
+    else if (!b.stripe_payment_intent) throw refuse(409, 'nothing_to_pay', 'There’s nothing to pay on this one.');
+    else await applyPaymentIntent(await stripe.retrievePaymentIntent(b.stripe_payment_intent, { householdId: household.id }));
     const { rows: [now] } = await query('select state, payment_state, request_state from experience_bookings where id = $1', [b.id]);
     res.json({ state: now.state, paymentState: now.payment_state, requestState: now.request_state });
   } catch (err) { next(err); }
 });
+
+/**
+ * POST /booked/:id/pay-now — a booking far ahead whose later charge the card refused (L4): the guest pays it now,
+ * in the browser like any payment, and keeps the place. The same amount and fee the job would have charged; a new
+ * PaymentIntent each try (a refused one cannot be confirmed again), each with its own key.
+ */
+router.post('/booked/:id/pay-now', async (req, res, next) => {
+  try {
+    const { household, account } = await me();
+    const b = await ownBooking(req.params.id, household.id);
+    if (b.payment_state !== 'charge_failed' || b.state === 'cancelled') throw refuse(409, 'nothing_to_pay', 'There’s nothing to pay on this one.');
+    const host = await repo.hostById(b.host_id);
+    if (!hostCanBeCharged(host)) throw refuse(409, 'host_not_ready', 'This host can’t take payments just now.');
+    const { amountPence, feePence } = laterAmounts(b);
+    const { rows: [n] } = await query('select count(*)::int as n from hosting_payments where booking_id = $1 and kind = $2', [b.id, 'charge']);
+    const pi = await stripe.paymentIntent({ amountPence, destination: host.stripe_account_id, applicationFeePence: feePence, hostName: host.name, bookingId: b.id, offerId: b.offer_id, householdId: b.household_id, email: account?.email ?? null, idempotencyKey: `booking-later-pay-${b.id}-${n.n}` });
+    await query('update experience_bookings set stripe_payment_intent = $2 where id = $1', [b.id, pi.id]);
+    await ledger.record({ kind: 'charge', bookingId: b.id, offerId: b.offer_id, hostId: b.host_id, householdId: b.household_id, amountPence, epicPence: feePence, hostPence: amountPence - feePence, bookingValuePence: b.value_pence, ratePct: b.fee_rate_pct, state: 'pending', stripeRef: pi.id, mode: 'test', reason: b.fee_reason });
+    res.json({ booking: { id: b.id }, pay: { clientSecret: pi.client_secret ?? null, paymentIntent: pi.id, amountPence } });
+  } catch (err) { next(err); }
+});
+
+/** What a later charge takes: the booking's value less any part cancelled before it, and Epic's fee in proportion. */
+export function laterAmounts(b) {
+  const value = Number(b.value_pence ?? 0);
+  const amountPence = Math.max(0, value - Number(b.later_off_pence ?? 0));
+  const feePence = value > 0 ? Math.round((Number(b.fee_pence ?? 0) * amountPence) / value) : 0;
+  return { amountPence, feePence };
+}
 
 // ---------------------------------------------------------------------------
 // the waiting list
@@ -1068,7 +1187,8 @@ async function quoteFor(b, o, sessionIds, now = new Date()) {
   const forfeited = held.filter((x) => x.held === 'forfeited').length;
   const q = o.lane === 'course' && everStarted
     ? { pence: 0, cause: 'guest_cancelled', words: 'The course has started: no refund.' }
-    : cancelQuote({ booking: { ...b, all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms, feePct: b.cancellation_fee_pct == null ? null : Number(b.cancellation_fee_pct) });
+    // A card saved and not yet charged (L4): quoted on what would be charged, and no fee is kept on money never taken.
+    : cancelQuote({ booking: { ...chargeBasis(b), all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms, feePct: b.cancellation_fee_pct == null || b.payment_state === 'card_saved' || b.payment_state === 'charge_failed' ? null : Number(b.cancellation_fee_pct) });
   return { ...q, losing, liveCount: live.length };
 }
 
@@ -1360,7 +1480,8 @@ async function myRequest(id, { retryCapture = false } = {}) {
   // A paid request can be answered only once the guest's card is held (Codex, 2 Oct 2026).
   const o = await repo.offerById(b.offer_id);
   // Paid through Epic: the card must be held first. Paid to the host directly: nothing to hold (Codex, 2 Oct 2026).
-  if (Number(b.value_pence ?? 0) > 0 && (o?.money ?? 'epic') === 'epic' && b.payment_state !== 'held') throw refuse(409, 'not_held', 'The guest hasn’t finished paying yet.');
+  // Far ahead (L4), the card is saved rather than held: that is the guest finished too.
+  if (Number(b.value_pence ?? 0) > 0 && (o?.money ?? 'epic') === 'epic' && !['held', 'card_saved'].includes(b.payment_state)) throw refuse(409, 'not_held', 'The guest hasn’t finished paying yet.');
   return { host, b, o, retry };
 }
 

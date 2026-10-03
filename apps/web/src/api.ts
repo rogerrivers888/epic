@@ -2815,15 +2815,17 @@ export const api = {
    * host-link rate applies; the booking screens arrive with the guest design.
    */
   laneBook: (offerId: string, hostId: string | null, body: Record<string, unknown>) =>
-    post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number; hold: boolean } | null }>(
+    post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent?: string; setupIntent?: string; amountPence: number; hold: boolean; later?: { chargeOn: string } } | null }>(
       `/api/experiences/${encodeURIComponent(offerId)}/booking`, { ...body, hostLink: hostLinkFor(hostId) ?? undefined }),
   // --- The guest side (guest handoff, 3 Oct 2026, G1–G31; routes/guestBookings.js) ---
   guestOptions: (id: string, q: { l?: string | null; i?: string | null } = {}) =>
     request<GuestOptions>(`/api/experiences/${encodeURIComponent(id)}/booking/options${qs({ l: q.l ?? undefined, i: q.i ?? undefined })}`),
   guestQuote: (id: string, body: GuestBookBody) => post<GuestQuote>(`/api/experiences/${encodeURIComponent(id)}/booking/quote`, body),
   guestBook: (offerId: string, hostId: string | null, body: GuestBookBody) =>
-    post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number; hold: boolean } | null }>(
+    post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent?: string; setupIntent?: string; amountPence: number; hold: boolean; later?: { chargeOn: string } } | null }>(
       `/api/experiences/${encodeURIComponent(offerId)}/booking`, { ...body, hostLink: hostLinkFor(hostId) ?? undefined }),
+  /** A booking far ahead whose saved card was refused at its later charge (L4): pay it now and keep the place. */
+  guestPayNow: (bookingId: string) => post<{ booking: { id: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number } }>(`/api/booked/${encodeURIComponent(bookingId)}/pay-now`, {}),
   guestPaid: (bookingId: string, paymentIntent: string) => post<{ state: string; paymentState: string; requestState: string | null }>(`/api/booked/${encodeURIComponent(bookingId)}/payment`, { paymentIntent }),
   /** Leave the waiting list — or pass on a place offered from it (G18), which then goes to the next person. */
   guestLeaveWaitlist: (offerId: string, sessionId?: string | null) => del<{ left: boolean; passed: boolean }>(`/api/experiences/${encodeURIComponent(offerId)}/waitlist${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),

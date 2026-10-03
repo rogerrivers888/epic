@@ -62,17 +62,23 @@ const outcomeOf = (r: any): PayOutcome => {
     const declined = r.error.code === 'card_declined' || r.error.type === 'card_error';
     return declined ? { state: 'declined', message: r.error.message ?? 'Your bank said no.' } : { state: 'failed', message: r.error.message ?? 'Something went wrong.' };
   }
-  const pi = r?.paymentIntent;
+  // A booking far ahead saves the card rather than paying now (register L4): its SetupIntent reads the same way.
+  const pi = r?.paymentIntent ?? r?.setupIntent;
   if (!pi) return { state: 'failed', message: 'Something went wrong.' };
   // Paid means settled (or a card hold that's in place) — exactly what the server confirms on (Codex, 3 Oct 2026).
+  // Paid — or, for a card saved, saved: the server reads either back and confirms the booking on it.
   if (pi.status === 'succeeded' || pi.status === 'requires_capture') return { state: 'paid', paymentIntent: pi.id };
   if (pi.status === 'processing') return { state: 'processing', paymentIntent: pi.id };
   if (pi.status === 'requires_action') return { state: 'bank', paymentIntent: pi.id };
   return { state: 'failed', message: 'Payment didn’t go through.' };
 };
 
+/** A SetupIntent's secret (a card saved for a booking far ahead) rather than a PaymentIntent's. */
+const saving = (clientSecret: string) => clientSecret.startsWith('seti_');
+
 /** Confirm with the card field; the bank's own step is left for "I've approved it". */
 export async function confirmWithCard(stripe: StripeJs, clientSecret: string, card: any): Promise<PayOutcome> {
+  if (saving(clientSecret)) return outcomeOf(await stripe.confirmCardSetup(clientSecret, { payment_method: { card } }, { handleActions: false }));
   return outcomeOf(await stripe.confirmCardPayment(clientSecret, { payment_method: { card } }, { handleActions: false }));
 }
 
@@ -107,7 +113,9 @@ export function payWithWallet(stripe: StripeJs, pr: any, { start }: { start: () 
       try {
         const secret = await start();
         if (!secret) { ev.complete('fail'); resolve({ state: 'failed', message: 'Nothing to pay.' }); return; }
-        const first = outcomeOf(await stripe.confirmCardPayment(secret, { payment_method: ev.paymentMethod.id }, { handleActions: false }));
+        const first = outcomeOf(saving(secret)
+          ? await stripe.confirmCardSetup(secret, { payment_method: ev.paymentMethod.id }, { handleActions: false })
+          : await stripe.confirmCardPayment(secret, { payment_method: ev.paymentMethod.id }, { handleActions: false }));
         ev.complete(first.state === 'paid' || first.state === 'bank' || first.state === 'processing' ? 'success' : 'fail');
         resolve(first.state === 'bank' ? await finishWithBank(stripe, secret) : first);
       } catch (e: any) { ev.complete('fail'); resolve({ state: 'failed', message: e?.message ?? 'Something went wrong.' }); }
