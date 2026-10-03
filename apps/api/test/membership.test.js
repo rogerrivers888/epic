@@ -23,6 +23,8 @@ const calls = [];
 /** The subscriptions the fake Stripe holds, by id. */
 const subs = new Map();
 let priceMade = 0;
+/** What a Checkout session reads back as. */
+let checkoutRead = { status: 'open' };
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -38,7 +40,7 @@ const fake = http.createServer((req, res) => {
     if (req.url === '/v1/checkout/sessions' && req.method === 'POST') return json({ id: 'cs_m_1', url: 'https://checkout.stripe.test/m' });
     if (req.url === '/v1/billing_portal/sessions' && req.method === 'POST') return json({ url: 'https://billing.stripe.test/p' });
     if (req.url.endsWith('/expire')) return json({ id: req.url.split('/')[4], status: 'expired' });
-    if (req.url.startsWith('/v1/checkout/sessions/')) return json({ id: req.url.split('/')[4], status: 'open' });
+    if (req.url.startsWith('/v1/checkout/sessions/')) return json({ id: req.url.split('/')[4], ...checkoutRead });
     if (req.url.startsWith('/v1/subscriptions/') && req.method === 'DELETE') { const s = subs.get(req.url.split('/')[3].split('?')[0]); return json({ ...s, status: 'canceled', latest_invoice: null }); }
     if (req.url.startsWith('/v1/subscriptions/') && req.method === 'POST') return json(subs.get(req.url.split('/')[3]) ?? {});
     if (req.url.startsWith('/v1/subscriptions/')) { const s = subs.get(req.url.split('/')[3]); return s ? json(s) : json({ error: { code: 'resource_missing' } }, 404); }
@@ -385,4 +387,48 @@ test('revenue counts the paid months only — never the trial, and still after a
   // Nothing else in this file runs before October 2026, so these windows hold this membership alone.
   assert.equal(before.pence, 0, 'the trial is not revenue');
   assert.equal(during.pence, 3 * 599, 'March, April and May, though it is cancelled now');
+});
+
+test('a member who cancelled can join again; a Checkout just finished and not yet written down is refused', async () => {
+  const { household, account } = await aMember();
+  const srv = await server(account);
+  try {
+    assert.equal((await srv.send('POST', '/api/membership/checkout', { plan: 'solo' })).status, 200);
+    await query("update households set membership_checkout_at = now() - interval '1 minute' where id = $1", [household.id]);
+    // Finished, its subscription not yet heard of: they have just joined.
+    const sub = aSub(household.id);
+    checkoutRead = { status: 'complete', subscription: sub.id };
+    assert.equal((await srv.send('POST', '/api/membership/checkout', { plan: 'solo' })).body.error, 'already_a_member');
+    // Written down, then cancelled: that Checkout is history, and joining again is allowed (without a second trial).
+    await applyStripeEvent(event('customer.subscription.created', sub));
+    sub.status = 'canceled'; sub.ended_at = secs(new Date());
+    await applyStripeEvent(event('customer.subscription.deleted', sub));
+    await query("update households set membership_checkout_at = now() - interval '1 minute' where id = $1", [household.id]);
+    const again = await srv.send('POST', '/api/membership/checkout', { plan: 'solo' });
+    assert.equal(again.status, 200, JSON.stringify(again.body));
+    assert.equal(again.body.trialDays, 0);
+  } finally { checkoutRead = { status: 'open' }; await srv.close(); }
+});
+
+test('a first payment that fails and never recovers is never revenue', async () => {
+  const { household } = await aMember();
+  const sub = aSub(household.id, { trialEnd: new Date(Date.now() - 2 * day) });
+  sub.status = 'past_due';
+  await applyStripeEvent(event('invoice.payment_failed', { id: 'in_f', object: 'invoice', subscription: sub.id }));
+  assert.equal((await billing.membershipBySubscription(sub.id)).paid_from, null);
+  sub.status = 'canceled'; sub.ended_at = secs(new Date());
+  await applyStripeEvent(event('customer.subscription.deleted', sub));
+  const billed = (await billedMemberships()).find((b) => b.householdId === household.id);
+  assert.equal(billed.paidFrom, null);
+});
+
+test('an annual reminder quotes Stripe’s own amount for the year, not twelve rounded months', async () => {
+  const { household } = await aMember();
+  const sub = aSub(household.id, { status: 'active', trialEnd: null, amount: 6469, interval: 'year' });
+  sub.items.data[0].current_period_end = secs(new Date(Date.now() + 3 * day));
+  await applyStripeEvent(event('customer.subscription.created', sub));
+  const m = (await billing.claimRemindersDue({ days: 7 })).find((x) => x.stripe_subscription_id === sub.id);
+  assert.ok(m);
+  assert.equal(m.monthly_pence, 539);
+  assert.match(membership.reminderMail(m, 'https://x').text, /£64\.69 for the year/);
 });

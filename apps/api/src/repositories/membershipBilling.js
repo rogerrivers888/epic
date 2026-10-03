@@ -77,21 +77,23 @@ export class SecondMembership extends Error {
  */
 export async function upsertFromSubscription({ householdId, subscriptionId, facts, mode = 'test', pauseReason = null, stamp = null }) {
   if (!facts.status) return null;
-  // First paid: the trial's end, or the start when there was none — once it is active or paused (a payment due).
-  const paidFrom = ['active', 'paused'].includes(facts.status) ? (facts.trialEnd ?? facts.startedAt ?? new Date()) : null;
+  // First paid: the trial's end, or the start when there was none — once Stripe says it is active, i.e. paid. A pause
+  // keeps a date already set but never makes one: a first payment that fails is not revenue (Codex, 3 Oct 2026).
+  const paidFrom = facts.status === 'active' ? (facts.trialEnd ?? facts.startedAt ?? new Date()) : null;
   let r;
   try {
     ({ rows: [r] } = await query(
-      `insert into memberships (household_id, plan_key, status, stripe_subscription_id, stripe_price_id, monthly_pence, interval,
+      `insert into memberships (household_id, plan_key, status, stripe_subscription_id, stripe_price_id, monthly_pence, amount_pence, interval,
                                 trial_end, current_period_end, cancel_at_period_end, started_at, ended_at, paused_at, pause_reason, mode,
                                 paid_from, read_stamp)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, now()), case when $3 = 'cancelled' then coalesce($12::timestamptz, now()) end,
+       values ($1, $2, $3, $4, $5, $6, $17, $7, $8, $9, $10, coalesce($11, now()), case when $3 = 'cancelled' then coalesce($12::timestamptz, now()) end,
                case when $3 = 'paused' then now() end, case when $3 = 'paused' then $13 end, $14, $15, $16)
        on conflict (stripe_subscription_id) do update set
          plan_key = excluded.plan_key,
          status = excluded.status,
          stripe_price_id = excluded.stripe_price_id,
          monthly_pence = excluded.monthly_pence,
+         amount_pence = excluded.amount_pence,
          interval = excluded.interval,
          trial_end = excluded.trial_end,
          current_period_end = excluded.current_period_end,
@@ -106,7 +108,7 @@ export async function upsertFromSubscription({ householdId, subscriptionId, fact
        returning *`,
       [householdId, facts.planKey ?? 'unknown', facts.status, subscriptionId, facts.priceId, facts.monthlyPence ?? 0, facts.interval ?? 'month',
         facts.trialEnd, facts.currentPeriodEnd, facts.cancelAtPeriodEnd ?? false, facts.startedAt, facts.endedAt, pauseReason, mode,
-        paidFrom, stamp ?? await readStamp()],
+        paidFrom, stamp ?? await readStamp(), facts.amountPence ?? facts.monthlyPence ?? 0],
     ));
   } catch (err) {
     // The household is a member already under another subscription: Stripe has made a second (two Checkouts finished).

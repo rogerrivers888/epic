@@ -524,6 +524,7 @@ export function membershipFromSubscription(sub) {
     planKey: price?.metadata?.epic_plan ?? sub?.metadata?.epic_plan ?? null,
     priceId: price?.id ?? null,
     monthlyPence: monthly,
+    amountPence: unit,
     interval,
     trialEnd: ts(sub?.trial_end),
     // Newer API versions put the period on the item; older ones on the subscription.

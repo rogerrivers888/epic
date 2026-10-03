@@ -63,7 +63,10 @@ export async function startCheckout({ householdId, email, name, planKey }) {
   try {
     if (slot.previous) {
       const prev = await stripe.retrieveCheckout(slot.previous, { householdId }).catch(() => null);
-      if (prev?.status === 'complete') throw refuse(409, 'already_a_member', 'You’ve just joined — it can take a moment to show.');
+      // Finished, and its subscription not written down yet: they have just joined. Written down already (and, since
+      // nothing is running, ended since): an old Checkout, and they may join again (Codex, 3 Oct 2026).
+      const prevSub = typeof prev?.subscription === 'string' ? prev.subscription : prev?.subscription?.id;
+      if (prev?.status === 'complete' && !(prevSub && await billing.membershipBySubscription(prevSub))) throw refuse(409, 'already_a_member', 'You’ve just joined — it can take a moment to show.');
       if (prev?.status === 'open') await stripe.expireCheckout(slot.previous, { householdId });
     }
     const customerId = await ensureCustomer({ householdId, email, name });
@@ -193,7 +196,9 @@ const PLAN_WORDS = { solo: 'Solo', household: 'Household', pro: 'Pro' };
 export function reminderMail(m, cancelLink) {
   const plan = PLAN_WORDS[m.plan_key] ?? 'Epic';
   const trial = m.status === 'trialling';
-  const amount = m.interval === 'year' ? `${money(m.monthly_pence * 12)} for the year` : `${money(m.monthly_pence)} a month`;
+  // Stripe's own amount for the interval, never the monthly figure multiplied back (Codex, 3 Oct 2026).
+  const each = Number(m.amount_pence) || Number(m.monthly_pence) * (m.interval === 'year' ? 12 : 1);
+  const amount = m.interval === 'year' ? `${money(each)} for the year` : `${money(each)} a month`;
   const subject = trial ? `Your free month of Epic ${plan} ends on ${day(m.on_date)}` : `Your Epic ${plan} membership renews on ${day(m.on_date)}`;
   const text = [
     trial
