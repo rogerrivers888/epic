@@ -471,6 +471,14 @@ export type Route =
    * and indexable, except a landing page, which is noindex (J10).
    */
   | { name: 'site'; locale: SiteLocale; page: SitePage; landing: HomeDesign | null }
+  /**
+   * Epic Events on the web (3 Oct 2026): a public event at /en-gb/event/{slug}-{code}, a host at
+   * /en-gb/hosts/{slug}-{code}, and the short share link /e/{code}. The code is permanent; the slug
+   * follows the title, and the web server 301s an old one before the app ever sees it.
+   */
+  | { name: 'publicEvent'; locale: SiteLocale; slug: string; code: string }
+  | { name: 'publicHost'; locale: SiteLocale; slug: string; code: string }
+  | { name: 'shortEvent'; code: string }
   | { name: 'login' }
   /**
    * Set your credentials (L4), epic.day/in/<token>: where a staff invitation and
@@ -677,10 +685,18 @@ export function parseRoute(path: string): Route {
           ? { name: 'site', locale, page: 'go', landing: b as HomeDesign }
           : { name: 'unknown', path };
       }
+      if ((a === 'event' || a === 'hosts') && b && !c) {
+        const m = /^(.+)-([a-z0-9]{6})$/.exec(b);
+        if (!m) return { name: 'unknown', path };
+        return a === 'event' ? { name: 'publicEvent', locale, slug: m[1], code: m[2] } : { name: 'publicHost', locale, slug: m[1], code: m[2] };
+      }
       return !b && (SITE_PAGES as readonly string[]).includes(a)
         ? { name: 'site', locale, page: a as SitePageName, landing: null }
         : { name: 'unknown', path };
     }
+
+    case 'e':
+      return a && !b && /^[a-z0-9]{6}$/.test(a) ? { name: 'shortEvent', code: a } : { name: 'unknown', path };
 
     case 'login':
       return a ? { name: 'unknown', path } : { name: 'login' };
@@ -846,6 +862,9 @@ export function hrefOf(route: Route): string {
       return route.page === 'home' ? paths.siteHome(route.locale)
         : route.page === 'go' ? paths.siteLanding(route.landing!, route.locale)
           : buildHref([route.locale, route.page]);
+    case 'publicEvent': return `/${route.locale}/event/${route.slug}-${route.code}`;
+    case 'publicHost': return `/${route.locale}/hosts/${route.slug}-${route.code}`;
+    case 'shortEvent': return buildHref(['e', route.code]);
     case 'login': return '/login';
     case 'in': return buildHref(['in', route.token]);
     case 'account': return '/account';
@@ -1366,6 +1385,9 @@ export function titleOf(route: Route): string {
     case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'You and yours');
     case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
     case 'site': return siteTitleOf(route);
+    // The page's own title is written by the web server and set again by the page once it has loaded.
+    case 'publicEvent': case 'shortEvent': return 'Epic Events';
+    case 'publicHost': return 'Epic Hosts';
     case 'login': return epic('Log in');
     case 'in': return epic('Set up your login');
     case 'account': return epic('Your account');

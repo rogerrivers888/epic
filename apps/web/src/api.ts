@@ -3031,6 +3031,9 @@ export const api = {
   experiencesNear: (q: { lat: number; lng: number; km?: number; love?: string | null }) => request<ExperiencesNear>(`/api/experiences/near${qs(q)}`),
   bookExperience: (id: string, body: BookingInput) => post<{ booking: Booking; payments: PaymentsConfig }>(`/api/experiences/${id}/book`, body),
   hostProfile: (id: string) => request<HostProfile>(`/api/hosts/${id}`),
+  /** Epic Events on the web: a public event or host page, for anybody (routes/publicPages.js). */
+  publicEvent: (code: string) => request<PublicEvent>(`/api/public/events/${encodeURIComponent(code)}`),
+  publicHost: (code: string) => request<PublicHostPage>(`/api/public/hosts/${encodeURIComponent(code)}`),
   hostReviews: (id: string, offset: number) => request<{ reviews: HostProfile['reviews'] }>(`/api/hosts/${encodeURIComponent(id)}/reviews?offset=${offset}`),
 
   // --- host skills: the open vocabulary both ends of the app share ----------
@@ -6291,4 +6294,22 @@ export type EventNear = {
   price: { mode: string; pence: number | null; childPence: number | null; nowEach: number | null; dropInPence?: number | null; bookAheadPence?: number | null };
   who: { ageMin: number | null; ageMax: number | null; dropOff: boolean };
   placesLeft: number | null; full: boolean; needs: number | null; waitlist: boolean; rating: number | null; reviews: number;
+};
+
+/** A card for another event on a public page: more from this host, or more like this. */
+export type PublicCard = { code: string; path: string; title: string | null; lane: GuestLane; kind: string | null; photo: string | null; area: string | null; date: string | null; time: string | null; price: EventNear['price'] };
+export type PublicReviews = { total: number; rating: number | null; items: { stars: number; text: string | null; who: string | null; on: string | null; reply: string | null }[] };
+/** A public event page (Epic Events on the web, 3 Oct 2026): the host as "Hannah R.", the town and never the address. */
+export type PublicEvent = {
+  code: string; path: string; status: 'live' | 'finished' | 'called_off' | 'expired' | 'gone'; on: string | null; mood: string; subcategory: string | null;
+  offerId?: string; title?: string | null; summary?: string | null; description?: string | null; lane?: GuestLane; kind?: string | null; category?: string | null;
+  photos?: string[]; where?: { area: string | null; online: boolean };
+  when?: { sessions: { date: string; endsOn: string | null; time: string | null; endsAt: string | null }[]; first: string | null; last: string | null; startsAt: string | null; endsAt: string | null; timeZone: string };
+  price?: EventNear['price']; who?: { ageMin: number | null; ageMax: number | null; dropOff: boolean; checked: boolean }; refundWords?: string | null;
+  host?: { code: string; path: string; name: string; photo: string | null; checked: boolean; since: string | null };
+  reviews?: PublicReviews; moreFromHost?: PublicCard[]; similar?: PublicCard[];
+};
+export type PublicHostPage = {
+  code: string; path: string; status: 'live' | 'gone'; indexable?: boolean; name?: string; photo?: string | null; intro?: string | null; checked?: boolean; since?: string | null;
+  subcategory?: string | null; town?: string | null; events?: PublicCard[]; finished?: PublicCard[]; reviews?: PublicReviews;
 };

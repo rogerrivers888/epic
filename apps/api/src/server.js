@@ -30,6 +30,7 @@ import hostDeskRoutes from './routes/hostDesk.js';
 import * as hostingSettingsRepo from './repositories/hostingSettings.js';
 import hostingAdminV4Routes from './routes/hostingAdmin.js';
 import guestBookingRoutes, { publicRouter as guestBookingPublicRoutes } from './routes/guestBookings.js';
+import publicPagesRoutes from './routes/publicPages.js';
 import hostingMoneyRoutes, { adminRouter as hostingMoneyAdminRoutes, startHostingMoneyLoop } from './routes/hostingMoney.js';
 import accountRoutes from './routes/accounts.js';
 import adminRoutes from './routes/admin.js';
@@ -217,6 +218,10 @@ app.use('/api/images', libraryImageRoutes);
 // unguessable token is the whole credential. Mounted before `requireSession`
 // so it is answered rather than turned away.
 app.use('/api/order', orderTicketRoutes);
+
+// Public event and host pages (Epic Events on the web, 3 Oct 2026): read-only,
+// account-free, spend-free, and admitted by the launch gate (siteGate.js).
+app.use('/api/public', publicPagesRoutes);
 
 app.use(requireSession);
 // An agent session reads and proposes; it never writes to production (G11,

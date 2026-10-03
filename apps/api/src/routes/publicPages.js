@@ -1,0 +1,273 @@
+/**
+ * Epic Events on the web (brief, 3 Oct 2026): what a public event page and a
+ * host page say to anybody, signed in or not, and to Google.
+ *
+ *   GET /api/public/events/:code    an event's page: status, the safe facts, its host as "Hannah R."
+ *   GET /api/public/hosts/:code     a host's page: their events and reviews
+ *   GET /api/public/sitemap         every indexable event and host, with lastmod
+ *   GET /api/public/media/:id       a photo, only while it belongs to a page shown here
+ *
+ * Mounted outside the session door and admitted by the launch gate: nothing
+ * here needs an account, nothing here spends, and nothing here writes (not even
+ * an Insights view — crawlers would make it up). What is never published: a
+ * host's home address or coordinates, an exact venue before booking, guest
+ * names, children's details, and anything from Google (brief §4, §5).
+ *
+ * Status of an event (brief §1):
+ *   live        public, live (or paused by the host for a while), still to come
+ *   finished    its last date passed in the last 90 days — "This has finished"
+ *   called_off  called off in the last 30 days — shown with alternatives
+ *   expired     past those windows; the web answers 301 to its subcategory
+ *               page once those pages exist (EPIC_EVENT_CATEGORY_PAGES), 410 until then
+ *   gone        its host paused or stopped; same answer as expired
+ * Drafts, events in review, private and link-only events are a 404 — they are
+ * not on the web at all (a private event is only ever at /in/{token}).
+ */
+
+import { Router } from 'express';
+import { query } from '../db.js';
+import * as repo from '../repositories/hosting.js';
+import { localDay, perPersonAt, refundWords, hostingConfig } from '../domain/lanes.js';
+import { moodOf } from './guestBookings.js';
+
+const router = Router();
+export default router;
+
+const CODE = /^[a-z0-9]{6}$/;
+const ymd = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : d ? String(d).slice(0, 10) : null);
+const hm = (t) => (t ? String(t).slice(0, 5) : null);
+const FINISHED_DAYS = 90;
+const CALLED_OFF_DAYS = 30;
+const KIND_WORDS = { oneoff: 'One-off', weekly: 'Weekly', course: 'Course', onrequest: 'On request' };
+
+/** "hannah-r", "fossil-hunting-with-a-geologist": lowercase, hyphens, nothing else, no more than 60 characters. */
+export function slugOf(words) {
+  const s = String(words ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return (s.slice(0, 60).replace(/-+$/, '') || 'event');
+}
+
+/** First name and surname initial on public pages (brief §5): "Hannah Robinson" → "Hannah R.". */
+export function publicName(name) {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'An Epic host';
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
+}
+
+export const eventPath = (o, locale = 'en-gb') => `/${locale}/event/${slugOf(o.title)}-${o.public_code}`;
+export const hostPath = (h, locale = 'en-gb') => `/${locale}/hosts/${slugOf(publicName(h.name))}-${h.public_code}`;
+const media = (id) => (id ? `/api/public/media/${id}` : null);
+const daysBetween = (a, b) => Math.round((new Date(`${b}T12:00:00Z`) - new Date(`${a}T12:00:00Z`)) / 86_400_000);
+
+/** The offers that are on the web at all: a public event from the four lanes, past review. */
+const LISTED = `o.lane is not null and o.visibility = 'public' and o.state in ('live', 'paused', 'ended')`;
+
+/** What an event's status is today, from its sessions and its host (see the file header). */
+export function eventStatus(o, host, sessions, today) {
+  if (!host || host.paused || host.stopped_at) return { status: 'gone' };
+  const live = sessions.filter((s) => s.state !== 'cancelled');
+  if (o.called_off_at) {
+    const on = ymd(o.called_off_at);
+    return { status: daysBetween(on, today) > CALLED_OFF_DAYS ? 'expired' : 'called_off', on };
+  }
+  const last = live.length ? ymd(live[live.length - 1].ends_on ?? live[live.length - 1].on_date) : null;
+  const ahead = live.some((s) => ymd(s.ends_on ?? s.on_date) >= today);
+  const ended = o.state === 'ended' || (o.lane !== 'onrequest' && live.length > 0 && !ahead);
+  if (!ended) return { status: 'live' };
+  const on = last ?? ymd(o.updated_at) ?? today;
+  return { status: daysBetween(on, today) > FINISHED_DAYS ? 'expired' : 'finished', on };
+}
+
+function priceOf(o) {
+  return {
+    mode: o.price_mode ?? 'free', pence: o.price_pence, childPence: o.child_pence, dropInPence: o.drop_in_pence, bookAheadPence: o.book_ahead_pence,
+    nowEach: o.price_mode === 'by_numbers' && o.total_pence && o.min_count ? perPersonAt(o.total_pence, o.min_count) : null,
+  };
+}
+
+async function sessionsOf(ids) {
+  if (!ids.length) return new Map();
+  const { rows } = await query(
+    `select offer_id, on_date, ends_on, starts_at, ends_at, state from offer_sessions where offer_id = any($1::uuid[]) order by on_date, starts_at nulls first`,
+    [ids],
+  );
+  const by = new Map();
+  for (const r of rows) { const l = by.get(r.offer_id) ?? []; l.push(r); by.set(r.offer_id, l); }
+  return by;
+}
+
+/** A card for another event: more from this host, or more like this. */
+function cardOf(o, sessions, today) {
+  const next = sessions.find((s) => s.state !== 'cancelled' && ymd(s.on_date) >= today) ?? null;
+  return { code: o.public_code, path: eventPath(o), title: o.title, lane: o.lane, kind: KIND_WORDS[o.lane] ?? null, photo: media(o.photo_ids?.[0]), area: o.venue_area ?? null, date: next ? ymd(next.on_date) : null, time: next ? hm(next.starts_at) : null, price: priceOf(o) };
+}
+
+/** Live, listed events, with their sessions — for "More from" and "More like this". */
+async function liveCards(where, params, today, limit = 4) {
+  const { rows } = await query(
+    `select o.* from host_offers o join hosts h on h.id = o.host_id
+      where ${LISTED} and o.state = 'live' and o.called_off_at is null and not coalesce(h.paused, false) and h.stopped_at is null and ${where}
+      order by o.updated_at desc limit 40`,
+    params,
+  );
+  const by = await sessionsOf(rows.map((r) => r.id));
+  const host = { paused: false, stopped_at: null };
+  return rows
+    .filter((o) => eventStatus(o, host, by.get(o.id) ?? [], today).status === 'live')
+    .slice(0, limit)
+    .map((o) => cardOf(o, by.get(o.id) ?? [], today));
+}
+
+async function reviewsOf(hostId) {
+  const [rows, total] = await Promise.all([repo.publishedReviews(hostId), repo.publishedReviewCount(hostId)]);
+  const rated = rows.filter((r) => r.stars);
+  return {
+    total,
+    rating: rated.length ? Math.round((rated.reduce((n, r) => n + r.stars, 0) / rated.length) * 10) / 10 : null,
+    // The reviewer by first name only; the host's reply beside it.
+    items: rows.slice(0, 6).map((r) => ({ stars: r.stars, text: r.text, who: r.who || null, on: ymd(r.publish_on), reply: r.reply ?? null })),
+  };
+}
+
+router.get('/events/:code', async (req, res, next) => {
+  try {
+    const code = String(req.params.code ?? '').toLowerCase();
+    if (!CODE.test(code)) return res.status(404).json({ error: 'not_found' });
+    const { rows: [o] } = await query(`select o.* from host_offers o where o.public_code = $1 and ${LISTED}`, [code]);
+    if (!o) return res.status(404).json({ error: 'not_found' });
+    const { rows: [h] } = await query('select * from hosts where id = $1', [o.host_id]);
+    const today = localDay(new Date(), o.time_zone ?? 'Europe/London');
+    const sessions = (await sessionsOf([o.id])).get(o.id) ?? [];
+    const st = eventStatus(o, h, sessions, today);
+    const mood = moodOf(o.what_category, `${o.what_label ?? ''} ${o.title ?? ''}`);
+    const base = { code: o.public_code, path: eventPath(o), status: st.status, on: st.on ?? null, mood, subcategory: o.what_label ?? null };
+    if (st.status === 'expired' || st.status === 'gone') return res.json(base);
+    const ahead = sessions.filter((s) => s.state !== 'cancelled' && ymd(s.ends_on ?? s.on_date) >= today).slice(0, 12);
+    const [reviews, moreFromHost, similar] = await Promise.all([
+      reviewsOf(h.id),
+      liveCards('o.host_id = $1 and o.id <> $2', [h.id, o.id], today),
+      liveCards(`o.id <> $1 and o.host_id <> $2 and (lower(coalesce(o.what_label, '')) = lower($3) or o.what_category = $4)`, [o.id, h.id, o.what_label ?? '', o.what_category ?? ''], today),
+    ]);
+    const cfg = hostingConfig();
+    res.json({
+      ...base,
+      offerId: o.id, title: o.title, summary: o.summary ?? null, description: o.description ?? null,
+      lane: o.lane, kind: KIND_WORDS[o.lane] ?? null, category: o.what_category ?? null,
+      photos: (o.photo_ids ?? []).slice(0, 8).map(media),
+      // The town and the area only — the exact place is for those who book (brief §5).
+      where: { area: o.venue_area ?? null, online: o.venue === 'online' },
+      when: {
+        sessions: ahead.map((s) => ({ date: ymd(s.on_date), endsOn: ymd(s.ends_on), time: hm(s.starts_at), endsAt: hm(s.ends_at) })),
+        first: sessions[0] ? ymd(sessions[0].on_date) : null, last: sessions.length ? ymd(sessions[sessions.length - 1].ends_on ?? sessions[sessions.length - 1].on_date) : null,
+        startsAt: hm(o.starts_at), endsAt: hm(o.ends_at), timeZone: o.time_zone ?? 'Europe/London',
+      },
+      price: priceOf(o),
+      who: { ageMin: o.age_min, ageMax: o.age_max, dropOff: o.parents === 'drop_off', checked: h.checked_state === 'passed' },
+      refundWords: o.refund_policy && o.price_mode && o.price_mode !== 'free' ? refundWords(o.refund_policy, cfg) : null,
+      host: { code: h.public_code, path: hostPath(h), name: publicName(h.name), photo: media(h.photo_id), checked: h.checked_state === 'passed', since: ymd(h.created_at) },
+      reviews, moreFromHost, similar,
+      updatedAt: o.updated_at,
+    });
+  } catch (err) { next(err); }
+});
+
+/** A host is indexable with at least one live public event or a review (brief §4); paused or stopped is 410. */
+async function hostPayload(h, today) {
+  const { rows: offers } = await query(`select o.* from host_offers o where o.host_id = $1 and ${LISTED} order by o.updated_at desc`, [h.id]);
+  const by = await sessionsOf(offers.map((o) => o.id));
+  const shown = offers.filter((o) => ['live', 'finished'].includes(eventStatus(o, h, by.get(o.id) ?? [], today).status));
+  const live = shown.filter((o) => eventStatus(o, h, by.get(o.id) ?? [], today).status === 'live');
+  const reviews = await reviewsOf(h.id);
+  // Their main subcategory and town, from their own events (owned facts; never their home).
+  const count = (xs) => { const m = new Map(); for (const x of xs.filter(Boolean)) m.set(x, (m.get(x) ?? 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null; };
+  return {
+    code: h.public_code, path: hostPath(h), status: 'live', indexable: live.length > 0 || reviews.total > 0,
+    name: publicName(h.name), photo: media(h.photo_id), intro: h.intro_text ?? null, checked: h.checked_state === 'passed', since: ymd(h.created_at),
+    subcategory: count(offers.map((o) => o.what_label)), town: count(offers.map((o) => o.venue_area)),
+    events: live.map((o) => cardOf(o, by.get(o.id) ?? [], today)),
+    finished: shown.filter((o) => !live.includes(o)).slice(0, 6).map((o) => cardOf(o, by.get(o.id) ?? [], today)),
+    reviews, updatedAt: h.updated_at ?? null,
+  };
+}
+
+router.get('/hosts/:code', async (req, res, next) => {
+  try {
+    const code = String(req.params.code ?? '').toLowerCase();
+    if (!CODE.test(code)) return res.status(404).json({ error: 'not_found' });
+    const { rows: [h] } = await query('select * from hosts where public_code = $1', [code]);
+    if (!h) return res.status(404).json({ error: 'not_found' });
+    if (h.paused || h.stopped_at) return res.json({ code: h.public_code, path: hostPath(h), status: 'gone' });
+    const out = await hostPayload(h, localDay(new Date(), 'Europe/London'));
+    // A host with nothing listed and nothing reviewed has no public page at all.
+    if (!out.events.length && !out.finished.length && !out.reviews.total) return res.status(404).json({ error: 'not_found' });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+/** Every indexable page, for the per-locale sitemaps: live, finished (90 days) and called-off (30 days) events; hosts with something to show. */
+router.get('/sitemap', async (_req, res, next) => {
+  try {
+    const { rows: offers } = await query(
+      `select o.*, h.paused as host_paused, h.stopped_at as host_stopped from host_offers o join hosts h on h.id = o.host_id where ${LISTED} order by o.updated_at desc limit 50000`,
+    );
+    const by = await sessionsOf(offers.map((o) => o.id));
+    const events = [];
+    const hostIds = new Set();
+    for (const o of offers) {
+      const st = eventStatus(o, { paused: o.host_paused, stopped_at: o.host_stopped }, by.get(o.id) ?? [], localDay(new Date(), o.time_zone ?? 'Europe/London'));
+      if (!['live', 'finished', 'called_off'].includes(st.status)) continue;
+      events.push({ path: eventPath(o), lastmod: (o.updated_at instanceof Date ? o.updated_at : new Date(o.updated_at ?? Date.now())).toISOString().slice(0, 10) });
+      if (st.status === 'live') hostIds.add(o.host_id);
+    }
+    const { rows: reviewed } = await query(
+      `select distinct host_id from host_reviews where side = 'guest' and not hidden and publish_on <= current_date`,
+    );
+    for (const r of reviewed) hostIds.add(r.host_id);
+    const { rows: hosts } = hostIds.size ? await query(
+      'select * from hosts where id = any($1::uuid[]) and not coalesce(paused, false) and stopped_at is null', [[...hostIds]],
+    ) : { rows: [] };
+    res.json({
+      events,
+      hosts: hosts.map((h) => ({ path: hostPath(h), lastmod: (h.updated_at instanceof Date ? h.updated_at : new Date(h.updated_at ?? Date.now())).toISOString().slice(0, 10) })),
+      capped: offers.length === 50000,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * A photo on a public page, and only while it is on one: an event's photo while the event is shown (live,
+ * finished, called off), a host's photo while their page is. Never a video, a document or anything private.
+ */
+router.get('/media/:id', async (req, res, next) => {
+  try {
+    const id = String(req.params.id ?? '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(404).end();
+    const { rows: offers } = await query(
+      `select o.*, h.paused as host_paused, h.stopped_at as host_stopped from host_offers o join hosts h on h.id = o.host_id
+        where ${LISTED} and o.photo_ids @> to_jsonb(array[$1::text])`,
+      [id],
+    );
+    let allowed = false;
+    if (offers.length) {
+      const by = await sessionsOf(offers.map((o) => o.id));
+      allowed = offers.some((o) => ['live', 'finished', 'called_off'].includes(eventStatus(o, { paused: o.host_paused, stopped_at: o.host_stopped }, by.get(o.id) ?? [], localDay(new Date(), o.time_zone ?? 'Europe/London')).status));
+    }
+    if (!allowed) {
+      const { rows: [h] } = await query(
+        `select h.id from hosts h where h.photo_id::text = $1 and not coalesce(h.paused, false) and h.stopped_at is null
+            and exists (select 1 from host_offers o where o.host_id = h.id and ${LISTED})`,
+        [id],
+      );
+      allowed = Boolean(h);
+    }
+    if (!allowed) return res.status(404).end();
+    const m = await repo.mediaById(id);
+    if (!m || m.kind !== 'photo' || !String(m.mime ?? '').startsWith('image/')) return res.status(404).end();
+    res.setHeader('content-type', m.mime);
+    // A day, not a year: a photo leaves the web when its page does.
+    res.setHeader('cache-control', 'public, max-age=86400');
+    res.setHeader('content-length', m.size);
+    res.end(m.bytes);
+  } catch (err) { next(err); }
+});

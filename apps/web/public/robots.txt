@@ -16,3 +16,5 @@ Disallow: /mockups/
 Allow: /
 
 Sitemap: https://epic.day/sitemap.xml
+Sitemap: https://epic.day/en-gb/sitemap-events.xml
+Sitemap: https://epic.day/en-gb/sitemap-hosts.xml

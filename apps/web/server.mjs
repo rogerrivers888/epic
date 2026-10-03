@@ -21,6 +21,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { siteGateOn } from './gate.mjs';
 import { loadSite, localeFor as localeOf, siteAddress as addressOf } from './site.mjs';
+import { eventHead, hostHead, leftTheWeb, publicAddress, sitemapOf, withHead } from './events.mjs';
 
 // The built app; a test points it at a folder of its own.
 const ROOT = resolve(process.env.EPIC_WEB_ROOT || fileURLToPath(new URL('./dist', import.meta.url)));
@@ -28,6 +29,11 @@ const PORT = Number(process.env.PORT || 8080);
 
 const clean = (u) => String(u || '').trim().replace(/\/+$/, '');
 const APP_URL = clean(process.env.EPIC_APP_URL || process.env.APP_URL) || 'https://epic.day';
+// Where the web server asks the API for a public event or host page (events.mjs). The bundle's own
+// EXPO_PUBLIC_API_URL is the same address, set on this service; EPIC_API_URL may point it elsewhere.
+const API_URL = clean(process.env.EPIC_API_URL || process.env.EXPO_PUBLIC_API_URL) || 'https://api.epic.day';
+// Category and subcategory pages wait on Claude Design; until they are on, an event that has left the web is a 410.
+const CATEGORY_PAGES = ['on', '1', 'true', 'yes'].includes(String(process.env.EPIC_EVENT_CATEGORY_PAGES || '').trim().toLowerCase());
 const APP_HOST = (() => { try { return new URL(APP_URL).host.toLowerCase(); } catch { return 'epic.day'; } })();
 
 const TYPES = {
@@ -165,6 +171,79 @@ function withSiteHead(html, site) {
     .replace('</head>', `  ${extra.join('\n    ')}\n  </head>`);
 }
 
+/** The API's public door, read-only; a failure is a status the page can answer with, never a throw. */
+async function publicApi(path) {
+  try {
+    const r = await fetch(`${API_URL}${path}`, { signal: AbortSignal.timeout(6000), headers: { accept: 'application/json' } });
+    if (r.status === 404) return { status: 404 };
+    if (!r.ok) return { status: 502 };
+    return { status: 200, body: await r.json() };
+  } catch { return { status: 502 }; }
+}
+
+/** The app shell at a status, for a page that is not (or no longer) there: never indexed, and the app says so. */
+async function shellWith(res, status, req) {
+  let html;
+  try { html = await shellHtml(); } catch { res.writeHead(status, { 'content-type': 'text/plain' }); res.end('Not found'); return; }
+  res.writeHead(status, { 'content-type': TYPES['.html'], 'cache-control': 'no-cache', 'x-robots-tag': 'noindex', 'content-length': Buffer.byteLength(html) });
+  res.end(req.method === 'HEAD' ? undefined : html);
+}
+
+/**
+ * A public event or host page, its short link, its photos and its sitemaps (Epic Events on the web, 3 Oct 2026).
+ * Live public pages are indexed straight away; the app, booking, accounts and the back office stay behind the gate.
+ */
+async function servePublic(req, res, pub, search) {
+  const send = (status, headers, body) => { res.writeHead(status, headers); res.end(req.method === 'HEAD' ? undefined : body); };
+  if (pub.kind === 'photo') {
+    let r;
+    try { r = await fetch(`${API_URL}/api/public/media/${pub.id}`, { signal: AbortSignal.timeout(8000) }); } catch { r = null; }
+    if (!r || !r.ok) { send(404, { 'content-type': 'text/plain', 'cache-control': 'no-cache' }, 'Not found'); return; }
+    const buf = Buffer.from(await r.arrayBuffer());
+    const type = r.headers.get('content-type') || '';
+    if (!type.startsWith('image/')) { send(404, { 'content-type': 'text/plain' }, 'Not found'); return; }
+    send(200, { 'content-type': type, 'content-length': buf.length, 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' }, buf);
+    return;
+  }
+  const locale = pub.locale ?? 'en-gb';
+  if (pub.locale && !SITE.liveLocales.includes(pub.locale)) { await shellWith(res, 404, req); return; }
+  const here = (path) => path.replace(/^\/[a-z]{2}-[a-z]{2}\//, `/${locale}/`);
+  if (pub.kind === 'sitemap') {
+    const r = await publicApi('/api/public/sitemap');
+    if (r.status !== 200) { send(503, { 'content-type': 'text/plain', 'retry-after': '300' }, 'Try again shortly'); return; }
+    const body = sitemapOf(APP_URL, (r.body[pub.which] ?? []).map((e) => ({ ...e, path: here(e.path) })));
+    send(200, { 'content-type': TYPES['.xml'], 'content-length': Buffer.byteLength(body), 'cache-control': 'public, max-age=3600' }, body);
+    return;
+  }
+  const r = await publicApi(pub.kind === 'host' ? `/api/public/hosts/${pub.code}` : `/api/public/events/${pub.code}`);
+  if (r.status === 404) { await shellWith(res, 404, req); return; }
+  if (r.status !== 200) { await shellWith(res, 503, req); return; }
+  const page = r.body;
+  const canonical = here(page.path);
+  // The short link, an old slug, any other spelling: one 301 to the page's own address.
+  if (pub.kind === 'short' || pub.asked !== canonical) {
+    if (pub.kind !== 'short' && (page.status === 'gone' || page.status === 'expired')) { /* fall through to its answer below */ } else {
+      send(301, { location: canonical + (pub.kind === 'short' ? '' : search), 'cache-control': 'no-cache' }, '');
+      return;
+    }
+  }
+  if (pub.kind === 'host' && page.status === 'gone') { await shellWith(res, 410, req); return; }
+  if (page.status === 'gone' || page.status === 'expired') {
+    const out = leftTheWeb(page, locale, CATEGORY_PAGES);
+    if (out.status === 301) { send(301, { location: out.location, 'cache-control': 'no-cache' }, ''); return; }
+    await shellWith(res, 410, req);
+    return;
+  }
+  let html;
+  try { html = await shellHtml(); } catch { send(404, { 'content-type': 'text/plain' }, 'Not found'); return; }
+  const head = pub.kind === 'host' ? hostHead(page, { appUrl: APP_URL, locale }) : eventHead(page, { appUrl: APP_URL, locale, categoryPagesOn: CATEGORY_PAGES });
+  const body = withHead(html, head, SITE.htmlLang?.[locale] ?? 'en-GB');
+  const headers = { 'content-type': TYPES['.html'], 'content-length': Buffer.byteLength(body), 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin' };
+  // Indexed straight away while the website is open; the gate's blanket noindex never covers a live public page.
+  if (head.robots || siteClosed()) headers['x-robots-tag'] = 'noindex'; else res.removeHeader('x-robots-tag');
+  send(200, headers, body);
+}
+
 /** sitemap.xml, generated — never by hand: every live locale's indexable pages, each with its alternates. */
 function sitemapXml() {
   const day = new Date(shellAt || Date.now()).toISOString().slice(0, 10);
@@ -240,6 +319,9 @@ const server = http.createServer(guarded(async (req, res) => {
     res.end();
     return;
   }
+  // Public event and host pages, their short links, photos and sitemaps — before the site's own pages (events.mjs).
+  const pub = publicAddress(pathname);
+  if (pub) { await servePublic(req, res, pub, search); return; }
   const site = addressOf(SITE, pathname);
   // While the gate is up there is no public sitemap; the pages themselves are
   // served (noindex, above) and the app draws them only for somebody signed in.

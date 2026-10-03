@@ -197,6 +197,9 @@ export async function siteGate(req, res, next) {
   // the public web bundle and spends nothing, so it is left open like a static
   // asset; the route itself keeps an unapproved image behind its own signed link.
   if (req.method === 'GET' && path.startsWith('/api/images/')) return next();
+  // Public event and host pages, their sitemap and their photos (Epic Events on the web, 3 Oct 2026): read-only,
+  // nothing private — a private event is never served there — and nothing that spends (routes/publicPages.js).
+  if (req.method === 'GET' && /^\/api\/public\/(events|hosts|media)\/[^/]+$|^\/api\/public\/sitemap$/.test(path)) return next();
   // "Register your interest" (routes/interest.js) is the one thing the unopened
   // site asks of the public, so the form must reach it with no password and no
   // session. Only the POST, only this exact path: it answers `{ok:true}` or a

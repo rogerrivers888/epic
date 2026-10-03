@@ -1,5 +1,6 @@
 // First, and deliberately: it moves this device's stored keys from `roam.` to
 // `epic.` before any module below reads one. See src/rename.ts.
+import { PublicEventPage, PublicHostPage, ShortEvent } from './src/screens/guest/PublicPages';
 import './src/rename';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
@@ -197,7 +198,7 @@ function Frame() {
   const { path } = useRouter();
   // Nor the sign-in doors and the account page, which people reach signed out
   // (design audit, 2 Oct 2026): /login, /in/<token> and /account.
-  if (window.width < DESKTOP || /^\/(en-(gb|us)(\/|$)|login\/?$|in\/|account\/?$)/.test(path)) return app;
+  if (window.width < DESKTOP || /^\/(en-(gb|us)(\/|$)|e\/|login\/?$|in\/|account\/?$)/.test(path)) return app;
 
   const frameHeight = Math.min(PHONE.height, window.height - TOOLBAR - spacing.xl * 2 - BEZEL * 2);
   // Where the phone's screen lands in the real window: the stage centres it below the toolbar.
@@ -298,6 +299,11 @@ function Routed() {
    * as public too (auth.js), and drawn without any of the household's app.
    */
   if (route.name === 'shared') return <SharedTripScreen token={route.token} you={query.get('you')} />;
+  // Epic Events on the web (3 Oct 2026): a public event or host page is the same page for everybody, signed in or
+  // not, in the website's own frame; Book and the host's events lead into the app from there.
+  if (route.name === 'publicEvent') return <PublicEventPage code={route.code} locale={route.locale} />;
+  if (route.name === 'publicHost') return <PublicHostPage code={route.code} locale={route.locale} />;
+  if (route.name === 'shortEvent') return <ShortEvent code={route.code} />;
   /**
    * A host's profile and an experience page (Events & Hosts, 12 Sep 2026)
    * "must work logged-out; account creation happens after the tap". Answered

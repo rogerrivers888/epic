@@ -378,3 +378,22 @@ test('health, the Postmark webhook, and a CORS preflight answer without a creden
     assert.equal(near.res.statusCode, 401);
   });
 });
+
+test('public event and host pages are open to everybody — only those four reads, nothing near them', async () => {
+  await withEnv({ SITE_GATE: null, GATE_USER: 'u', GATE_PASSWORD: 'p' }, async () => {
+    for (const path of ['/api/public/events/k7f2ab', '/api/public/hosts/3mq9cd', '/api/public/media/0b6a3e2c-1111-4222-8333-944455556666', '/api/public/sitemap']) {
+      assert.equal((await run(mockReq({ path }))).nexted, true, `${path} is open`);
+    }
+    for (const req of [
+      mockReq({ path: '/api/public/events/k7f2ab', method: 'POST' }),
+      mockReq({ path: '/api/public/events' }),
+      mockReq({ path: '/api/public/other/x' }),
+      mockReq({ path: '/api/public/events/k7f2ab/edit' }),
+      mockReq({ path: '/api/experiences/k7f2ab' }),
+    ]) {
+      const { nexted, res } = await run(req);
+      assert.equal(nexted, false, `${req.method} ${req.path} stays behind the gate`);
+      assert.equal(res.statusCode, 401);
+    }
+  });
+});
