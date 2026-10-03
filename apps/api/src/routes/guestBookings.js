@@ -761,7 +761,7 @@ router.get('/events/near', async (req, res, next) => {
            from host_offers o join hosts h on h.id = o.host_id
           where o.lane is not null and o.state = 'live' and o.visibility = 'public' and not coalesce(h.paused, false) and h.stopped_at is null
        )
-       select o.id, o.title, o.lane, o.photo_ids, o.what_category, o.what_label, o.price_mode, o.price_pence, o.child_pence, o.drop_in_pence, o.book_ahead_pence, o.total_pence, o.min_count, o.max_count, o.age_min, o.age_max, o.parents, o.waitlist_on, o.host_id,
+       select o.id, o.title, o.lane, o.photo_ids, o.what_category, o.what_label, o.price_mode, o.price_pence, o.child_pence, o.drop_in_pence, o.book_ahead_pence, o.summary, o.total_pence, o.min_count, o.max_count, o.age_min, o.age_max, o.parents, o.waitlist_on, o.host_id,
               (6371 * acos(least(1, cos(radians($1)) * cos(radians(o.at_lat)) * cos(radians(o.at_lng) - radians($2)) + sin(radians($1)) * sin(radians(o.at_lat))))) as km,
               nxt.id as session_id, nxt.on_date, nxt.starts_at, nxt.max_count as session_max,
               coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
@@ -769,6 +769,13 @@ router.get('/events/near', async (req, res, next) => {
               -- A place offered from the waiting list is held, as the booking path counts it (Codex, 3 Oct 2026).
               coalesce((select sum(w.party) from offer_waitlist w where (w.session_id = nxt.id or (w.session_id is null and w.offer_id = o.id))
                            and w.state = 'offered' and w.offer_expires_at > now()), 0)::int as held,
+              -- A course is booked whole: its room is the tightest session still to come (Roger, 3 Oct 2026).
+              (select min(coalesce(s2.max_count, o.max_count)
+                        - coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+                                     where bs.session_id = s2.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')), 0)
+                        - coalesce((select sum(w.party) from offer_waitlist w where (w.session_id = s2.id or (w.session_id is null and w.offer_id = o.id))
+                                     and w.state = 'offered' and w.offer_expires_at > now()), 0))
+                 from offer_sessions s2 where o.lane = 'course' and s2.offer_id = o.id and s2.state = 'scheduled' and (s2.on_date > (now() at time zone coalesce(o.time_zone, 'Europe/London'))::date or (s2.on_date = (now() at time zone coalesce(o.time_zone, 'Europe/London'))::date and (s2.starts_at is null or s2.starts_at > (now() at time zone coalesce(o.time_zone, 'Europe/London'))::time))))::int as run_left,
               (select round(avg(r.stars)::numeric, 1)::float from host_reviews r where r.host_id = o.host_id and r.side = 'guest' and not r.hidden and r.publish_on <= current_date) as rating,
               (select count(*)::int from host_reviews r where r.host_id = o.host_id and r.side = 'guest' and not r.hidden and r.publish_on <= current_date) as reviews,
               (select count(*)::int from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and (s.on_date > (now() at time zone coalesce(o.time_zone, 'Europe/London'))::date or (s.on_date = (now() at time zone coalesce(o.time_zone, 'Europe/London'))::date and (s.starts_at is null or s.starts_at > (now() at time zone coalesce(o.time_zone, 'Europe/London'))::time)))) as ahead
@@ -786,7 +793,7 @@ router.get('/events/near', async (req, res, next) => {
       estimated: true, minutes,
       events: rows.map((r) => {
         const most = r.session_max ?? r.max_count ?? null;
-        const left = most != null ? Math.max(0, most - r.booked - (r.held ?? 0)) : null;
+        const left = r.lane === 'course' && r.run_left != null ? Math.max(0, r.run_left) : most != null ? Math.max(0, most - r.booked - (r.held ?? 0)) : null;
         return {
           id: r.id, title: r.title, lane: r.lane, photo: mediaRef(r.photo_ids?.[0]), mood: moodOf(r.what_category, `${r.what_label ?? ''} ${r.title ?? ''}`),
           date: ymd(r.on_date), time: hm(r.starts_at), sessionsAhead: r.ahead, // Found by its place with no point to measure from: no journey time, rather than a made-up one (Codex, 3 Oct 2026).
@@ -795,6 +802,8 @@ router.get('/events/near', async (req, res, next) => {
           who: { ageMin: r.age_min, ageMax: r.age_max, dropOff: r.parents === 'drop_off' },
           placesLeft: left, full: left === 0, needs: r.min_count && r.booked < r.min_count ? r.min_count - r.booked : null, waitlist: r.waitlist_on === true,
           rating: r.rating, reviews: r.reviews,
+          // What it is, in the host's words, so Inspire's search can match its kind and description as well as its title (Roger, 3 Oct 2026).
+          words: [r.what_category, r.what_label, String(r.summary ?? '').slice(0, 600)].filter(Boolean).join(' '),
         };
       }),
       capped: rows.length === 200,

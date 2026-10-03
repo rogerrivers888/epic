@@ -778,3 +778,22 @@ test('Codex: a held waiting-list place makes an event card full, and a course sh
     assert.equal(card.dates.length, 3, 'every session’s day');
   } finally { await sp.close(); }
 });
+
+test('a course card counts room across the whole run, and an event carries its kind and description for search', async () => {
+  settings.forget();
+  const { o, h } = await anEvent({ lane: 'course', sessions: 3, max: 2 });
+  await query(`update host_offers set venue_lat = 51.4, venue_lng = -0.62, what_label = 'Pottery', summary = 'Wheel throwing for beginners' where id = $1`, [o.id]);
+  // The last session is full; the first two have room.
+  const { rows: [last] } = await query(`select id from offer_sessions where offer_id = $1 order by on_date desc limit 1`, [o.id]);
+  const x = await aPerson();
+  const { rows: [b] } = await query(`insert into experience_bookings (offer_id, host_id, household_id, state, heads) values ($1, $2, $3, 'confirmed', 2) returning id`, [o.id, h.id, x.household.id]);
+  await query(`insert into booking_sessions (booking_id, session_id, state) values ($1, $2, 'booked')`, [b.id, last.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const e = (await srv.get('/api/events/near?lat=51.39&lng=-0.62&minutes=30')).body.events.find((y) => y.id === o.id);
+    assert.equal(e.full, true, 'one full session fills the run');
+    assert.match(e.words, /Pottery/);
+    assert.match(e.words, /Wheel throwing/);
+  } finally { await srv.close(); }
+});

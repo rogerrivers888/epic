@@ -113,7 +113,7 @@ export function InspireEvents() {
       <View style={{ gap: 20, marginHorizontal: -20 }}>
         {list.map((e) => <EventCard key={e.id} e={e} wide onOpen={() => navigate(paths.experience(e.id))} />)}
       </View>
-      {!list.length ? <Para color={INK_MUTED}>Nothing matches those filters.</Para> : null}
+      {!events.length ? <Para color={INK_MUTED}>No events near you yet</Para> : !list.length ? <Para color={INK_MUTED}>Nothing matches those filters.</Para> : null}
     </GuestPage>
   );
 }

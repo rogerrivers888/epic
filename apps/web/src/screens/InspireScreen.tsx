@@ -1091,7 +1091,7 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                   {(() => {
                     const moods = ask?.resolved.filter.moods ?? [];
                     const named = (ask?.resolved.wants ?? []).map((w) => w.name.toLowerCase()).filter((w) => w.length > 2);
-                    const hits = events.filter((e) => moods.includes(e.mood) || named.some((w) => (e.title ?? '').toLowerCase().includes(w)));
+                    const hits = events.filter((e) => moods.includes(e.mood) || named.some((w) => `${e.title ?? ''} ${e.words ?? ''}`.toLowerCase().includes(w)));
                     return hits.length ? <View style={styles.cards}>{hits.map((e) => <EventCard key={`ev-${e.id}`} e={e} mixed wide onOpen={() => openEvent(e)} />)}</View> : null;
                   })()}
                   <Pressable onPress={() => navigate(withQuery(href, { intake: null }, paths.inspire()))} accessibilityRole="button" style={{ paddingVertical: 8 }}>
