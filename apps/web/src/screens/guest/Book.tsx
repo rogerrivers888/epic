@@ -111,6 +111,9 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     if (you && !opt.who.dropOff && !(opt.who.ageMax != null && opt.who.ageMax < 18)) setTicked(new Set([you.key]));
   }, [people, opt, peopleKnown]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Start on a way of booking the host actually offers (a book-ahead-only class has no drop in; Codex, 3 Oct 2026).
+  useEffect(() => { if (opt && opt.lane === 'weekly' && !opt.kinds.includes(mode)) setMode(opt.kinds.includes('drop_in') ? 'drop_in' : 'book_ahead'); }, [opt]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!offer || !opt) return <Waiting error={error} />;
 
   const lane = offer.lane ?? 'oneoff';
@@ -156,7 +159,9 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const p = opt.price;
   const free = p.mode === 'free' || !(p.pence || p.totalPence);
   const sessN = lane === 'weekly' && mode === 'book_ahead' ? Math.max(1, picks.size) : 1;
-  const each = p.mode === 'by_numbers' ? p.nowEach ?? 0 : lane === 'weekly' ? (mode === 'drop_in' ? p.dropInPence ?? p.pence ?? 0 : p.bookAheadPence ?? p.pence ?? 0) : p.pence ?? 0;
+  // As the server prices it (guestBookings.weeklyEach): a weekly kind's own price, or the one price of an older offer.
+  const oneOnly = p.dropInPence == null && p.bookAheadPence == null;
+  const each = p.mode === 'by_numbers' ? p.nowEach ?? 0 : lane === 'weekly' ? ((mode === 'drop_in' ? p.dropInPence : p.bookAheadPence) ?? (oneOnly ? p.pence : 0) ?? 0) : p.pence ?? 0;
   const childEach = p.childPence ?? each;
   const lines: PriceLine[] = [];
   let gross = 0;

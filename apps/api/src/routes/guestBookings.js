@@ -85,6 +85,21 @@ async function eventWithSessions(id, client = null) {
 const ahead = (sessions, o, now = new Date()) => sessions.filter((s) => s.state === 'scheduled' && startOf(s, o) > now);
 
 /** What a booking costs: the lane's price for its kind, a child price, the group discount for that kind. */
+/**
+ * The ways a weekly event can be booked, from what the host priced (Codex, 3 Oct 2026): free, both; paid, only
+ * the kinds with a price — a book-ahead-only class never offers a drop in, which would otherwise price at nothing.
+ * An older offer with only its one price takes it for both. Every other lane: KINDS_BY_LANE.
+ */
+export function kindsFor(o) {
+  if (o.lane !== 'weekly') return KINDS_BY_LANE[o.lane] ?? [];
+  if (o.price_mode === 'free' || !o.price_mode || o.price_mode === 'by_numbers') return KINDS_BY_LANE.weekly;
+  if (o.drop_in_pence == null && o.book_ahead_pence == null) return o.price_pence != null ? KINDS_BY_LANE.weekly : [];
+  return KINDS_BY_LANE.weekly.filter((k) => (k === 'drop_in' ? o.drop_in_pence != null : o.book_ahead_pence != null));
+}
+
+/** A weekly session's price by kind: its own price, or the offer's one price on an older offer; never nought by default. */
+const weeklyEach = (o, kind) => (kind === 'book_ahead' ? o.book_ahead_pence : o.drop_in_pence) ?? (o.drop_in_pence == null && o.book_ahead_pence == null ? o.price_pence : null);
+
 function priceFor(o, kind, party, sessionCount) {
   if (o.price_mode === 'free' || !o.price_mode) return { lines: [], grossPence: 0, discountPence: 0, valuePence: 0 };
   if (o.price_mode === 'by_numbers') {
@@ -93,7 +108,8 @@ function priceFor(o, kind, party, sessionCount) {
     return { lines: [{ label: 'Each, at the minimum numbers', each, count: heads, pence: each * heads }], grossPence: each * heads, discountPence: 0, valuePence: each * heads };
   }
   if (o.lane === 'weekly') {
-    const each = kind === 'book_ahead' ? (o.book_ahead_pence ?? o.drop_in_pence ?? 0) : (o.drop_in_pence ?? 0);
+    const each = weeklyEach(o, kind);
+    if (each == null) throw refuse(409, 'kind_closed', 'That way of booking isn’t open on this one.');
     const one = priceBooking({ pricePence: each, childPence: o.child_pence, adults: party.adults, children: party.children,
       groupPct: kind === 'book_ahead' ? o.book_ahead_group_pct : o.drop_in_group_pct, groupMin: kind === 'book_ahead' ? o.book_ahead_group_min : o.drop_in_group_min });
     const n = Math.max(1, sessionCount);
@@ -184,7 +200,7 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
     }
     res.json({
       action: mainAction({ offer: o, sessionsAhead: next, hostPaused: Boolean(host?.paused || host?.stopped_at), placesLeft: Number.isFinite(left) ? left : null }),
-      lane: o.lane, kinds: KINDS_BY_LANE[o.lane] ?? [],
+      lane: o.lane, kinds: kindsFor(o),
       sessions: next.map((x) => ({ id: x.id, n: x.n, date: ymd(x.on_date), time: hm(x.starts_at), placesLeft: placesLeft(x, o) == null ? null : Math.max(0, placesLeft(x, o) - x.reserved), topic: x.topic })),
       slots,
       price: {
@@ -205,7 +221,7 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
 /** Parse the When part of a booking: its kind, sessions or slot. */
 function parseWhen(o, sessionsAhead, body) {
   const kind = body?.kind;
-  if (!(KINDS_BY_LANE[o.lane] ?? []).includes(kind)) throw refuse(400, 'bad_kind', 'Pick when.');
+  if (!kindsFor(o).includes(kind)) throw refuse(400, 'bad_kind', 'Pick when.');
   if (kind === 'request') {
     const date = String(body?.date ?? '');
     const time = String(body?.time ?? '');
@@ -1023,7 +1039,18 @@ router.post('/booked/:id/tip', async (req, res, next) => {
        on conflict (booking_id) where state in ('pending', 'paid') do nothing returning *`,
       [b.id, b.offer_id, b.host_id, household.id, amount, fee],
     );
-    if (!t) throw refuse(409, 'tipped', 'You’ve tipped on this one.');
+    if (!t) {
+      // The same tip still waiting on its card — after a decline, a bank check, or the page reloaded: the guest
+      // finishes that payment rather than starting another (Codex, 3 Oct 2026). A paid one, or a different amount, is refused.
+      const { rows: [open] } = await query(`select * from booking_tips where booking_id = $1 and state = 'pending' and stripe_ref is not null`, [b.id]);
+      if (open && Number(open.amount_pence) === amount) {
+        const existing = await stripe.retrievePaymentIntent(open.stripe_ref, { householdId: household.id }).catch(() => null);
+        if (existing?.client_secret && ['requires_payment_method', 'requires_confirmation', 'requires_action'].includes(existing.status)) {
+          return res.json({ tip: { id: open.id, amountPence: amount, feePence: Number(open.admin_fee_pence), totalPence: amount + Number(open.admin_fee_pence) }, pay: { clientSecret: existing.client_secret, paymentIntent: existing.id } });
+        }
+      }
+      throw refuse(409, 'tipped', 'You’ve tipped on this one.');
+    }
     let pi;
     try { pi = await stripe.paymentIntent({ amountPence: amount + fee, bookingId: b.id, offerId: b.offer_id, householdId: household.id, idempotencyKey: `tip-${t.id}`, kind: 'tip', tipId: t.id }); }
     catch (err) {

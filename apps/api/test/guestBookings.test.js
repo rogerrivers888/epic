@@ -608,3 +608,22 @@ test('a host’s profile: reviews with their replies, the total, and no reply ti
   assert.equal(await repo.publishedReviewCount(h.id), 1);
   assert.equal(await repo.replyMinutesOf(h.id), null, 'never "usually replies within" from fewer than three answers');
 });
+
+test('a weekly class offers only the ways of booking its host priced: never a drop in at nothing', async () => {
+  settings.forget();
+  const { o } = await anEvent({ lane: 'weekly', priceMode: 'same_each', price: 1200, sessions: 3 });
+  await query('update host_offers set drop_in_pence = null, book_ahead_pence = 1000 where id = $1', [o.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    assert.deepEqual((await srv.get(`/api/experiences/${o.id}/booking/options`)).body.kinds, ['book_ahead']);
+    const dropIn = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'drop_in' }, party: { adults: 1 } });
+    assert.equal(dropIn.status, 400, 'a drop in the host never priced is refused, not booked free');
+    // An older offer with only its one price: both ways, at that price.
+    await query('update host_offers set drop_in_pence = null, book_ahead_pence = null where id = $1', [o.id]);
+    const guest = await import('../src/routes/guestBookings.js');
+    assert.deepEqual(guest.kindsFor({ ...o, drop_in_pence: null, book_ahead_pence: null }), ['drop_in', 'book_ahead']);
+    assert.deepEqual(guest.kindsFor({ ...o, drop_in_pence: 900, book_ahead_pence: null }), ['drop_in']);
+    assert.deepEqual(guest.kindsFor({ ...o, price_mode: 'free' }), ['drop_in', 'book_ahead']);
+  } finally { await srv.close(); }
+});

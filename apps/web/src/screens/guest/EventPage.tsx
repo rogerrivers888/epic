@@ -142,7 +142,9 @@ export function EventPage({ id, webPage, linkToken, inviteToken }: { id: string;
   const join = async () => {
     if (joined != null) return;
     if (!signedIn()) { setSheet('account'); return; }
-    try { const r = await api.guestWaitlist(o.id); setJoined(r.position); toast.show(`You’re #${r.position} on the waiting list`); }
+    // A weekly event's list is per session: the first one that is full (Codex, 3 Oct 2026).
+    const sessionId = o.lane === 'weekly' ? (opt?.sessions.find((x) => x.placesLeft === 0)?.id ?? opt?.sessions[0]?.id ?? null) : null;
+    try { const r = await api.guestWaitlist(o.id, { sessionId }); setJoined(r.position); toast.show(`You’re #${r.position} on the waiting list`); }
     catch (e: any) { toast.show(e?.message ?? 'That didn’t go through.'); }
   };
 
