@@ -168,3 +168,16 @@ test('the settings are laid over the lanes’ config, last, and a bad layer is i
     assert.deepEqual(hostingConfig({}).publicShare, DEFAULT_CONFIG.publicShare, 'malformed: ignored, never half-applied');
   } finally { useSettingsOverlay(null); }
 });
+
+test('Codex: a weekly cancellation refunds each session on its own terms and loses no penny', async () => {
+  const { cancelQuote } = await import('../src/domain/booking.js');
+  const now = new Date('2026-10-02T12:00:00Z');
+  const at = (h) => new Date(now.getTime() + h * 3_600_000);
+  const terms = { flexible: { fullHoursBefore: 24 } };
+  const booking = { charged_pence: 100, refunded_pence: 0, payment_state: 'charged', refund_policy: 'flexible', all_sessions_count: 3 };
+  // Three sessions all far enough out: every penny comes back, the odd one on the last.
+  assert.equal(cancelQuote({ booking, lane: 'weekly', sessions: [{ id: 'a', startsAt: at(50) }, { id: 'b', startsAt: at(60) }, { id: 'c', startsAt: at(70) }], losing: ['a', 'b', 'c'], now, terms }).pence, 100);
+  // One moved, one inside the window: the moved one back in full, the other nothing.
+  const q = cancelQuote({ booking, lane: 'weekly', sessions: [{ id: 'a', startsAt: at(5), movedAfterBooking: true }, { id: 'b', startsAt: at(6) }, { id: 'c', startsAt: at(70) }], losing: ['a', 'b'], now, terms });
+  assert.deepEqual([q.pence, q.cause], [33, 'guest_cancelled']);
+});

@@ -114,22 +114,29 @@ export function cancelQuote({ booking, lane, sessions, losing, now = new Date(),
   // A session given up earlier with its money kept stays kept: giving up the rest refunds only their share (Codex, 2 Oct 2026).
   const share = keepsSome || Number(booking.forfeited_count ?? 0) > 0 ? Math.min(left, Math.floor((Number(booking.charged_pence ?? 0) * lose.length) / all)) : left;
   const s = { refund_terms: terms ?? null };
-  if (lose.some((x) => x.movedAfterBooking)) return { pence: Math.min(left, share), cause: 'date_changed', words: 'The host moved the date: a full refund.' };
   const first = [...sessions].sort((a, b) => a.startsAt - b.startsAt)[0];
-  const started = (lane === 'course' || lane === 'oneoff') && first && first.startsAt <= now;
-  if (lane === 'course' && started) return { pence: 0, cause: 'guest_cancelled', words: 'The course has started: no refund.' };
-  // One-off and Course count from the first session; Weekly and On request from each session given up.
-  const from = lane === 'oneoff' || lane === 'course' ? [first] : lose;
+  if (lane === 'oneoff' || lane === 'course') {
+    // One booking, one window: counted from the first session; a move to it is everything back.
+    if (lose.some((x) => x.movedAfterBooking)) return { pence: Math.min(left, share), cause: 'date_changed', words: 'The host moved the date: a full refund.' };
+    if (lane === 'course' && first && first.startsAt <= now) return { pence: 0, cause: 'guest_cancelled', words: 'The course has started: no refund.' };
+    const r = refundFor({ policy: booking.refund_policy, paidPence: share, hoursBefore: (first.startsAt.getTime() - now.getTime()) / 3_600_000, cause: 'guest_cancelled' }, s);
+    if (r == null) return { pence: null, cause: 'guest_cancelled', words: 'Epic will look at this one and come back to you.' };
+    return { pence: Math.min(left, r), cause: 'guest_cancelled', words: null };
+  }
+  // Weekly and On request: each session on its own — its own share (the odd pence on the last, so nothing is lost),
+  // its own window, and a full refund only for a session the host moved (Codex, 2 Oct 2026).
+  const each = Math.floor(share / Math.max(1, lose.length));
   let pence = 0;
-  for (const x of from) {
-    const hours = (x.startsAt.getTime() - now.getTime()) / 3_600_000;
-    const part = lane === 'oneoff' || lane === 'course' ? share : Math.floor(share / Math.max(1, lose.length));
-    const r = refundFor({ policy: booking.refund_policy, paidPence: part, hoursBefore: hours, cause: 'guest_cancelled' }, s);
+  let moved = 0;
+  lose.forEach((x, i) => { x.part = i === lose.length - 1 ? share - each * (lose.length - 1) : each; });
+  for (const x of lose) {
+    if (x.movedAfterBooking) { pence += x.part; moved += 1; continue; }
+    const r = refundFor({ policy: booking.refund_policy, paidPence: x.part, hoursBefore: (x.startsAt.getTime() - now.getTime()) / 3_600_000, cause: 'guest_cancelled' }, s);
     if (r == null) return { pence: null, cause: 'guest_cancelled', words: 'Epic will look at this one and come back to you.' };
     pence += r;
   }
   pence = Math.min(left, pence);
-  return { pence, cause: 'guest_cancelled', words: null };
+  return { pence, cause: moved === lose.length && moved ? 'date_changed' : 'guest_cancelled', words: moved === lose.length && moved ? 'The host moved the date: a full refund.' : null };
 }
 
 /** Answers can be changed until 24 hours before the first session still ahead (guest brief §6). */
