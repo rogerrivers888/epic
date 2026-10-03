@@ -87,6 +87,8 @@ create table if not exists message_sends (
   -- A delivery's once-only key: the same key never sends the same template on the same channel twice.
   dedupe_key     text,
   result         jsonb not null default '{}'::jsonb,
+  -- A test of unsaved words: `version` is the one it was drafted from, and the words were not that version's.
+  draft          boolean not null default false,
   by_account     uuid references accounts(id) on delete set null,
   at             timestamptz not null default now(),
   constraint message_sends_channel_check check (channel in ('in_app', 'email', 'sms', 'push')),
@@ -136,8 +138,10 @@ create table if not exists automation_runs (
   at               timestamptz not null default now(),
   undone_at        timestamptz,
   undone_by        uuid references accounts(id) on delete set null,
+  -- Who, in words, kept when their account is later removed (the reference goes; the name stays).
+  undone_by_label  text,
   undone_note      text,
-  constraint automation_runs_undone_by_person check (undone_at is null or undone_by is not null)
+  constraint automation_runs_undone_by_person check (undone_at is null or undone_by_label is not null)
 );
 create index if not exists automation_runs_key_idx on automation_runs (automation_key, at desc);
 create index if not exists automation_runs_at_idx on automation_runs (at desc);
@@ -173,6 +177,9 @@ on conflict (key) do nothing;
 -- The two pauses cannot be turned off at all, whatever writes to the table.
 create or replace function automations_keep_pauses_on() returns trigger language plpgsql as $$
 begin
+  if tg_op = 'UPDATE' and old.key in ('child_safety_pause', 'checks_lapse_pause') and new.key is distinct from old.key then
+    raise exception 'The % cannot be renamed', replace(old.key, '_', ' ') using errcode = 'check_violation';
+  end if;
   if new.key in ('child_safety_pause', 'checks_lapse_pause') and (not new.is_on or new.lock_kind is distinct from 'always_on' or not new.locked) then
     raise exception 'The % is always on', replace(new.key, '_', ' ') using errcode = 'check_violation';
   end if;

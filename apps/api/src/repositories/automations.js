@@ -305,7 +305,7 @@ export async function listRuns({ automation = null, since = null, limit = 200 } 
     runs: rows.slice(0, lim).map((r) => ({
       id: r.id, automation: r.automation_key, subject: r.subject_kind ? { kind: r.subject_kind, id: r.subject_id } : null,
       rule: r.rule, evidence: r.evidence, did: r.did, undoable: Boolean(UNDO.get(r.automation_key)?.fn) && !r.undone_at,
-      at: r.at, undoneAt: r.undone_at, undoneBy: r.undone_by ? { id: r.undone_by, email: r.undone_by_email } : null, undoneNote: r.undone_note,
+      at: r.at, undoneAt: r.undone_at, undoneBy: r.undone_at ? { id: r.undone_by, email: r.undone_by_email ?? r.undone_by_label } : null, undoneNote: r.undone_note,
     })),
   };
 }
@@ -383,7 +383,9 @@ export async function undoRun(id, { by = null, note = null } = {}) {
     if (!(by && UUID.test(String(by)))) throw refuse(403, 'person_only', 'Undoing this needs a person, signed in.');
     const said = await h.fn(run, { by, client: c });
     const { rows: [row] } = await c.query(
-      `update automation_runs set undone_at = now(), undone_by = $2, undone_note = $3 where id = $1 returning *`,
+      `update automation_runs set undone_at = now(), undone_by = $2,
+              undone_by_label = coalesce((select coalesce(email, name) from accounts where id = $2), 'account ' || $2::text), undone_note = $3
+        where id = $1 returning *`,
       [id, by, [said, note].filter(Boolean).join(' — ').slice(0, 500) || null],
     );
     return { run: row, did: said };

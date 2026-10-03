@@ -162,3 +162,16 @@ test('a host’s message names its household or account, and a nonsense version 
   await assert.rejects(templates.deliver({ templateKey: 'new_tip', fields: { amount: '5.00', link: 'x' }, to: { email: 'host@example.com' } }), { code: 'no_recipient' });
   await assert.rejects(templates.preview('rating_dropped', { version: 'abc' }), { code: 'bad_request' });
 });
+
+test('a host template needs its household even before its notification kind is registered, and a draft test is logged as a draft', async () => {
+  await assert.rejects(templates.deliver({ templateKey: 'event_live', channels: ['email'], fields: { title: 'x', link: 'y' }, to: { email: 'host@example.com' } }), { code: 'no_recipient' });
+  const was = { ...templates.senders };
+  templates.senders.mail = async () => ({ sent: true });
+  try {
+    const { rows: [acct] } = await query("insert into accounts (email, role, status, name) values ('draft-test@example.com', 'customer', 'active', 'Sam') returning id, email");
+    const t = await templates.getTemplate('rating_dropped');
+    await templates.sendTest('rating_dropped', { account: { id: acct.id, email: acct.email }, channels: ['email'], channelsDraft: { ...t.channels, email: { subject: 'Draft', body: 'Unsaved words' } } });
+    const { rows: [log] } = await query("select draft from message_sends where template_key = 'rating_dropped' and purpose = 'test' and to_ref = 'draft-test@example.com'");
+    assert.equal(log.draft, true);
+  } finally { Object.assign(templates.senders, was); }
+});

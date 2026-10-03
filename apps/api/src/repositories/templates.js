@@ -268,11 +268,11 @@ export async function hasMarketingConsent(email, trigger = 'interest.signed_up',
   return false;
 }
 
-async function logSend({ t, version = t.version, channel, purpose, toKind, toRef, result, by, dedupeKey = null }) {
+async function logSend({ t, version = t.version, channel, purpose, toKind, toRef, result, by, dedupeKey = null, draft = false }) {
   await query(
-    `insert into message_sends (template_key, version, channel, purpose, to_kind, to_ref, result, by_account, dedupe_key) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+    `insert into message_sends (template_key, version, channel, purpose, to_kind, to_ref, result, by_account, dedupe_key, draft) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
      on conflict do nothing`,
-    [t.key, version, channel, purpose, toKind, toRef, JSON.stringify(result ?? {}), by, dedupeKey],
+    [t.key, version, channel, purpose, toKind, toRef, JSON.stringify(result ?? {}), by, dedupeKey, draft],
   ).catch((err) => console.error(`epic-api: message log — ${err.message}`));
 }
 
@@ -340,7 +340,8 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   }
   // A host's message is sent to a household or an account, never to a bare address: the host's own
   // e-mail switches are kept by household, and a bare address would step round them (Codex, 3 Oct 2026).
-  if (notifications.KINDS[t.notificationKind]?.audience === 'host' && !to.householdId && !to.accountId) {
+  // Read from the trigger, which every template has, not from a notification kind that may not be registered yet.
+  if (/\bhost\b/.test(TRIGGERS[t.trigger]?.audience ?? '') && !to.householdId && !to.accountId) {
     throw refuse(400, 'no_recipient', `“${t.name}” goes to a host: say which household or account, so their e-mail settings are kept.`);
   }
   const values = await valuesFor(t.trigger, fields);
@@ -410,12 +411,12 @@ export async function sendTest(key, { account, channels = null, channelsDraft = 
       sent.email = account.email
         ? await senders.mail({ to: account.email, subject: r.subject, text: r.body, purpose: 'template_test' }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }))
         : { sent: false, reason: 'no_address', message: 'Your account has no e-mail address.' };
-      await logSend({ t, version: version ?? t.version, channel: 'email', purpose: 'test', toKind: 'self', toRef: account.email ?? null, result: sent.email, by: account.id });
+      await logSend({ t, version: channelsDraft ? t.version : (version ?? t.version), draft: Boolean(channelsDraft), channel: 'email', purpose: 'test', toKind: 'self', toRef: account.email ?? null, result: sent.email, by: account.id });
     } else {
       sent.sms = account.mobile
         ? await senders.sms({ to: account.mobile, text: r.body }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }))
         : { sent: false, reason: 'no_address', message: 'Your account has no mobile number.' };
-      await logSend({ t, version: version ?? t.version, channel: 'sms', purpose: 'test', toKind: 'self', toRef: account.mobile ?? null, result: sent.sms, by: account.id });
+      await logSend({ t, version: channelsDraft ? t.version : (version ?? t.version), draft: Boolean(channelsDraft), channel: 'sms', purpose: 'test', toKind: 'self', toRef: account.mobile ?? null, result: sent.sms, by: account.id });
     }
   }
   return { template: t.key, version: version ?? t.version, draft: Boolean(channelsDraft), channels: sent };

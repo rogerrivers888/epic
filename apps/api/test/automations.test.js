@@ -87,6 +87,7 @@ test('the child-safety pause and the lapsed-checks pause cannot be turned off â€
     await assert.rejects(query('update automations set is_on = false where key = $1', [key]), /always on/);
     await assert.rejects(query('update automations set locked = false, lock_kind = null where key = $1', [key]), /always on|automations_/);
     await assert.rejects(query('delete from automations where key = $1', [key]), /cannot be removed/);
+    await assert.rejects(query(`update automations set key = key || '_x' where key = $1`, [key]), /cannot be renamed/);
     const r = await row(key);
     assert.equal(r.is_on, true);
     assert.equal(r.lock_kind, 'always_on');
