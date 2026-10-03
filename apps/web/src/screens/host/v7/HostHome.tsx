@@ -33,14 +33,15 @@ const pre = (web ? { whiteSpace: 'pre' } : {}) as TextStyle;
 const nowrap = (web ? { whiteSpace: 'nowrap' } : {}) as TextStyle;
 const CARD_KEY: Record<HostLane, 'one-off' | 'weekly' | 'course' | 'on-request'> = { oneoff: 'one-off', weekly: 'weekly', course: 'course', onrequest: 'on-request' };
 
-export function HostLanes({ yours = 0 }: { yours?: number }) {
+/** `under`: something above (the co-host strip) has already taken the status bar. */
+export function HostLanes({ yours = 0, under = false }: { yours?: number; under?: boolean }) {
   const { navigate } = useRouter();
   const { width } = useViewport();
   const wide = width >= 900;
   const [hover, setHover] = useState<number | null>(null);
   return (
     <View style={[styles.page, wide && styles.wide]}>
-      <View style={styles.hero}>
+      <View style={[styles.hero, under && { paddingTop: 22 }]}>
         <Text style={hx(50, -0.055, 0.9)}>Host it.</Text>
         <Text style={tx(15, '600', INK, { lineHeight: 21 })}>
           {HERO_SEGMENTS.map(([t, i], n) => (

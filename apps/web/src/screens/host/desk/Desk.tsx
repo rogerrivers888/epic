@@ -34,18 +34,20 @@ export function HostDesk({ fallbackCount = 0 }: { fallbackCount?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [invites, setInvites] = useState<Awaited<ReturnType<typeof api.deskCohostInvites>>['invites']>([]);
   useEffect(() => { api.desk().then(setHome).catch((e) => setError(e.message)); api.deskCohostInvites().then((r) => setInvites(r.invites)).catch(() => null); }, []);
+  // The strip, when it shows, is the first row under the status bar and takes its inset; the page below then doesn't (Codex, 3 Oct 2026).
   const strip = invites.length ? <CohostInvites invites={invites} onDone={(id) => setInvites((l) => l.filter((x) => x.id !== id))} /> : null;
-  if (error && !home) return <View style={{ flex: 1 }}>{strip}<HostLanes yours={fallbackCount} /></View>;
+  const under = Boolean(strip);
+  if (error && !home) return <View style={{ flex: 1 }}>{strip}<HostLanes yours={fallbackCount} under={under} /></View>;
   if (!home) return <Loading />;
-  if (home.home === '4e') return <View style={{ flex: 1 }}>{strip}<HostLanes yours={home.helping ?? 0} /></View>;
-  return <View style={{ flex: 1 }}>{strip}<DeskHomeView d={home} /></View>;
+  if (home.home === '4e') return <View style={{ flex: 1 }}>{strip}<HostLanes yours={home.helping ?? 0} under={under} /></View>;
+  return <View style={{ flex: 1 }}>{strip}<DeskHomeView d={home} under={under} /></View>;
 }
 
 /** Asked to co-host: nothing of the event is shown until they accept (Codex, 2 Oct 2026). */
 function CohostInvites({ invites, onDone }: { invites: { id: string; offerId: string; title: string | null; host: string }[]; onDone: (id: string) => void }) {
   const { navigate } = useRouter();
   return (
-    <View style={{ backgroundColor: LIME, paddingHorizontal: 20, paddingVertical: 10, gap: 6 }}>
+    <View style={{ backgroundColor: LIME, paddingHorizontal: 20, paddingTop: insetTop(10), paddingBottom: 10, gap: 6 }}>
       {invites.map((i) => (
         <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Text style={[tx(14, '700'), { flex: 1 }]} numberOfLines={1}>Co-host {i.title ?? 'an event'} · {i.host}</Text>
@@ -56,14 +58,14 @@ function CohostInvites({ invites, onDone }: { invites: { id: string; offerId: st
   );
 }
 
-function DeskHomeView({ d }: { d: Desk }) {
+function DeskHomeView({ d, under = false }: { d: Desk; under?: boolean }) {
   const { navigate } = useRouter();
   const { width } = useViewport();
   const wide = width >= 900;
   const col = wide ? { width: 560, alignSelf: 'center' as const } : null;
   const t = d.tiles;
   return (
-    <View style={{ flex: 1, backgroundColor: CREAM, paddingTop: insetTop(0) }}>
+    <View style={{ flex: 1, backgroundColor: CREAM, paddingTop: under ? 0 : insetTop(0) }}>
       <ScrollView contentContainerStyle={[{ paddingBottom: 20 }, col]}>
         <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Text style={hx(32)} accessibilityRole="header">Host</Text>

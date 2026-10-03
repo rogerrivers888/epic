@@ -91,7 +91,8 @@ test('every Host page that starts the screen takes the status bar into its first
     ['src/screens/host/v7/Ending.tsx', /band: \{[^}]*paddingTop: insetTop\(/],
     ['src/screens/host/v7/Preview.tsx', /paddingTop: insetTop\(10\), paddingBottom: 10/],
     ['src/screens/host/desk/kit.tsx', /backgroundColor: CREAM, paddingTop: insetTop\(0\)/],
-    ['src/screens/host/desk/Desk.tsx', /backgroundColor: CREAM, paddingTop: insetTop\(0\)/],
+    ['src/screens/host/desk/Desk.tsx', /paddingTop: under \? 0 : insetTop\(0\)/],
+    ['src/screens/host/desk/Desk.tsx', /backgroundColor: LIME, paddingHorizontal: 20, paddingTop: insetTop\(10\)/],
   ];
   for (const [file, re] of tops) assert.match(read(file), re, file);
 });
