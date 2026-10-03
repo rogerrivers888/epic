@@ -23,9 +23,10 @@
 -- pottery near Reading and near Bath is two asks; asking twice about one is
 -- one, answered exactly like the first so the form never says who is on it,
 -- and the second ask's radius and place replace the first's (`updated_at`).
--- "The same place" is `place_key`, not the spelling: every way of writing one
--- postcode is `pc:RG1 1AA`, a county is `county:Dorset`, an Open Names place
--- is its OS id, and only what could not be told falls back to the words.
+-- "The same place" is `place_key`, read from the words alone so it is the
+-- same whether or not the lookup answered (sources/ukPlace.js › placeKeyOf):
+-- every way of writing one postcode is `pc:RG1 1AA`, a county `county:Dorset`,
+-- and a town `name:` and its words, lowercased, stops and doubled spaces out.
 --
 -- A county is filed by name with no point (`lat`/`lng` null): a radius from
 -- "Dorset" has no one origin, so when the alert is built a county ask matches
