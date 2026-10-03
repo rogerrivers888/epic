@@ -171,8 +171,43 @@ function withSiteHead(html, site) {
     .replace('</head>', `  ${extra.join('\n    ')}\n  </head>`);
 }
 
+/**
+ * What the web server has lately asked the API, kept a short while: every visitor and crawler arrives through
+ * this one process, so the same page asked for twice in a minute is answered from here (Codex, 3 Oct 2026).
+ * Bounded by entries and bytes; a failure is never kept.
+ */
+const CACHE = new Map();
+const CACHE_MAX = 500;
+let cacheBytes = 0;
+const CACHE_BYTES_MAX = 40 * 1024 * 1024;
+function cached(key) {
+  const hit = CACHE.get(key);
+  if (!hit) return null;
+  if (hit.until < Date.now()) { CACHE.delete(key); cacheBytes -= hit.size; return null; }
+  return hit.value;
+}
+function keep(key, value, ttlMs, size = 1024) {
+  if (size > CACHE_BYTES_MAX / 10) return;
+  const old = CACHE.get(key);
+  if (old) { CACHE.delete(key); cacheBytes -= old.size; }
+  while (CACHE.size >= CACHE_MAX || cacheBytes + size > CACHE_BYTES_MAX) {
+    const [k, v] = CACHE.entries().next().value ?? [];
+    if (!k) break;
+    CACHE.delete(k); cacheBytes -= v.size;
+  }
+  CACHE.set(key, { value, until: Date.now() + ttlMs, size });
+  cacheBytes += size;
+}
+
 /** The API's public door, read-only; a failure is a status the page can answer with, never a throw. */
 async function publicApi(path) {
+  const hit = cached(path);
+  if (hit) return hit;
+  const out = await askApi(path);
+  if (out.status === 200 || out.status === 404) keep(path, out, path === '/api/public/sitemap' ? 10 * 60_000 : 60_000);
+  return out;
+}
+async function askApi(path) {
   try {
     const r = await fetch(`${API_URL}${path}`, { signal: AbortSignal.timeout(6000), headers: { accept: 'application/json' } });
     if (r.status === 404) return { status: 404 };
@@ -196,13 +231,17 @@ async function shellWith(res, status, req) {
 async function servePublic(req, res, pub, search) {
   const send = (status, headers, body) => { res.writeHead(status, headers); res.end(req.method === 'HEAD' ? undefined : body); };
   if (pub.kind === 'photo') {
-    let r;
-    try { r = await fetch(`${API_URL}/api/public/media/${pub.id}`, { signal: AbortSignal.timeout(8000) }); } catch { r = null; }
-    if (!r || !r.ok) { send(404, { 'content-type': 'text/plain', 'cache-control': 'no-cache' }, 'Not found'); return; }
-    const buf = Buffer.from(await r.arrayBuffer());
-    const type = r.headers.get('content-type') || '';
-    if (!type.startsWith('image/')) { send(404, { 'content-type': 'text/plain' }, 'Not found'); return; }
-    send(200, { 'content-type': type, 'content-length': buf.length, 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' }, buf);
+    let photo = cached(`photo:${pub.id}`);
+    if (!photo) {
+      let r;
+      try { r = await fetch(`${API_URL}/api/public/media/${pub.id}`, { signal: AbortSignal.timeout(8000) }); } catch { r = null; }
+      const type = r?.headers.get('content-type') || '';
+      if (!r || !r.ok || !type.startsWith('image/')) { send(404, { 'content-type': 'text/plain', 'cache-control': 'no-cache' }, 'Not found'); return; }
+      photo = { type, buf: Buffer.from(await r.arrayBuffer()) };
+      // An hour: a photo leaves with its page, and the page is asked again every minute.
+      keep(`photo:${pub.id}`, photo, 60 * 60_000, photo.buf.length);
+    }
+    send(200, { 'content-type': photo.type, 'content-length': photo.buf.length, 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' }, photo.buf);
     return;
   }
   const locale = pub.locale ?? 'en-gb';

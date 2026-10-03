@@ -92,7 +92,7 @@ import { requireDoor, requireOwnerSignedIn, hasDoor } from './access.js';
 import { writeAuditStrict } from './repositories/roles.js';
 import sourceSwitchRoutes from './routes/sourceSwitch.js';
 import { APP_URL, canonicalRedirect } from './origins.js';
-import { SPEND_PREFIXES, generalLimit, holdSendingDoors, photoLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
+import { SPEND_PREFIXES, generalLimit, holdSendingDoors, photoLimit, publicPagesLimit, signInLimit, spendLimit, voiceLimit } from './limits.js';
 import { sweepDeadSessions } from './repositories/sessions.js';
 import { sweepExpiredPlanSessions } from './repositories/planSessions.js';
 import { sweepOldFailures } from './repositories/signInFailures.js';
@@ -144,7 +144,7 @@ app.get('/health', health);
 // The coarse per-caller limit runs before the gate, so a flood of requests
 // carrying random Bearer tokens cannot drive unbounded session lookups in the
 // gate below — the limiter turns them away first (Codex, 1 Oct 2026).
-app.use(generalLimit);
+app.use((req, res, next) => (req.path.startsWith('/api/public/') ? publicPagesLimit(req, res, next) : generalLimit(req, res, next)));
 
 // --- the launch gate --------------------------------------------------------
 // First of all, before anything else can answer: until epic.day is open, the

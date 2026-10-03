@@ -27,10 +27,12 @@ const EVENT = {
   reviews: { total: 0, rating: null, items: [] }, moreFromHost: [], similar: [],
 };
 
+const asked: string[] = [];
 async function stubApi(fn: (base: string) => Promise<void>) {
   const api = http.createServer((req, res) => {
     const json = (status: number, body: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     const u = req.url ?? '';
+    asked.push(u);
     if (u === '/api/public/events/k7f2ab') return json(200, EVENT);
     if (u === '/api/public/events/old123') return json(200, { ...EVENT, code: 'old123', path: '/en-gb/event/a-past-walk-old123', title: 'A past walk', status: 'expired', ended: 'finished', mood: 'outdoors', subcategory: 'Walking' });
     if (u === '/api/public/hosts/3mq9cd') return json(200, { code: '3mq9cd', path: '/en-gb/hosts/hannah-r-3mq9cd', status: 'live', indexable: true, name: 'Hannah R.', subcategory: 'Fossil hunting', town: 'Charmouth', intro: null, events: [], finished: [], reviews: { total: 0, rating: null, items: [] } });
@@ -134,4 +136,14 @@ test('the addresses, the heads and the app’s routes agree', () => {
   assert.equal(hostHead({ path: '/en-gb/hosts/x-abcd12', name: 'Sam T.', indexable: false } as never, { appUrl: 'https://epic.day' }).robots, 'noindex');
   for (const path of ['/en-gb/event/fossil-hunting-k7f2ab', '/en-gb/hosts/hannah-r-3mq9cd', '/e/k7f2ab']) assert.equal(hrefOf(parseRoute(path)), path);
   assert.equal(parseRoute('/en-gb/event/no-code').name, 'unknown');
+});
+
+test('the same page twice in a minute asks the API once; so does the same photo', async () => {
+  await stubApi(async (api) => serve({ EPIC_API_URL: api }, async (base) => {
+    asked.length = 0;
+    await page(base, EVENT.path); await page(base, EVENT.path);
+    await fetch(`${base}/photos/${PHOTO}`); await fetch(`${base}/photos/${PHOTO}`);
+    assert.equal(asked.filter((u) => u === '/api/public/events/k7f2ab').length, 1, 'one page, one ask');
+    assert.equal(asked.filter((u) => u === `/api/public/media/${PHOTO}`).length, 1, 'one photo, one ask');
+  }));
 });

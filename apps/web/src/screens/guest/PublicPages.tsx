@@ -85,7 +85,13 @@ export function PublicEventPage({ code, locale }: { code: string; locale: SiteLo
   const { navigate } = useRouter();
   const [e, setE] = useState<Ev | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { api.publicEvent(code).then(setE).catch((x) => setError(x?.status === 404 ? 'This event isn’t on Epic.' : x?.message ?? 'That didn’t load.')); }, [code]);
+  // A new code is a new page: clear the old one, and an answer for a code no longer shown is dropped (Codex, 3 Oct 2026).
+  useEffect(() => {
+    let live = true;
+    setE(null); setError(null);
+    api.publicEvent(code).then((x) => { if (live) setE(x); }).catch((x) => { if (live) setError(x?.status === 404 ? 'This event isn’t on Epic.' : x?.message ?? 'That didn’t load.'); });
+    return () => { live = false; };
+  }, [code]);
   useTitle(e?.title ? `${e.title}${e.where?.area ? ` · ${e.where.area}` : ''} · Epic Events` : null);
   if (!e) return <Frame locale={locale}><Waiting error={error} /></Frame>;
 
@@ -133,7 +139,12 @@ export function PublicHostPage({ code, locale }: { code: string; locale: SiteLoc
   const { navigate } = useRouter();
   const [h, setH] = useState<Host | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { api.publicHost(code).then(setH).catch((x) => setError(x?.status === 404 ? 'This host isn’t on Epic.' : x?.message ?? 'That didn’t load.')); }, [code]);
+  useEffect(() => {
+    let live = true;
+    setH(null); setError(null);
+    api.publicHost(code).then((x) => { if (live) setH(x); }).catch((x) => { if (live) setError(x?.status === 404 ? 'This host isn’t on Epic.' : x?.message ?? 'That didn’t load.'); });
+    return () => { live = false; };
+  }, [code]);
   const what = [h?.subcategory, h?.town ? `in ${h.town}` : null].filter(Boolean).join(' ');
   useTitle(h?.name ? `${h.name}${what ? ` · ${what}` : ''} · Epic Hosts` : null);
   if (!h) return <Frame locale={locale}><Waiting error={error} /></Frame>;

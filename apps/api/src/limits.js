@@ -259,6 +259,13 @@ export const voiceLimit = limit({
 /** Everything else. Generous: a screen opening can be a dozen requests. */
 export const generalLimit = limit({ name: 'general', windowMs: 5 * MINUTE, max: 900 });
 
+/**
+ * The public event and host pages (routes/publicPages.js): read-only and spend-free, and asked for by the web
+ * server on behalf of every visitor and crawler — one caller to this process. Their own, larger bucket, so a busy
+ * day on epic.day never throttles the app's own requests, and the app's never throttle the pages (Codex, 3 Oct 2026).
+ */
+export const publicPagesLimit = limit({ name: 'public-pages', windowMs: 5 * MINUTE, max: 6000 });
+
 /** Forget windows that have passed, so the maps do not grow for ever. */
 const sweep = setInterval(() => {
   const now = Date.now();
