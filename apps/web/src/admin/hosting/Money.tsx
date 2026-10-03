@@ -203,10 +203,10 @@ function usePeriod() {
 type StreamRow = Stream & { total?: boolean; last?: number | null; split?: boolean };
 
 /** The ledger type each stream is made of; the total is every type. */
-const STREAM_TYPE: Record<string, string> = { public: 'charge', host_link: 'charge', intro: 'charge', private_payment: 'charge', private_fee: 'private_fee', pro: 'pro', tips: 'tip' };
+const STREAM_TYPE: Record<string, string> = { public: 'charge', host_link: 'charge', intro: 'charge', private_payment: 'charge', private_fee: 'private_fee', pro: 'pro', tips: 'tip', host_recovery: 'host_recovery' };
 
 /** Streams that are not bookings on an event, so Kind cannot split them. */
-const NOT_BY_KIND = new Set(['private_fee', 'pro', 'tips']);
+const NOT_BY_KIND = new Set(['private_fee', 'pro', 'tips', 'host_recovery']);
 
 function StreamsView({ onLedger }: { onLedger: () => void }) {
   const { months, month, setMonth, period, setPeriod } = usePeriod();
@@ -255,7 +255,7 @@ function StreamsView({ onLedger }: { onLedger: () => void }) {
       cell: (r) => <Pounds p={r.split ? null : r.epicPence} strong={r.total} />, cellTip: (r) => (r.split ? notByKind : null) },
     { key: 'hosts', label: 'To hosts', sort: 'hosts', width: 130, align: 'right', tip: tip('To hosts', 'What went to hosts from these bookings.'),
       // A fee or a subscription has no host side: a dash, not £0.00.
-      cell: (r) => <Pounds p={r.split || r.key === 'private_fee' || r.key === 'pro' ? null : r.toHostsPence} strong={r.total} />,
+      cell: (r) => <Pounds p={r.split || r.key === 'private_fee' || r.key === 'pro' || r.key === 'host_recovery' ? null : r.toHostsPence} strong={r.total} />,
       cellTip: (r) => (r.split ? notByKind : null) },
     ...(beforeName ? [{
       key: 'last', label: beforeName, sort: 'last', width: 120, align: 'right' as const, tip: tip(beforeName, `Epic took, ${beforeName}.`),

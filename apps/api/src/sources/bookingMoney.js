@@ -74,10 +74,10 @@ export async function owe(c, booking, { amountPence, cause, key, sessionId = nul
   if (booking.payment_state === 'held') {
     if (!wholeBooking) return null;
     const { rows: [row] } = await c.query(
-      `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, session_id, amount_pence, state, mode, cause, idem_key)
-       values ('release', $1, $2, $3, $4, $5, $6, 'pending', 'test', $7, $8)
+      `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, session_id, amount_pence, state, mode, cause, idem_key, triggered_by)
+       values ('release', $1, $2, $3, $4, $5, $6, 'pending', 'test', $7, $8, $9)
        on conflict (idem_key) where idem_key is not null do nothing returning *`,
-      [booking.id, booking.offer_id, booking.host_id, booking.household_id, sessionId, booking.held_pence ?? 0, cause, key],
+      [booking.id, booking.offer_id, booking.host_id, booking.household_id, sessionId, booking.held_pence ?? 0, cause, key, triggeredBy],
     );
     return row ?? null;
   }

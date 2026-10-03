@@ -114,6 +114,8 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
       // Is the money there to pay out yet? Asked first, so Stripe is not asked for a Payout it would refuse — a
       // refusal it would then remember under this payout's key (Codex, 3 Oct 2026). Can't tell: ask anyway.
       const held = await balance(p.stripe_account_id, { householdId: p.household_id }).catch(() => null);
+      // Something owed back and no way to see the balance: wait, rather than pay out what may be owed (Codex, 3 Oct 2026).
+      if (!held && Number(p.recovery_owed ?? 0) > 0) { out.waiting += 1; continue; }
       // Not more than is there — and not the part of it the host owes Epic back (a cancellation fee, L5), which is
       // collected first (processRecoveries) and would otherwise be paid out from under it.
       if (held && held.availablePence < amount + Number(p.recovery_owed ?? 0)) { out.waiting += 1; continue; }

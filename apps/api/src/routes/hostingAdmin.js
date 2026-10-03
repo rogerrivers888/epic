@@ -566,6 +566,8 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
       { key: 'private_fee', stream: 'Private event fee', bookingValuePence: null, ratePct: null, count: p.find((x) => x.kind === 'private_fee')?.n ?? 0, epicPence: p.find((x) => x.kind === 'private_fee')?.epic ?? 0, toHostsPence: 0 },
       { key: 'pro', stream: 'Pro', bookingValuePence: null, ratePct: null, count: p.find((x) => x.kind === 'pro')?.n ?? 0, epicPence: p.find((x) => x.kind === 'pro')?.value ?? 0, toHostsPence: 0 },
       { key: 'tips', stream: 'Tip admin fees', bookingValuePence: p.find((x) => x.kind === 'tip')?.value ?? null, ratePct: null, count: p.find((x) => x.kind === 'tip')?.n ?? 0, epicPence: p.find((x) => x.kind === 'tip')?.epic ?? 0, toHostsPence: p.find((x) => x.kind === 'tip')?.host ?? 0 },
+      // Cancellation fees recovered from hosts who cancelled or moved a date (register L5): Epic's, taken from the host.
+      { key: 'host_recovery', stream: 'Cancellation fees from hosts', bookingValuePence: null, ratePct: null, count: p.find((x) => x.kind === 'host_recovery')?.n ?? 0, epicPence: p.find((x) => x.kind === 'host_recovery')?.value ?? 0, toHostsPence: 0 },
     ];
     const total = { epicPence: streams.reduce((t, x) => t + x.epicPence, 0), toHostsPence: streams.reduce((t, x) => t + x.toHostsPence, 0), count: streams.reduce((t, x) => t + x.count, 0) };
     const s = await settingsRepo.current();
