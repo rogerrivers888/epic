@@ -9,7 +9,7 @@
  * Membership"). Hosting and Recovery join the bar when they are built — a tab
  * that opens nothing is a dead end, which the back office does not have.
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { asOneOf, useQueryState } from '../../router';
 import { BILLING_TABS, type BillingTab } from '../../routes';
 import { AdminPage, TabBar } from '../kit';
@@ -20,6 +20,9 @@ const TABS: { key: BillingTab; label: string }[] = [{ key: 'membership', label: 
 export function Billing({ canManage }: { canManage: boolean }) {
   const [tab, setTab] = useQueryState<BillingTab>('tab', 'membership', asOneOf(BILLING_TABS, 'membership'));
   const shown: BillingTab = TABS.some((t) => t.key === tab) ? tab : 'membership';
+  // The address says what is drawn (Codex, 3 Oct 2026): a tab not built yet is
+  // rewritten to Membership rather than left claiming something else.
+  useEffect(() => { if (shown !== tab) setTab(shown, { replace: true }); }, [shown, tab, setTab]);
   return (
     <AdminPage>
       <TabBar tabs={TABS} value={shown} onPick={setTab} />
