@@ -1306,6 +1306,35 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
 }
 
 /** Which tab in the shell a route belongs under, so the rail can light up. */
+/**
+ * Where a free guest account (G21, owner 3 Oct 2026: "bookings, messages,
+ * payments only") may be in the app. The tab bar draws only Plans › Events,
+ * Messages and Settings; this is what stops a typed or remembered address
+ * opening the rest — the API refuses those calls anyway (guestAccess.js).
+ * Everything else is sent to `GUEST_HOME` with a replace (App.tsx › Gate).
+ *
+ * In: Plans (the list — never a trip, a search or a new trip), a booking and
+ * its chat, Messages, an event and its layers, a host's profile, an invitation,
+ * Settings (preferences — profile, sign-out, delete — devices and payments),
+ * the household's people (never the voice layer), the account page, and the
+ * pages that live outside the app (website, sign-in, shared and joined links,
+ * a table's order code). `unknown` stays, so a bad address still says so.
+ */
+export const GUEST_HOME = paths.bookings();
+const GUEST_SETTINGS: SettingsSection[] = ['preferences', 'devices', 'payments'];
+export function guestMayOpen(route: Route): boolean {
+  switch (route.name) {
+    case 'trips': return !route.tripId && !route.creating && !route.searching;
+    case 'settings': return GUEST_SETTINGS.includes(route.section);
+    case 'household': return route.voice == null;
+    case 'booking': case 'messages': case 'experience': case 'hostProfile': case 'invited': case 'invitedLink':
+    case 'account': case 'site': case 'guide': case 'publicEvent': case 'publicHost': case 'shortEvent':
+    case 'login': case 'in': case 'join': case 'shared': case 'order': case 'unknown':
+      return true;
+    default: return false;
+  }
+}
+
 export function tabOf(route: Route): Tab | null {
   switch (route.name) {
     case 'inspire': return 'inspire';

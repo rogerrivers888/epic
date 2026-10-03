@@ -68,7 +68,7 @@ import { Toaster } from './src/components/Toast';
 import { UpgradePrompt } from './src/components/UpgradePrompt';
 import { RouterProvider, rememberedAddress, useRememberedAddress, useRouter } from './src/router';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
-import { isFullBleed, isImmersive, isTabHome, legacyHref, ownsHeader, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
+import { GUEST_HOME, guestMayOpen, isFullBleed, isImmersive, isTabHome, legacyHref, ownsHeader, parseRoute, paths, Route, splitHref, Tab, TripSection, tabOf, titleOf } from './src/routes';
 
 // Epic opens on Inspire (owner, 5 Sep 2026, "Supporting docs/Roam Inspire"):
 // what there is to do, with one search bar above it. The conversational planner
@@ -447,6 +447,12 @@ function Gate({ route }: { route: Route }) {
   // household passcode is never shown to a person; it is only the agents' way in,
   // through the API (owner, 2 Oct 2026).
   const signedOut = state === 'out' && !redeeming;
+  // A free guest account (G21) is in Plans › Events, its bookings, Messages and
+  // its own Settings; a typed or remembered address anywhere else goes there.
+  const guestAway = state === 'in' && !redeeming && account?.plan === 'guest' && !guestMayOpen(route);
+  useEffect(() => {
+    if (guestAway) navigate(GUEST_HOME, { replace: true });
+  }, [guestAway, navigate]);
   useEffect(() => {
     if (!signedOut) return;
     const back = href && href !== '/' ? `?next=${encodeURIComponent(href)}` : '';
@@ -454,7 +460,7 @@ function Gate({ route }: { route: Route }) {
     navigate(`${paths.login()}${back}${why}`, { replace: true });
   }, [signedOut, href, linkFailed, navigate]);
 
-  if (redeeming || state === 'checking' || signedOut) return <View style={styles.waiting} />;
+  if (redeeming || state === 'checking' || signedOut || guestAway) return <View style={styles.waiting} />;
   if (state === 'unconfigured') {
     return <NotHere title="Epic is not set up on this server yet" body="The API has no sign-in configured." href={paths.inspire()} />;
   }

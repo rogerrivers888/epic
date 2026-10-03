@@ -18,6 +18,11 @@ import { storage } from './storage';
 import { secureStorage } from './secureStorage';
 
 export const TOKEN_KEY = 'epic.session';
+/**
+ * A booking form kept while its free account is made (G21, Book.tsx). It belongs
+ * to that one sign-in, so signing out removes it.
+ */
+export const BOOK_DRAFT_KEY = 'epic.book-draft';
 
 // Web: read synchronously now. Native: null until `hydrateSession` awaits the
 // Keychain at boot (the secure cache is empty until then).
@@ -44,6 +49,7 @@ export function setSessionToken(next: string | null) {
   token = next;
   if (next) secureStorage.setItem(TOKEN_KEY, next);
   else secureStorage.removeItem(TOKEN_KEY);
+  if (!next) { try { storage.removeItem(BOOK_DRAFT_KEY); } catch { /* nothing kept */ } }
   markSignedIn(Boolean(next));
   listeners.forEach((fn) => fn(token));
 }

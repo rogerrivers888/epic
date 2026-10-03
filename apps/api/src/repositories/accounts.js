@@ -265,6 +265,22 @@ export async function createGuestAccount({ name, email, mobile, trialDays = 30, 
   });
 }
 
+/**
+ * Cancel every still-live guest link waiting for an address (G21) — by the
+ * address, or by the account that now holds it. Called inside the transaction
+ * that makes the address's account or its own login link, so a guest link
+ * can never outlive the moment the address stops being an account-in-waiting
+ * (Codex, 3 Oct 2026).
+ */
+async function expirePendingGuestLinks(client, { email = null, accountId = null }) {
+  await client.query(
+    `update sign_in_links set expires_at = now()
+      where account_id is null and purpose = 'guest' and used_at is null and expires_at > now()
+        and lower(pending_email) = lower(coalesce($1::text, (select email from accounts where id = $2::uuid)))`,
+    [email, accountId],
+  );
+}
+
 /** The plan a self-made free account is on (G21, migration 373): bookings, messages and payments only. */
 export { GUEST_PLAN };
 
@@ -297,6 +313,8 @@ async function insertGuest(client, { email, name, googleSub }) {
       [households[0].id, address, name || null, GUEST_PLAN, googleSub || null],
     );
     await client.query('release savepoint guest_insert');
+    // The address is an account now: any guest link still waiting for it is spent in the same step.
+    await expirePendingGuestLinks(client, { email: address });
     return rows[0];
   } catch (err) {
     await client.query('rollback to savepoint guest_insert');
@@ -692,6 +710,10 @@ export async function replaceSignInLink(accountId, { requestedBy = 'owner', ttlH
           and ($2::text is null or purpose is null or purpose = $2::text)`,
       [accountId, purpose],
     );
+    // A guest link still waiting for this account's address (G21) goes too, in
+    // the same step: the address has an account now, and its own link is the
+    // one that works (Codex, 3 Oct 2026).
+    await expirePendingGuestLinks(client, { accountId });
     const { rows } = await client.query(
       `insert into sign_in_links (account_id, token_hash, expires_at, requested_by, purpose)
        values ($1, $2, now() + ($3 || ' hours')::interval, $4, $5)

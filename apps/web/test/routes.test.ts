@@ -13,7 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FILING_TABS, HOW_ANCHORS, filingTabOf, howAnchorOf, hrefOf, isFullBleed, isImmersive, isTabHome, legacyHref,
+  FILING_TABS, GUEST_HOME, HOW_ANCHORS, guestMayOpen, filingTabOf, howAnchorOf, hrefOf, isFullBleed, isImmersive, isTabHome, legacyHref,
   ownsHeader, parseRoute, paths, parentOf, splitHref, tabOf, titleOf, withQuery,
 } from '../src/routes.ts';
 
@@ -1091,4 +1091,17 @@ test('the back-office redesign: Actions, Billing and Messages and emails have ad
   assert.deepEqual(parseRoute('/admin/approvals'), { name: 'admin', screen: 'approvals' });
   assert.deepEqual(parseRoute('/admin/plans'), { name: 'admin', screen: 'plans' });
   assert.deepEqual(parseRoute('/admin/mail'), { name: 'admin', screen: 'mail' });
+});
+
+test('a free guest account opens only its own pages; everything else goes to Plans › Events (G21)', () => {
+  assert.equal(GUEST_HOME, '/plans?span=events');
+  const may = (href: string) => guestMayOpen(parseRoute(splitHref(href).path));
+  for (const ok of ['/plans', '/bookings/b1', '/bookings/b1/chat', '/messages', '/experiences/e1', '/experiences/e1/book',
+    '/hosts/h1', '/invited/t1', '/i/t1', '/settings', '/settings/payments', '/settings/devices', '/account', '/login', '/e/abc123']) {
+    assert.equal(may(ok), true, ok);
+  }
+  for (const no of ['/inspire', '/places', '/plan', '/host', '/plans/t1', '/plans/new', '/settings/providers', paths.collections(),
+    '/inspire/events', paths.people(), '/admin', '/say']) {
+    assert.equal(may(no), false, no);
+  }
 });

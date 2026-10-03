@@ -166,6 +166,11 @@ export function guestNext(value) {
   // confirm; it never acts by itself.
   const then = new URLSearchParams(s.split('?')[1] ?? '').getAll('then');
   if (then.length && !(then.length === 1 && GUEST_THEN.has(then[0]) && segs[0] === 'experiences' && segs.length === 2)) return null;
+  // `draft` is the nonce of a booking form kept while the account is made
+  // (Book.tsx): one, of its own shape, only on an event or its booking page.
+  const draft = new URLSearchParams(s.split('?')[1] ?? '').getAll('draft');
+  const onEvent = segs[0] === 'experiences' && (segs.length === 2 || (segs.length === 3 && segs[2] === 'book'));
+  if (draft.length && !(draft.length === 1 && /^[A-Za-z0-9_-]{16,64}$/.test(draft[0]) && onEvent)) return null;
   if (GUEST_PAGES.has(segs[0])) return s;
   // The public event and host pages: /en-gb/event/<slug>-<code>, /en-gb/host/…
   if (/^[a-z]{2}(-[a-z]{2})?$/.test(segs[0] ?? '') && (segs[1] === 'event' || segs[1] === 'host')) return s;

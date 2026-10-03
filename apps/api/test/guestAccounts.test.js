@@ -264,6 +264,41 @@ test('the sheet to reopen after sign-in is only ask or the waiting list, only on
   }
 });
 
+test("a kept booking's nonce rides back only in its own shape, only on an event or its booking page", () => {
+  const n = 'Ab3_-xYz0123456789abcd';
+  for (const ok of [`/experiences/e1/book?draft=${n}`, `/experiences/e1/book?l=tok&session=s1&draft=${n}`, `/experiences/e1?draft=${n}`]) {
+    assert.equal(guestNext(ok), ok, ok);
+  }
+  for (const bad of ['/experiences/e1/book?draft=short', `/experiences/e1/book?draft=${n}!`, `/experiences/e1/book?draft=${n}&draft=${n}`,
+    `/plans?draft=${n}`, `/bookings/b1?draft=${n}`, `/experiences/e1/where?draft=${n}`, '/experiences/e1/book?draft=']) {
+    assert.equal(guestNext(bad), null, bad);
+  }
+});
+
+test("an address's own login link cancels the guest links still waiting for it, in the same step", async () => {
+  const email = `pending-${uniq()}@guest.test`;
+  await accounts.createGuestLink({ email });
+  // The address gets an account (say an administrator made one), then asks again: its own link, and the guest one goes.
+  await accounts.createAccount({ email, name: 'Now a member', plan: 'friend' });
+  const r = await call('POST', '/api/auth/guest', { email });
+  assert.equal(r.status, 200);
+  const { rows } = await query(
+    `select (expires_at > now()) as live from sign_in_links where account_id is null and lower(pending_email) = $1`, [email]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].live, false, 'the waiting guest link no longer works');
+});
+
+test('a guest account made with Google cancels the guest links still waiting for its address', async () => {
+  const email = `gpending-${uniq()}@gmail.test`;
+  const { token } = await accounts.createGuestLink({ email });
+  const r = await resolveGuestGoogleAccount({ sub: `sub-${uniq()}`, email, emailVerified: true });
+  assert.equal(r.created, true);
+  const { rows: [l] } = await query(`select (expires_at > now()) as live, used_at from sign_in_links where lower(pending_email) = $1`, [email]);
+  assert.equal(l.live, false);
+  assert.equal(l.used_at, null, 'cancelled, never recorded as opened');
+  assert.equal(await accounts.consumeGuestLink(token), null);
+});
+
 // ---------------------------------------------------------------------------
 // the wall
 // ---------------------------------------------------------------------------

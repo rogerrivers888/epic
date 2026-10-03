@@ -36,9 +36,10 @@ function startGoogle(next: string) {
 export function FreeAccount({ next, line, onLeave }: {
   next: string; line?: string | null;
   /** Called just before leaving for Google or sending the link — the booking screen keeps its form then. */
-  onLeave?: () => void;
+  /** May hand back the page to return to instead — the booking screen adds its draft's nonce (Book.tsx). */
+  onLeave?: () => string | void;
 }) {
-  const google = () => { onLeave?.(); startGoogle(next); };
+  const google = () => { startGoogle(onLeave?.() || next); };
   // Google is offered only once the server says it is switched on; until then email is the way in.
   const [googleOn, setGoogleOn] = useState(false);
   useEffect(() => {
@@ -59,9 +60,10 @@ export function FreeAccount({ next, line, onLeave }: {
     setErr(null); setBusy(true);
     try {
       // Kept on this device too, so the link lands back here even if it loses its way (afterSignIn.ts).
-      rememberNext(next);
-      onLeave?.();
-      await api.guestAccountLink(value, next);
+      // A link asked for again carries a fresh draft nonce; only the newest link restores the form.
+      const back = onLeave?.() || next;
+      rememberNext(back);
+      await api.guestAccountLink(value, back);
       setStep('sent'); setResent(again);
     } catch (e) {
       setErr(e instanceof ApiError && e.status === 429 ? (e.message || 'Too many tries. Wait a few minutes and try again.')

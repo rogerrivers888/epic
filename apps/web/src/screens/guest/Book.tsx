@@ -27,7 +27,7 @@ import { CompactBand } from '../../components/Band';
 import { BirthdayPicker } from '../../components/BirthdayPicker';
 import { paths, withQuery } from '../../routes';
 import { useRouter } from '../../router';
-import { signedIn } from '../../session';
+import { BOOK_DRAFT_KEY, signedIn } from '../../session';
 import {
   AMBER, AMBER_DARK, Buttons, Chips, DEEP_GREEN, Facts, Field, Foot, GuestPage, GuestSheet, INK_MUTED, Kick, LIME_TINT, MOSS, MonthPicker, Notice, Para,
   People, PriceLines, Rows, Seg, Waiting, dayWords, firstName, gbp, useToast, type PriceLine,
@@ -42,23 +42,36 @@ type Who = { key: string; name: string; adult: boolean; age: number | null; dob:
 /**
  * What was filled in before leaving to make the free account (G21). Continue
  * with Google leaves the page and an e-mail link opens a new one, so the form
- * is kept on this device for half an hour, for this event only, and taken back
- * once when the booking screen opens again — then removed.
+ * is kept on this device — one draft, for one event — for half an hour.
+ *
+ * It belongs to that one sign-in, never to whoever opens the page next: a
+ * random nonce is saved with it and carried in the page the sign-in comes back
+ * to (`?draft=`), and the form is restored only when the returning address
+ * carries the same nonce. Read once and removed — on restore, on a mismatch,
+ * and on sign-out (session.ts) — and never restored on a plain revisit
+ * (Codex, 3 Oct 2026).
  */
 type Draft = {
-  at: number; mode: 'drop_in' | 'book_ahead'; picks: string[]; month: number; day: string | null; time: string | null; length: number | null;
+  offerId: string; nonce: string; at: number; mode: 'drop_in' | 'book_ahead'; picks: string[]; month: number; day: string | null; time: string | null; length: number | null;
   ticked: string[]; extra: Who[]; contacts: Record<string, string>; over18: boolean; diet: string[]; bring: string | null;
   plusOne: boolean; stay: string | null; dobs: Record<string, string>;
 };
-const draftKey = (id: string) => `epic.book-draft.${id}`;
-function takeDraft(id: string): Draft | null {
+function takeDraft(id: string, nonce: string): Draft | null {
   try {
-    const raw = storage.getItem(draftKey(id));
-    storage.removeItem(draftKey(id));
+    const raw = storage.getItem(BOOK_DRAFT_KEY);
+    storage.removeItem(BOOK_DRAFT_KEY);
     if (!raw) return null;
     const d = JSON.parse(raw) as Draft;
-    return d && Date.now() - d.at < 30 * 60 * 1000 ? d : null;
+    return d && d.offerId === id && d.nonce === nonce && Date.now() - d.at < 30 * 60 * 1000 ? d : null;
   } catch { return null; }
+}
+/** 24 random characters, the shape the API's next-path check accepts (authGoogle.js guestNext). */
+function draftNonce(): string {
+  const bytes = new Uint8Array(24);
+  const c = (globalThis as any).crypto;
+  if (c?.getRandomValues) c.getRandomValues(bytes); else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  return Array.from(bytes, (b) => abc[b % 64]).join('');
 }
 const DIET: Record<string, string> = { vegetarian: 'Vegetarian', vegan: 'Vegan', gluten_free: 'Gluten free', nut_allergy: 'Nut allergy', dairy_free: 'Dairy free', halal: 'Halal' };
 
@@ -81,7 +94,7 @@ function fromMember(m: Member, me: string | null): Who {
 }
 
 export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: Experience | null }) {
-  const { navigate, back, query } = useRouter();
+  const { navigate, back, query, setQuery } = useRouter();
   const toast = useToast();
   const [offer, setOffer] = useState<Experience | null>(initial?.id === id ? initial : null);
   const [opt, setOpt] = useState<GuestOptions | null>(null);
@@ -128,17 +141,20 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   // Back from making the free account: what was filled in before, once (G21).
   const restored = useRef(false);
   const draftTicked = useRef<string[] | null>(null);
+  const draftMark = query.get('draft');
   useEffect(() => {
-    if (restored.current || !signedIn()) return;
+    if (restored.current || !signedIn() || !draftMark) return;
     restored.current = true;
-    const d = takeDraft(id);
+    const d = takeDraft(id, draftMark);
+    // The nonce leaves the address once read, whether or not it matched.
+    setQuery({ draft: null }, { replace: true });
     if (!d) return;
     setMode(d.mode); setPicks(new Set(d.picks)); setMonth(d.month); setDay(d.day); setTime(d.time); setLength(d.length);
     setExtra(d.extra); setContacts(d.contacts); setOver18(d.over18); setDiet(new Set(d.diet)); setBring(d.bring);
     setPlusOne(d.plusOne); setStay(d.stay); setDobs(d.dobs);
     // Who was ticked: the people added by hand keep their keys; "You" is whoever you are now.
     setTicked(new Set(d.ticked)); draftTicked.current = d.ticked;
-  }, [id]);
+  }, [id, draftMark, setQuery]);
 
   useEffect(() => {
     if (initial?.id !== id) api.experience(id, inviteToken, linkToken).then((r) => setOffer(r.offer)).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
@@ -258,13 +274,15 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
 
   // This page, as it is set — the invitation, the link, a held waiting-list place — to come back to.
   const here = withQuery(paths.experienceBook(offer.id), { l: linkToken ?? null, i: inviteToken ?? null, session: heldSession ?? null });
-  const keepDraft = () => {
+  const keepDraft = (): string => {
     const youKey = people.find((p) => p.line === 'You')?.key;
+    const nonce = draftNonce();
     const d: Draft = {
-      at: Date.now(), mode, picks: [...picks], month, day, time, length, extra, contacts, over18, diet: [...diet], bring, plusOne, stay, dobs,
+      offerId: offer.id, nonce, at: Date.now(), mode, picks: [...picks], month, day, time, length, extra, contacts, over18, diet: [...diet], bring, plusOne, stay, dobs,
       ticked: [...ticked].map((k) => (k === youKey ? 'you' : k)),
     };
-    try { storage.setItem(draftKey(offer.id), JSON.stringify(d)); } catch { /* nowhere to keep it: the form starts afresh */ }
+    try { storage.setItem(BOOK_DRAFT_KEY, JSON.stringify(d)); } catch { return here; /* nowhere to keep it: the form starts afresh */ }
+    return withQuery(here, { draft: nonce });
   };
 
   const body = (): GuestBookBody => ({
