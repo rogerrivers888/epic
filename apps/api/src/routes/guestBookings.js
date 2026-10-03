@@ -899,18 +899,18 @@ router.post('/booked/:id/rate', async (req, res, next) => {
     const hostStars = req.body?.hostStars == null ? null : Number(req.body.hostStars);
     if (hostStars != null && (!Number.isInteger(hostStars) || hostStars < 1 || hostStars > 5)) throw refuse(400, 'stars', 'One to five stars for the host.');
     const s = await settingsRepo.current();
-    const days = Math.ceil((typeof s.review_window === 'number' ? s.review_window : 48) / 24);
+    // Shown no sooner than the review window after it was written: the first midnight once the window has passed (Codex, 3 Oct 2026).
+    const windowHours = typeof s.review_window === 'number' ? s.review_window : 48;
     const chips = Array.isArray(req.body?.chips) ? req.body.chips.filter((x) => typeof x === 'string').map((x) => x.slice(0, 40)).slice(0, 8) : [];
     const { rows: [r] } = await query(
       `insert into host_reviews (booking_id, offer_id, host_id, household_id, side, stars, host_stars, text, chips, publish_on, by_proxy)
-       values ($1, $2, $3, $4, 'guest', $5, $6, $7, $8::jsonb, current_date + $9::int, $10)
+       values ($1, $2, $3, $4, 'guest', $5, $6, $7, $8::jsonb, (now() + make_interval(hours => $9::int))::date + 1, $10)
        on conflict (booking_id, side) do nothing returning id`,
-      [b.id, b.offer_id, b.host_id, household.id, stars, hostStars, String(req.body?.text ?? '').trim().slice(0, 2000) || null, JSON.stringify(chips), days, req.body?.byProxy === true],
+      [b.id, b.offer_id, b.host_id, household.id, stars, hostStars, String(req.body?.text ?? '').trim().slice(0, 2000) || null, JSON.stringify(chips), windowHours, req.body?.byProxy === true],
     );
     if (!r) throw refuse(409, 'rated', 'You’ve rated this one.');
     await query('update experience_bookings set rated_at = now() where id = $1', [b.id]);
-    const h = await repo.hostById(b.host_id);
-    await notifications.notify({ householdId: h.household_id, kind: 'new_review', title: `A ${stars}-star review`, link: '/host/reviews', dedupeKey: `review:${r.id}` }).catch(() => null);
+    // The host hears of it when it shows, not before (guestPrompts, Codex 3 Oct 2026).
     res.status(201).json({ id: r.id });
   } catch (err) { next(err); }
 });
@@ -1128,6 +1128,15 @@ export async function guestPrompts({ now = new Date() } = {}) {
         and s.on_date between current_date - 2 and current_date + 2`,
   );
   let sent = 0;
+  // Reviews that have just become visible: the host is told now, once each.
+  const { rows: shown } = await query(
+    `select r.id, r.stars, h.household_id from host_reviews r join hosts h on h.id = r.host_id
+      where r.side = 'guest' and not coalesce(r.hidden, false) and r.publish_on <= current_date and r.publish_on > current_date - 3`,
+  );
+  for (const v of shown) {
+    const n = await notifications.notify({ householdId: v.household_id, kind: 'new_review', title: `A ${v.stars}-star review`, link: '/host/reviews', dedupeKey: `review:${v.id}` }).catch(() => null);
+    if (n) sent += 1;
+  }
   for (const r of rows) {
     const o = { time_zone: r.time_zone };
     const start = startOf(r, o);

@@ -332,6 +332,15 @@ test('after the event: did it happen (a complaint holds the payout), rate once, 
     assert.equal((await query(`select count(*)::int as n from hosting_complaints where booking_id = $1 and state = 'open'`, [id])).rows[0].n, 1);
     assert.equal((await srv.send('POST', `/api/booked/${id}/rate`, { stars: 4, text: 'Good fun', chips: ['Patient'] })).status, 201);
     assert.equal((await srv.send('POST', `/api/booked/${id}/rate`, { stars: 5 })).status, 409);
+    // Shown only after the review window, to the hour; the host hears of it when it shows, not before (Codex, 3 Oct 2026).
+    const { rows: [rv] } = await query(`select id, publish_on >= (now() + interval '48 hours')::date as later from host_reviews where booking_id = $1`, [id]);
+    assert.equal(rv.later, true, 'not before 48 hours have passed');
+    const told = async () => (await query(`select count(*)::int as n from notifications where dedupe_key = $1`, [`review:${rv.id}`])).rows[0].n;
+    assert.equal(await told(), 0, 'not told before it shows');
+    await query(`update host_reviews set publish_on = current_date where id = $1`, [rv.id]);
+    await guest.guestPrompts();
+    await guest.guestPrompts();
+    assert.equal(await told(), 1, 'told once when it shows');
     const tip = await srv.send('POST', `/api/booked/${id}/tip`, { amountPence: 500 });
     assert.equal(tip.status, 201);
     assert.deepEqual([tip.body.tip.feePence, tip.body.tip.totalPence], [30, 530], '£5 tip + 30p fee');

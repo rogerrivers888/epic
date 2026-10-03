@@ -69,7 +69,7 @@ async function offersWithSessions(hostId) {
   const { rows: sessions } = ids.length ? await query(
     `select s.*,
             coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
-                       where bs.session_id = s.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')), 0)::int as booked
+                       where bs.session_id = s.id and bs.state = 'booked' and (b.state in ('confirmed', 'attended') or b.payment_state in ('charged', 'held', 'partially_refunded'))), 0)::int as booked
        from offer_sessions s where s.offer_id = any($1::uuid[]) order by s.on_date, s.starts_at nulls first`,
     [ids],
   ) : { rows: [] };
@@ -453,7 +453,7 @@ async function offersWithSessionsOf(ids) {
   for (const o of offers) {
     const { rows } = await query(
       `select s.*, coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
-                              where bs.session_id = s.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')), 0)::int as booked
+                              where bs.session_id = s.id and bs.state = 'booked' and (b.state in ('confirmed', 'attended') or b.payment_state in ('charged', 'held', 'partially_refunded'))), 0)::int as booked
          from offer_sessions s where s.offer_id = $1 order by s.on_date, s.starts_at nulls first`, [o.id],
     );
     out.push({ ...o, sessionsList: rows });

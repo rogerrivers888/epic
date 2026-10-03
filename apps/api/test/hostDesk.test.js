@@ -76,13 +76,13 @@ async function aSession(offer, inDays, { decidesInHours = null } = {}) {
 let phones = 0;
 const aPhone = () => `07700 9${String(Date.now() % 100000).padStart(5, '0')}${(phones += 1)}`;
 
-async function aBooking(offer, sessions, { heads = 1, charged = 2000, hostPence = 1600, mobile = aPhone() } = {}) {
+async function aBooking(offer, sessions, { heads = 1, charged = 2000, hostPence = 1600, mobile = aPhone(), state = 'confirmed', pay = 'charged' } = {}) {
   const { household, member } = await aHousehold(query);
   await anAccount(household.id, member.id, { mobile, name: 'Priya Patel' });
   const { rows: [b] } = await query(
     `insert into experience_bookings (offer_id, host_id, household_id, heads, state, payment_state, charged_pence, host_pence, fee_pence, fee_rate_pct, fee_reason, value_pence)
-     values ($1, $2, $3, $4, 'confirmed', 'charged', $5, $6, $7, 20, 'standard', $5) returning *`,
-    [offer.id, offer.host_id, household.id, heads, charged, hostPence, charged - hostPence],
+     values ($1, $2, $3, $4, $8, $9, $5, $6, $7, 20, 'standard', $5) returning *`,
+    [offer.id, offer.host_id, household.id, heads, charged, hostPence, charged - hostPence, state, pay],
   );
   for (const s of sessions) await query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, s.id]);
   return b;
@@ -112,6 +112,7 @@ test('busy: next up, the three after, tiles, earnings and the ladder', async () 
   const past = await aSession(weekly, -3);
   await aBooking(weekly, [s1], { heads: 6 });
   await aBooking(weekly, [s3], { heads: 3 });
+  await aBooking(weekly, [s3], { heads: 4, state: 'pending', pay: 'none' }); // a checkout not yet paid holds no place towards the minimum
   await aBooking(weekly, [past], { heads: 2, hostPence: 3000 });
   const srv = await server(account);
   try {
