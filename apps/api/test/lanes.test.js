@@ -184,24 +184,27 @@ test('weekly is paid when either price is set', () => {
 const host = (over = {}) => ({ name: 'Maya Okafor', photo_id: 'p1', intro_text: 'Henley local', date_of_birth: '1986-03-02', identity_state: 'none', payouts_state: 'none', checked_state: 'none', tax_reference: null, ...over });
 const account = { email: 'maya@example.com', mobile: '07700900118' };
 
-test('private checklist: profile and payouts block sending; the video is optional; tax waits for the first payout', () => {
+test('private checklist: Verified, profile and payouts block sending; the video is optional; tax waits for the first payout', () => {
   const offer = { lane: 'oneoff', visibility: 'invite', price_mode: 'same_each', money: 'epic' };
   const items = checklist(offer, { host: host(), account });
-  assert.deepEqual(items.map((i) => i.key), ['email', 'phone', 'profile', 'video', 'payouts', 'tax']);
-  assert.deepEqual(sendBlockers(items), ['payouts']);
+  // Every host proves who they are once, private as well as public (register L7, 3 Oct 2026).
+  assert.deepEqual(items.map((i) => i.key), ['email', 'phone', 'profile', 'verified', 'video', 'payouts', 'tax']);
+  assert.deepEqual(sendBlockers(items), ['verified', 'payouts']);
+  assert.deepEqual(sendBlockers(checklist(offer, { host: host({ identity_state: 'verified' }), account })), ['payouts']);
+  assert.equal(publishAction(offer, items).key, 'verify', 'the passport comes first, before Stripe’s form');
   assert.equal(items.find((i) => i.key === 'video').blocks, null);
   assert.equal(items.find((i) => i.key === 'tax').blocks, 'payout');
   // Free private: nothing about money at all.
-  assert.deepEqual(checklist({ lane: 'oneoff', visibility: 'invite', price_mode: 'free' }, { host: host(), account }).map((i) => i.key), ['email', 'phone', 'profile', 'video']);
+  assert.deepEqual(checklist({ lane: 'oneoff', visibility: 'invite', price_mode: 'free' }, { host: host(), account }).map((i) => i.key), ['email', 'phone', 'profile', 'verified', 'video'], 'a free host proves who they are too, with no Stripe account');
   // Paid directly: no payouts, no tax.
   assert.ok(!checklist({ ...offer, money: 'direct' }, { host: host(), account }).some((i) => i.key === 'payouts'));
 });
 
 test('the host profile needs a date of birth, and the host must be eighteen', () => {
   const offer = { lane: 'oneoff', visibility: 'invite', price_mode: 'free' };
-  assert.deepEqual(sendBlockers(checklist(offer, { host: host({ date_of_birth: null }), account })), ['profile']);
+  assert.deepEqual(sendBlockers(checklist(offer, { host: host({ date_of_birth: null, identity_state: 'verified' }), account })), ['profile']);
   const young = new Date(); young.setUTCFullYear(young.getUTCFullYear() - 17);
-  assert.deepEqual(sendBlockers(checklist(offer, { host: host({ date_of_birth: young.toISOString().slice(0, 10) }), account })), ['profile']);
+  assert.deepEqual(sendBlockers(checklist(offer, { host: host({ date_of_birth: young.toISOString().slice(0, 10), identity_state: 'verified' }), account })), ['profile']);
   assert.equal(ageOn('2000-10-03', '2026-10-02'), 25);
   assert.equal(ageOn('2000-10-02', '2026-10-02'), 26);
 });

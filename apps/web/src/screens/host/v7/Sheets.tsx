@@ -236,8 +236,11 @@ function CheckedSheet({ home, onClose, onChanged }: SheetProps) {
 
 function VerifySheet({ offer, onClose, onChanged }: SheetProps) {
   const { busy, run } = useSave();
+  // TEMPORARY (3 Oct 2026): the consent tick below is a stand-in built from this sheet's own parts until Claude Design
+  // draws the biometric consent screen. The rule it carries is not temporary: no check starts without the yes (L7).
+  const [agreed, setAgreed] = useState(false);
   const go = () => run(async () => {
-    const r = await api.laneVerify(offer.id);
+    const r = await api.laneVerify(offer.id, agreed);
     if (r.url) { goToStripe(r.url); return; }
     if (r.processing) showToast('Stripe is checking it. We’ll tick it off when it’s done.');
     await onChanged();
@@ -253,13 +256,19 @@ function VerifySheet({ offer, onClose, onChanged }: SheetProps) {
     </View>
   );
   return (
-    <Overlay full title="Verify your identity" onClose={onClose} footer={<ActionBar label="Continue to Stripe" onPress={() => { void go(); }} busy={busy} />}>
-      <Text style={tx(13, '400', INK_MUTED, { marginTop: -4 })}>Needed to host in public</Text>
+    <Overlay full title="Verify your identity" onClose={onClose} footer={<ActionBar label="Continue to Stripe" onPress={() => { void go(); }} disabled={!agreed} busy={busy} />}>
+      <Text style={tx(13, '400', INK_MUTED, { marginTop: -4 })}>Once, for every host</Text>
       <View style={v.list}>
-        {row('identity', 'Your passport', 'Or a UK driving licence')}
+        {row('identity', 'Your passport', 'The photo page')}
         {row('face', 'A quick selfie', 'To match your face to the photo')}
       </View>
       <Text style={tx(13, '400', INK_MUTED, { lineHeight: 18 })}>Checked by Stripe. Epic sees the result, never your passport.</Text>
+      {/* TEMPORARY: stand-in consent row until the designed screen. */}
+      <Press onPress={() => setAgreed((a) => !a)} accessibilityRole="checkbox" accessibilityState={{ checked: agreed }}
+        accessibilityLabel="I agree to Stripe matching my selfie to my passport photo" style={[v.box, { gap: 10 }, pointer]}>
+        <Icon name={agreed ? 'check' : 'face'} size={18} color={INK} strokeWidth={2.2} />
+        <Text style={[v.boxText, { flex: 1 }]}>I agree to Stripe using my selfie and passport photo to check it’s me (biometric data)</Text>
+      </Press>
       <Text style={tx(12.5, '700')}>About 2 minutes</Text>
     </Overlay>
   );

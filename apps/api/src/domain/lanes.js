@@ -547,7 +547,8 @@ export function checklist(offer, { host, account } = {}, cfg = DEFAULT_CONFIG) {
   push('email', 'send', has(account?.email));
   push('phone', 'send', has(account?.mobile));
   push('profile', 'send', profileDone);
-  if (pub) push('verified', 'send', host?.identity_state === 'verified');
+  // Every host proves who they are once, with a passport — public or private, paid or free (register L7, 3 Oct 2026).
+  push('verified', 'send', host?.identity_state === 'verified');
   // The host makes their own video (owner, 2 Oct 2026: "They need to make their own video").
   push('video', pub ? 'send' : null, Boolean(offer.video_id), { optional: !pub });
   if (needsChecked(offer, cfg)) push('checked', 'live', checkedHolds(host), { submitted: host?.checked_state === 'submitted' });
@@ -582,11 +583,10 @@ export function ageOn(dob, on = new Date()) {
  * Public: "Carry on · Verified" until the identity check is done, then "Send for review".
  */
 export function publishAction(offer, items, { isPro = false } = {}, cfg = DEFAULT_CONFIG) {
-  if (offer.visibility === 'public') {
-    const verified = items.find((i) => i.key === 'verified');
-    if (verified && !verified.done) return { key: 'verify', label: 'Carry on · Verified' };
-    return { key: 'review', label: 'Send for review' };
-  }
+  // The passport check comes first for every host (L7), and before Stripe's own form (owner, 3 Oct 2026).
+  const verified = items.find((i) => i.key === 'verified');
+  if (verified && !verified.done) return { key: 'verify', label: 'Carry on · Verified' };
+  if (offer.visibility === 'public') return { key: 'review', label: 'Send for review' };
   if (isPro || offer.private_fee_state === 'paid') return { key: 'send', label: 'Send the invites' };
   if ((offer.private_plan ?? 'event') === 'pro') return { key: 'pro', label: 'Join Pro · send the invites' };
   const pounds = cfg.privateEventPence / 100;

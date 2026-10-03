@@ -301,11 +301,12 @@ test('the profile sheet: date of birth always, eighteen or over; tax and Checked
 });
 
 /** A host with everything a private checklist asks for, but the fee. */
-async function readyHost(h, member, { mobile = `077${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}` } = {}) {
+async function readyHost(h, member, { mobile = `077${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`, verified = true } = {}) {
   const account = await anAccount(h, member, { mobile });
   const { rows: [m] } = await query("insert into host_media (household_id, kind, mime, bytes, size) values ($1, 'photo', 'image/jpeg', '\\x00', 1) returning id", [h.id]);
   const host = await repo.insertHost(h.id, { name: 'Maya Okafor', dateOfBirth: '1986-03-02', accountId: account.id });
-  await repo.updateHost(host.id, { photoId: m.id, introText: 'Henley local' });
+  // Every host proves who they are once (L7); a test about that check starts with a host who hasn't.
+  await repo.updateHost(host.id, { photoId: m.id, introText: 'Henley local', ...(verified ? { identityState: 'verified', identityVerifiedAt: new Date('2026-09-01T10:00:00Z') } : {}) });
   return account;
 }
 
@@ -403,7 +404,7 @@ test('private: the profile blocks sending; a missing mobile blocks it too', asyn
 
 test('public: Verified and the video block review; Checked and tax wait; then it is sent for review', async () => {
   const { household: h, member } = await aHousehold(query);
-  const srv = await server(await readyHost(h, member));
+  const srv = await server(await readyHost(h, member, { verified: false }));
   try {
     const { body: { offer: o } } = await srv.send('POST', '/api/host/lanes/offers', { lane: 'course', whatLabel: 'Swimming lessons', title: 'Learn to swim' });
     let r = await srv.send('PATCH', `/api/host/lanes/offers/${o.id}`, {
@@ -418,7 +419,11 @@ test('public: Verified and the video block review; Checked and tax wait; then it
     assert.equal((await srv.send('POST', `/api/host/lanes/offers/${o.id}/publish`)).body.error, 'checklist');
 
     await withStripe('sk_test_fake', async () => {
-      r = await srv.send('POST', '/api/host/lanes/verify', { offerId: o.id });
+      // Consent to the face match first (L7): without it, nothing is opened.
+      assert.equal((await srv.send('POST', '/api/host/lanes/verify', { offerId: o.id })).body.error, 'consent_required');
+      // Stripe's form can't come before the passport check (owner, 3 Oct 2026).
+      assert.equal((await srv.send('POST', '/api/host/lanes/payouts', { offerId: o.id })).body.error, 'verify_first');
+      r = await srv.send('POST', '/api/host/lanes/verify', { offerId: o.id, consent: true });
       assert.equal(r.body.url, 'https://verify.stripe.test/start');
       r = await srv.send('POST', '/api/host/lanes/payouts', { offerId: o.id });
       assert.equal(r.body.url, 'https://connect.stripe.test/onboard');
@@ -604,20 +609,20 @@ test('the older offer routes refuse a lane offer: it is sent only through its ow
 
 test('L7: the passport check is tied to the host’s Stripe Person only while Stripe allows it — before the hosted form opens', async () => {
   const { household: h, member } = await aHousehold(query);
-  const srv = await server(await readyHost(h, member));
+  const srv = await server(await readyHost(h, member, { verified: false }));
   try {
     const host = await repo.hostByHousehold(h.id);
     await repo.updateHost(host.id, { stripeAccountId: 'acct_test_1', stripeAccountModel: 'v2', stripePersonId: 'person_test_1' });
     const sessions = () => calls.filter((c) => c.url === '/v1/identity/verification_sessions' && c.method === 'POST');
     await withStripe('sk_test_fake', async () => {
-      await srv.send('POST', '/api/host/lanes/verify', { offerId: null });
+      await srv.send('POST', '/api/host/lanes/verify', { offerId: null, consent: true });
       const tied = new URLSearchParams(sessions().at(-1).body);
       assert.deepEqual([tied.get('related_person[account]'), tied.get('related_person[person]')], ['acct_test_1', 'person_test_1']);
       assert.equal(tied.get('options[document][allowed_types][0]'), 'passport');
       assert.equal(tied.get('options[document][allowed_types][1]'), null, 'passport only while the licence setting is off');
       // Once Stripe's form has been opened Stripe refuses the tie, so it isn't asked for.
       await repo.updateHost(host.id, { identityState: 'none', identitySessionId: null, stripeLinkMadeAt: new Date() });
-      await srv.send('POST', '/api/host/lanes/verify', { offerId: null });
+      await srv.send('POST', '/api/host/lanes/verify', { offerId: null, consent: true });
       assert.equal(new URLSearchParams(sessions().at(-1).body).get('related_person[account]'), null);
     });
   } finally { await srv.close(); }
@@ -638,4 +643,80 @@ test('an account from before register L is left alone for the owner’s void, ne
     assert.equal(made(), before, 'no new account made');
     assert.equal((await repo.hostById(host.id)).stripe_account_id, 'acct_old_1', 'the old id is still there for the void to keep');
   } finally { await srv.close(); }
+});
+
+test('L7: a host taking money gets their Stripe account before the passport check, so the check is tied to it; a free host gets none', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await readyHost(h, member, { verified: false }));
+  try {
+    const host = await repo.hostByHousehold(h.id);
+    const paid = await repo.insertOffer(host.id, 'oneoff', { lane: 'oneoff' });
+    await query(`update host_offers set price_mode = 'same_each', price_pence = 2000, money = 'epic', visibility = 'invite' where id = $1`, [paid.id]);
+    const free = await repo.insertOffer(host.id, 'oneoff', { lane: 'oneoff' });
+    const accountsMade = () => calls.filter((c) => c.url === '/v2/core/accounts' && c.method === 'POST').length;
+    const before = accountsMade();
+    const linksBefore = calls.filter((c) => c.url === '/v1/account_links').length;
+    await withStripe('sk_test_fake', async () => {
+      // A free event: the check stands on its own, and no Stripe account is made (L6).
+      await srv.send('POST', '/api/host/lanes/verify', { offerId: free.id, consent: true });
+      assert.equal(accountsMade(), before, 'a free host never needs a Stripe account');
+      const alone = new URLSearchParams(calls.filter((c) => c.url === '/v1/identity/verification_sessions' && c.method === 'POST').at(-1).body);
+      assert.equal(alone.get('related_person[account]'), null);
+      // The same host, for a paid event, after that check was dropped: account first, then the check, tied to it.
+      await repo.updateHost(host.id, { identityState: 'none', identitySessionId: null });
+      await srv.send('POST', '/api/host/lanes/verify', { offerId: paid.id, consent: true });
+      assert.equal(accountsMade(), before + 1, 'the account is made first');
+      const tied = new URLSearchParams(calls.filter((c) => c.url === '/v1/identity/verification_sessions' && c.method === 'POST').at(-1).body);
+      assert.deepEqual([tied.get('related_person[account]'), tied.get('related_person[person]')], ['acct_test_1', 'person_test_1']);
+      assert.equal(calls.filter((c) => c.url === '/v1/account_links').length, linksBefore, 'Stripe’s form is not opened by the check');
+      assert.equal((await repo.hostById(host.id)).stripe_link_made_at, null);
+    });
+    // Each yes to the face match is logged with its date.
+    const { rows: consents } = await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'identity_consent'`, [host.id]);
+    assert.equal(consents.length, 2);
+    assert.equal(consents[0].after.biometric, true);
+    assert.ok(Date.parse(consents[0].after.at));
+  } finally { await srv.close(); }
+});
+
+test('L7: Stripe asking a verified host for ID again tells the owner once, and asks the host nothing', async () => {
+  const stripe = await import('../src/sources/stripe.js');
+  assert.deepEqual(stripe.asksForIdAgain({ requirements: { currently_due: ['external_account', 'individual.verification.document'], eventually_due: ['individual.verification.document'] } }), ['individual.verification.document']);
+  assert.deepEqual(stripe.asksForIdAgain({ requirements: { currently_due: ['external_account', 'individual.address.city'] } }), []);
+
+  const { household: h } = await aHousehold(query);
+  const host = await repo.insertHost(h.id, { name: 'Twice Asked' });
+  await repo.updateHost(host.id, { identityState: 'verified', identityVerifiedAt: new Date('2026-09-20T09:00:00Z') });
+  const { rows: [owner] } = await query(`select email from accounts where role = 'owner' and status = 'active' limit 1`);
+  const ownerAlert = await import('../src/sources/ownerAlert.js');
+  if (!owner) {
+    const { household: oh, member: om } = await aHousehold(query);
+    await query("insert into accounts (household_id, member_id, email, role, status, name) values ($1,$2,'owner-test@epic.day','owner','active','Owner')", [oh.id, om.id]);
+  }
+  const sent = [];
+  const deps = { send: async (m) => { sent.push(m); }, configured: () => true };
+  const args = { key: `stripe-asks-id:${host.id}:individual.verification.document`, subjectId: host.id, subject: 'Stripe is asking Twice Asked for ID again', text: 'x' };
+  assert.equal((await ownerAlert.alertOwner(args, deps)).sent, true);
+  assert.equal((await ownerAlert.alertOwner(args, deps)).sent, false, 'once');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, await ownerAlert.ownerEmail());
+  // No mail set up: said in the log, never silent, and nothing recorded as sent.
+  assert.deepEqual(await ownerAlert.alertOwner({ ...args, key: 'other' }, { send: deps.send, configured: () => false }), { sent: false, reason: 'no_mail' });
+});
+
+test('L7: the host’s public page shows the day Stripe confirmed their passport, and nothing else of the check', async () => {
+  const { household: h } = await aHousehold(query);
+  const host = await repo.insertHost(h.id, { name: 'Dated Fact' });
+  const hosting = await import('../src/routes/hosting.js');
+  const app = express(); app.use(express.json()); app.use('/api', hosting.publicRouter);
+  const s = app.listen(0, '127.0.0.1'); await new Promise((r) => s.once('listening', r));
+  const get = async () => (await fetch(`http://127.0.0.1:${s.address().port}/api/hosts/${host.id}`)).json();
+  try {
+    assert.equal((await get()).host?.verifiedOn ?? (await get()).verifiedOn ?? null, null, 'not verified: no date');
+    await repo.updateHost(host.id, { identityState: 'verified', identityVerifiedAt: new Date('2026-09-20T09:00:00Z'), identitySessionId: 'vs_secret_1' });
+    const page = await get();
+    const shown = page.host ?? page;
+    assert.equal(shown.verifiedOn, '2026-09-20');
+    assert.ok(!JSON.stringify(page).includes('vs_secret_1'), 'never the session id');
+  } finally { await new Promise((r) => s.close(r)); }
 });

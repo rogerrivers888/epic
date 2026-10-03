@@ -95,6 +95,8 @@ function publicHost(h, rating = { rating: null, count: 0, guests: 0 }, extra = {
     rating: rating.rating, reviewCount: rating.count, guests: rating.guests,
     // "New on Epic" is not a fourth level: Verified with no reviews yet.
     isNew: rating.count === 0,
+    // A dated fact, never a badge on its own (Stripe brief §3): the day Stripe confirmed their passport. Nothing else of it.
+    verifiedOn: h.identity_state === 'verified' && h.identity_verified_at ? ymd(h.identity_verified_at) : null,
     since: h.created_at,
     ...extra,
   };

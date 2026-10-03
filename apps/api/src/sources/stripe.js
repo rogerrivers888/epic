@@ -202,6 +202,13 @@ export function hostPatchFromAccount(a) {
   };
 }
 
+/** Identity documents Stripe's onboarding still lists for the account's person — what L7 means never to ask twice. */
+export function asksForIdAgain(a) {
+  const r = a?.requirements ?? {};
+  const all = [...(r.currently_due ?? []), ...(r.eventually_due ?? []), ...(r.past_due ?? [])];
+  return [...new Set(all.filter((x) => /(^|\.)verification\.(additional_)?document$/.test(x)))];
+}
+
 /** The only facts Epic keeps about a host's account (brief §2): never bank details. */
 export function accountFacts(a) {
   return {

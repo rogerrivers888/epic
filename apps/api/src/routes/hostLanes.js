@@ -140,7 +140,7 @@ const ITEM_WORDS = {
   email: (h) => ({ t: 'Email', s: h.email ?? 'Add your email' }),
   phone: (h) => ({ t: 'Phone', s: h.mobile ?? 'Add your mobile' }),
   profile: () => ({ t: 'Your host profile', s: 'Name, photo, a line about you' }),
-  verified: (h) => ({ t: 'Verified', s: h.identity === 'verified' ? 'ID · by Stripe' : h.identity === 'pending' ? 'Stripe is checking it' : 'ID · because it’s public' }),
+  verified: (h) => ({ t: 'Verified', s: h.identity === 'verified' ? 'ID · by Stripe' : h.identity === 'pending' ? 'Stripe is checking it' : 'Your passport · once, for every host' }),
   video: () => ({ t: 'Offer video', s: 'Record it, or let Epic make it' }),
   checked: (h) => ({ t: 'Checked', s: h.checked === 'submitted' ? 'Sent for checking' : 'DBS, insurance, references · for children' }),
   payouts: (h) => ({ t: 'Payouts', s: h.payouts === 'ready' ? 'Paid out by Stripe' : h.payouts === 'pending' ? 'Stripe is finishing it' : 'Bank details · through Stripe' }),
@@ -758,6 +758,26 @@ async function ownDoc(householdId, id) {
   return id;
 }
 
+/**
+ * The host's Stripe account, made once (L6): Accounts v2, pre-filled from what Epic holds, manual payouts. Called
+ * under the per-host payouts lock. An account from before register L is left for the owner's void and refused.
+ */
+async function ensureStripeAccount(host, { account, household }) {
+  // An account from before this build (no model) took money the old way. It is voided by the owner's own action
+  // (G7), which keeps its id; until then it is left exactly as it is, and set-up waits rather than replacing it
+  // (owner, 3 Oct 2026: void the old, recreate under the new model). Once voided, a new one is made the L1 way.
+  if (host.stripe_account_id && host.stripe_account_model !== 'v2') throw refuse(409, 'old_stripe_account', 'Payouts are being moved to a new set-up. Try again shortly.');
+  if (host.stripe_account_id) return host;
+  const a = await stripe.createConnectAccount({
+    email: account?.email, householdId: household.id, hostId: host.id,
+    legalName: host.legal_name, dateOfBirth: host.date_of_birth, displayName: host.name,
+  });
+  return repo.updateHost(host.id, {
+    stripeAccountId: a.id, stripeMode: 'test', stripeAccountModel: 'v2', stripePersonId: a.personId,
+    ...stripe.hostPatchFromAccount(a.account),
+  });
+}
+
 /** POST /host/lanes/payouts {offerId} — Stripe's hosted onboarding. Returns the URL to send the host to; they come back to the checklist. */
 router.post('/host/lanes/payouts', async (req, res, next) => {
   try {
@@ -769,22 +789,12 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
     await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-payouts:${first.id}`]);
     const host = await repo.hostById(first.id);
     const back = `${appUrl()}/host/offers/${encodeURIComponent(str(req.body?.offerId, 40) ?? '')}/publish?back=payouts`;
-    // An account from before this build (no model) took money the old way. It is voided by the owner's own action
-    // (G7), which keeps its id; until then it is left exactly as it is, and set-up waits rather than replacing it
-    // (owner, 3 Oct 2026: void the old, recreate under the new model). Once voided, a new one is made the L1 way.
-    if (host.stripe_account_id && host.stripe_account_model !== 'v2') throw refuse(409, 'old_stripe_account', 'Payouts are being moved to a new set-up. Try again shortly.');
-    let accountId = host.stripe_account_id;
-    if (!accountId) {
-      const a = await stripe.createConnectAccount({
-        email: account?.email, householdId: household.id, hostId: host.id,
-        legalName: host.legal_name, dateOfBirth: host.date_of_birth, displayName: host.name,
-      });
-      accountId = a.id;
-      await repo.updateHost(host.id, {
-        stripeAccountId: accountId, stripeMode: 'test', stripeAccountModel: 'v2', stripePersonId: a.personId,
-        ...stripe.hostPatchFromAccount(a.account),
-      });
-    }
+    // The passport first, then Stripe's form (L7; owner, 3 Oct 2026: "Keep the order: create account → passport and
+    // selfie → Stripe's form"). Once Stripe's form has been opened it no longer lets the check be tied to the host's
+    // Person, so a host who hasn't started it is sent to it first. A check under way is already tied.
+    if (!['verified', 'pending'].includes(host.identity_state)) throw refuse(409, 'verify_first', 'Verify your identity first — then Stripe asks only for your bank details.');
+    const ready = await ensureStripeAccount(host, { account, household });
+    const accountId = ready.stripe_account_id;
     const link = await stripe.accountLink({ accountId, refreshUrl: back, returnUrl: back, householdId: household.id });
     // From here Stripe no longer lets an Identity check be tied to the account's Person (L7).
     if (!host.stripe_link_made_at) await repo.updateHost(host.id, { stripeLinkMadeAt: new Date() });
@@ -817,12 +827,26 @@ router.post('/host/lanes/verify', async (req, res, next) => {
       // Stripe is still reading what was sent: wait for it, never start a second check (Codex, 2 Oct 2026).
       if (open?.status === 'processing') return res.json({ url: null, processing: true });
     }
+    // Explicit consent to the selfie match, which is biometric data (L7), logged with its date. The words are Stripe's
+    // own, shown on the screen before the selfie; the request carries the host's yes.
+    if (req.body?.consent !== true) throw refuse(400, 'consent_required', 'Agree to the face match first.');
+    await hostingSettings.logChange({ subjectKind: 'host', subjectId: host.id, field: 'identity_consent', after: { biometric: true, at: new Date().toISOString() }, by: account?.id ?? null, byLabel: 'host' });
+    // A host who will take money through Epic gets their Stripe account now, before the check, so the check can be tied
+    // to the account's Person (create account → passport and selfie → Stripe's form). A free-event host gets none (L6).
+    let me2 = host;
+    const offerId = str(req.body?.offerId, 40);
+    const offer = offerId && /^[0-9a-f-]{36}$/i.test(offerId) ? await repo.offerById(offerId) : null;
+    if (offer && offer.host_id === host.id && paidThroughEpic(offer) && stripe.stripeStatus().ready) {
+      await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-payouts:${host.id}`]);
+      try { me2 = await ensureStripeAccount(await repo.hostById(host.id), { account, household }); }
+      finally { await lockClient.query('select pg_advisory_unlock(hashtext($1))', [`host-payouts:${host.id}`]).catch(() => null); }
+    }
     const cfg = await hostingSettings.current();
     // Tied to the host's Stripe Person when there is one and Stripe still allows it — before the hosted form was first
     // opened — so the same check satisfies Stripe's own and the host is never asked for ID twice (L7). A free-event
     // host has no account, and the check stands on its own.
-    const relatedPerson = host.stripe_account_model === 'v2' && host.stripe_account_id && host.stripe_person_id && !host.stripe_link_made_at
-      ? { account: host.stripe_account_id, person: host.stripe_person_id } : null;
+    const relatedPerson = me2.stripe_account_model === 'v2' && me2.stripe_account_id && me2.stripe_person_id && !me2.stripe_link_made_at
+      ? { account: me2.stripe_account_id, person: me2.stripe_person_id } : null;
     const s = await stripe.identitySession({ returnUrl: back, hostId: host.id, householdId: household.id, relatedPerson, allowDrivingLicence: cfg.identity_driving_licence === true });
     await repo.updateHost(host.id, { identitySessionId: s.id, identityState: 'pending', stripeMode: 'test' });
     res.json({ url: s.url });
@@ -1096,7 +1120,21 @@ export async function applyStripeEvent(event) {
     const obj = event?.data?.object ?? {};
     if (event.type === 'account.updated' && obj.id) {
       const host = await repo.hostByStripeAccount(obj.id);
-      if (host) await repo.updateHost(host.id, stripe.hostPatchFromAccount(obj));
+      if (host) {
+        await repo.updateHost(host.id, stripe.hostPatchFromAccount(obj));
+        // Stripe asking for ID from a host whose passport check passed: the owner is told, and the host is not sent round
+        // again (brief §3, L7: "never asked for ID twice").
+        const asks = stripe.asksForIdAgain(obj);
+        if (asks.length && host.identity_state === 'verified') {
+          const { alertOwner } = await import('../sources/ownerAlert.js');
+          await alertOwner({
+            key: `stripe-asks-id:${host.id}:${asks.sort().join(',')}`, subjectId: host.id,
+            subject: `Stripe is asking ${host.name ?? 'a host'} for ID again`,
+            text: [`Stripe's onboarding lists ${asks.join(', ')} for ${host.name ?? 'a host'} (${obj.id}), although their passport check passed on ${host.identity_verified_at ? new Date(host.identity_verified_at).toISOString().slice(0, 10) : 'an earlier date'}.`,
+              'The host has not been asked to do anything. Epic hosting › the host, or the Stripe sandbox dashboard, shows the account.'].join('\n\n'),
+          }).catch((err) => console.error(`epic-api: owner alert failed — ${err.message}`));
+        }
+      }
     } else if ((event.type === 'payout.paid' || event.type === 'payout.failed') && obj.id && typeof event.account === 'string') {
       // A released payout reaching the host's bank, or bouncing: the host's own account's event (Connect endpoint).
       const { markPayoutOutcome } = await import('../repositories/hostingLedger.js');
