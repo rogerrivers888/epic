@@ -207,6 +207,9 @@ test('a complaint, missing tax or an unfinished Stripe account holds a payout, a
   assert.equal(transfers.filter((t) => [a, b, c].some((x) => x.host.id === t.hostId)).length, 0);
   const { rows: [{ n }] } = await query(`select count(*)::int as n from notifications where household_id = $1 and kind = 'payout_held'`, [a.host.household_id]);
   assert.equal(n, 1, 'told once, not every ten minutes');
+  // Each hold, by its reason, is one open row in the payment problems log, however often the job runs.
+  const { rows: logged } = await query(`select stage, status from payment_problems where kind = 'payout_held' and host_id = any($1::uuid[]) order by stage`, [[a.host.id, b.host.id, c.host.id]]);
+  assert.deepEqual(logged.map((x) => [x.stage, x.status]), [['complaint', 'open'], ['stripe_incomplete', 'open'], ['tax_details', 'open']]);
 
   // Resolved: it goes.
   await query(`update hosting_complaints set state = 'resolved' where session_id = $1`, [a.sessions[0].id]);

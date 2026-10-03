@@ -296,7 +296,7 @@ export async function markDispute({ paymentIntent, open, status = null }) {
 export async function rowsToReconcile({ days = 3, limit = 500 } = {}) {
   const { rows } = await query(
     // A payout lives on the host's own account, so its account comes with it.
-    `select p.id, p.kind, p.amount_pence, p.state, p.stripe_ref, p.household_id, p.stripe_match, h.stripe_account_id
+    `select p.id, p.kind, p.amount_pence, p.state, p.stripe_ref, p.household_id, p.stripe_match, p.booking_id, p.host_id, p.offer_id, h.stripe_account_id
        from hosting_payments p left join hosts h on h.id = p.host_id
       where p.stripe_ref is not null and p.mode = 'test' and p.voided_at is null and p.updated_at > now() - make_interval(days => $1)
       order by p.updated_at desc limit $2`,

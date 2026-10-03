@@ -26,6 +26,7 @@ import { query, withTransaction } from '../db.js';
 import * as ledger from '../repositories/hostingLedger.js';
 import * as settings from '../repositories/hostingSettings.js';
 import * as notifications from '../repositories/notifications.js';
+import * as problems from '../repositories/paymentProblems.js';
 import * as stripe from './stripe.js';
 import { logChange } from '../repositories/hostingSettings.js';
 import { isLate } from '../domain/money.js';
@@ -432,6 +433,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
   for (const p of rows) {
     if (!p.stripe_payment_intent) {
       await query(`update hosting_payments set state = 'failed', reason = 'no payment to refund', updated_at = now() where id = $1 and state = 'pending'`, [p.id]);
+      await problems.record({ kind: 'refund_failed', dedupeKey: `refund_failed:${p.id}`, amountPence: p.amount_pence, bookingId: p.booking_id, householdId: p.household_id, hostId: p.host_id, offerId: p.offer_id, detail: { line: p.id, cause: p.cause, why: 'no payment to refund' } });
       out.failed += 1;
       continue;
     }
@@ -478,6 +480,8 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
           }
         }
       });
+      // Tried again after failing (a person's Retry): the problem it was is put right.
+      await problems.resolve({ dedupeKey: `refund_failed:${p.id}`, resolution: 'Sent on a later try', by: 'epic' });
       if (p.kind === 'refund' || p.kind === 'tip_refund') {
         await tell([{ householdId: p.household_id, kind: 'refund_issued', title: `£${(p.amount_pence / 100).toFixed(2)} is on its way back to you`, body: p.title ?? null, link: guestLink(p.booking_id), dedupeKey: `refund:${p.id}` }]);
       }
@@ -488,6 +492,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
       // back office (Money › Payouts, refunds) for a person to retry or settle it — never quietly given back to the host (Codex, 2 Oct 2026).
       await query(`update hosting_payments set state = 'failed', reason = $2, updated_at = now() where id = $1 and state = 'pending'`, [p.id, String(err.detail ?? err.code ?? 'failed').slice(0, 80)]);
       console.error(`epic-api: refund ${p.id} failed — ${err.detail ?? err.code ?? err.message}`);
+      await problems.record({ kind: 'refund_failed', dedupeKey: `refund_failed:${p.id}`, amountPence: p.amount_pence, bookingId: p.booking_id, householdId: p.household_id, hostId: p.host_id, offerId: p.offer_id, stripeRef: p.stripe_payment_intent, detail: { line: p.id, kind: p.kind, cause: p.cause, code: err.detail ?? err.code ?? null }, reopen: true });
       out.failed += 1;
     }
   }

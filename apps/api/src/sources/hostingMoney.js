@@ -22,6 +22,7 @@ import { query, withTransaction } from '../db.js';
 import * as ledger from '../repositories/hostingLedger.js';
 import * as settings from '../repositories/hostingSettings.js';
 import * as notifications from '../repositories/notifications.js';
+import * as problems from '../repositories/paymentProblems.js';
 import * as stripe from './stripe.js';
 import { payoutDecision } from '../domain/money.js';
 import { decideDue, warnUnderMinimum, processRefunds } from './bookingMoney.js';
@@ -92,6 +93,8 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
     if (d.state === 'held') {
       const changed = await ledger.holdPayout(p.id, d.reason);
       out.held += 1;
+      // Every hold, by its reason, until the payout goes (payment problems, "payout held").
+      await problems.record({ kind: 'payout_held', dedupeKey: `payout_held:${p.id}:${d.reason}`, amountPence: p.amount_pence + p.tips_pence, hostId: p.host_id, offerId: p.offer_id, stage: d.reason, detail: { payout: p.id, reason: d.reason } });
       if (changed) {
         await notifications.notify({
           householdId: p.household_id, kind: 'payout_held', title: 'A payout is on hold',
@@ -130,6 +133,7 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
       if (err.code === 'stripe_refused' || err.code === 'host_not_ready') {
         await ledger.finishPayout(p.id, { state: 'failed' });
         console.error(`epic-api: payout ${p.id} failed — ${err.detail ?? err.code}`);
+        await problems.record({ kind: 'payout_failed', dedupeKey: `payout_failed:${p.id}`, amountPence: amount, hostId: p.host_id, offerId: p.offer_id, detail: { payout: p.id, code: err.detail ?? err.code ?? null, by: 'stripe_refused' }, reopen: true });
         out.failed += 1;
         continue;
       }
@@ -149,6 +153,9 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
       // Told only while it still stands: a bounce reported in the meantime is not announced as on its way.
       const { rows: [still] } = await query('select state from host_payouts where id = $1', [p.id]);
       if (still?.state !== 'paid') { out.failed += 1; continue; }
+      // Paid: whatever held it or failed it before is put right.
+      await problems.resolveLike(`payout_held:${p.id}:`, { resolution: 'Paid out', by: 'epic' });
+      await problems.resolve({ dedupeKey: `payout_failed:${p.id}`, resolution: 'Paid out on a later try', by: 'epic' });
       await notifications.notify({
         householdId: p.household_id, kind: 'payout_sent', title: `£${(amount / 100).toFixed(2)} is on its way`,
         link: '/host/offers', dedupeKey: `payout_sent:${p.id}`,
@@ -182,11 +189,16 @@ export async function processRecoveries({ status = stripe.stripeStatus, balance 
       const asked = x.reason === 'debit_sent';
       if (!asked) {
         const b = await balance(x.stripe_account_id, { householdId: x.host_household });
-        if (b.availablePence < x.amount_pence) { out.waiting += 1; continue; }
+        if (b.availablePence < x.amount_pence) {
+          await problems.record({ kind: 'host_recovery_waiting', dedupeKey: `host_recovery:${x.id}`, amountPence: x.amount_pence, bookingId: x.booking_id, hostId: x.host_id, offerId: x.offer_id, stage: 'waiting', detail: { line: x.id, why: 'balance', availablePence: b.availablePence } });
+          out.waiting += 1;
+          continue;
+        }
         await query(`update hosting_payments set reason = 'debit_sent', updated_at = now() where id = $1 and state = 'pending'`, [x.id]);
       }
       const py = await debit({ accountId: x.stripe_account_id, amountPence: x.amount_pence, householdId: x.host_household, idempotencyKey: x.idem_key, recoveryId: x.id });
       await query(`update hosting_payments set state = 'succeeded', stripe_ref = $2, updated_at = now() where id = $1 and state = 'pending'`, [x.id, py.id]);
+      await problems.resolve({ dedupeKey: `host_recovery:${x.id}`, resolution: 'Recovered from the host’s balance', by: 'epic', stage: 'recovered' });
       out.recovered += 1;
     } catch (err) {
       if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
@@ -201,6 +213,7 @@ export async function processRecoveries({ status = stripe.stripeStatus, balance 
       // the host's payouts until it is settled (Codex, 3 Oct 2026).
       await query(`update hosting_payments set state = 'failed', reason = $2, updated_at = now() where id = $1 and state = 'pending'`, [x.id, String(err.detail ?? err.code ?? 'failed').slice(0, 80)]);
       console.error(`epic-api: host recovery ${x.id} failed — ${err.detail ?? err.code ?? err.message}`);
+      await problems.record({ kind: 'host_recovery_waiting', dedupeKey: `host_recovery:${x.id}`, amountPence: x.amount_pence, bookingId: x.booking_id, hostId: x.host_id, offerId: x.offer_id, stage: 'failed', detail: { line: x.id, code: err.detail ?? err.code ?? null }, reopen: true });
       out.failed += 1;
     }
   }
@@ -237,6 +250,9 @@ export async function reconcile({ days = 3, read = stripe.retrieveRef, status = 
     if (match === 'mismatch') {
       mismatched += 1;
       details.push({ id: row.id, kind: row.kind, ref: row.stripe_ref, ledger: { state: row.state, pence: row.amount_pence }, stripe: view });
+      await problems.record({ kind: 'reconciliation_mismatch', dedupeKey: `reconcile:${row.id}`, amountPence: row.amount_pence, bookingId: row.booking_id ?? null, hostId: row.host_id ?? null, offerId: row.offer_id ?? null, stripeRef: row.stripe_ref, detail: { line: row.id, kind: row.kind, ledger: { state: row.state, pence: row.amount_pence }, stripe: view }, reopen: true });
+    } else if (match === 'matched' && row.stripe_match === 'mismatch') {
+      await problems.resolve({ dedupeKey: `reconcile:${row.id}`, resolution: 'Matches Stripe now', by: 'epic' });
     }
     if (match !== row.stripe_match) await ledger.markMatch(row.id, match);
   }

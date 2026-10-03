@@ -1221,11 +1221,25 @@ export async function applyStripeEvent(event) {
     } else if ((event.type === 'payout.paid' || event.type === 'payout.failed') && obj.id && typeof event.account === 'string') {
       // A released payout reaching the host's bank, or bouncing: the host's own account's event (Connect endpoint).
       const { markPayoutOutcome } = await import('../repositories/hostingLedger.js');
-      await markPayoutOutcome({ stripePayout: obj.id, accountId: event.account, paid: event.type === 'payout.paid', failure: obj.failure_code ?? null, payoutId: obj.metadata?.epic_payout_id ?? null });
-    } else if ((event.type === 'charge.dispute.created' || event.type === 'charge.dispute.closed') && obj.payment_intent) {
+      const bounced = await markPayoutOutcome({ stripePayout: obj.id, accountId: event.account, paid: event.type === 'payout.paid', failure: obj.failure_code ?? null, payoutId: obj.metadata?.epic_payout_id ?? null });
+      if (bounced) {
+        const { record } = await import('../repositories/paymentProblems.js');
+        await record({ kind: 'payout_failed', dedupeKey: `payout_failed:${bounced.id}`, amountPence: obj.amount ?? null, hostId: bounced.host_id, offerId: bounced.offer_id ?? null, stripeRef: obj.id, stage: 'bounced', detail: { payout: bounced.id, code: obj.failure_code ?? null, by: 'bank' }, reopen: true });
+      }
+    } else if (event.type?.startsWith('charge.dispute.') && obj.payment_intent) {
       // A chargeback is the guest's bank's decision (L3); while it is open the booking's payout waits, like a complaint.
+      // Every stage is its own sighting of one problem — created, updated, funds withdrawn or reinstated, closed.
       const { markDispute } = await import('../repositories/hostingLedger.js');
-      await markDispute({ paymentIntent: obj.payment_intent, open: event.type === 'charge.dispute.created', status: obj.status ?? null });
+      const closed = event.type === 'charge.dispute.closed';
+      if (event.type === 'charge.dispute.created' || closed) await markDispute({ paymentIntent: obj.payment_intent, open: !closed, status: obj.status ?? null });
+      const { applyDispute } = await import('../sources/disputes.js');
+      await applyDispute(obj, { closed, eventType: event.type });
+    } else if (event.type === 'radar.early_fraud_warning.created' && obj.id) {
+      // The card's issuer says this payment was probably fraud: a chargeback is likely to follow.
+      const pi = typeof obj.payment_intent === 'string' ? obj.payment_intent : null;
+      const { rows: [b] } = pi ? await query('select id, household_id, host_id, offer_id, charged_pence from experience_bookings where stripe_payment_intent = $1', [pi]) : { rows: [] };
+      const { record } = await import('../repositories/paymentProblems.js');
+      await record({ kind: 'early_fraud_warning', dedupeKey: `efw:${obj.id}`, amountPence: b?.charged_pence ?? null, bookingId: b?.id ?? null, householdId: b?.household_id ?? null, hostId: b?.host_id ?? null, offerId: b?.offer_id ?? null, stripeRef: pi ?? obj.charge ?? obj.id, detail: { fraudType: obj.fraud_type ?? null, actionable: obj.actionable ?? null } });
     } else if (event.type?.startsWith('identity.verification_session.') && obj.id) {
       const host = await repo.hostByIdentitySession(obj.id);
       // The day it is shown as is Stripe's, from the event, and an earlier one is never moved (Codex, 3 Oct 2026).

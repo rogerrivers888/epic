@@ -29,6 +29,7 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import * as repo from '../repositories/hosting.js';
+import * as problems from '../repositories/paymentProblems.js';
 import * as settingsRepo from '../repositories/hostingSettings.js';
 import * as ledger from '../repositories/hostingLedger.js';
 import * as notifications from '../repositories/notifications.js';
@@ -481,6 +482,21 @@ async function confirmed(b, o, host) {
  * confirmed and on the ledger; held (Ask to book) → the host is asked;
  * failed → the place is let go. The webhook and the return trip both land here.
  */
+/**
+ * A payment that went wrong, in the payment problems log: blocked as fraud when Stripe's screening (Radar) or the
+ * bank called it fraudulent, otherwise failed — with the bank's own code, never its message to the guest.
+ */
+export async function recordFailedPayment(pi, { bookingId = null, householdId = null, hostId = null, offerId = null, kind = 'booking' } = {}) {
+  const e = pi?.last_payment_error ?? {};
+  const charge = typeof pi?.latest_charge === 'object' ? pi.latest_charge : null;
+  const fraud = e.decline_code === 'fraudulent' || charge?.outcome?.type === 'blocked';
+  await problems.record({
+    kind: fraud ? 'blocked_fraud' : 'payment_failed', dedupeKey: `${fraud ? 'blocked_fraud' : 'payment_failed'}:${pi.id}`,
+    amountPence: pi.amount ?? null, bookingId, householdId, hostId, offerId, stripeRef: pi.id,
+    detail: { for: kind, code: e.code ?? null, declineCode: e.decline_code ?? null, outcome: charge?.outcome?.type ?? null, reason: charge?.outcome?.reason ?? null },
+  });
+}
+
 export async function applyPaymentIntent(pi) {
   const bookingId = pi?.metadata?.epic_booking_id;
   if (pi?.metadata?.epic_kind === 'tip') return applyTipIntent(pi);
@@ -531,6 +547,14 @@ export async function applyPaymentIntent(pi) {
     if (outcome === 'held') await notifications.notify({ householdId: host.household_id, kind: 'ask_to_book_request', title: `Ask to book: ${o?.title ?? 'your offer'}`, body: `${b.requested_date ? ymd(b.requested_date) : ''} ${hm(b.requested_time) ?? ''}`.trim(), link: hostLink(b.offer_id), dedupeKey: `ask:${b.id}` }).catch(() => null);
     return b.id;
   }
+  // A card hold Stripe let go by itself (seven days, never captured): the money was never taken, and the booking has
+  // nothing behind it — for a person to look at.
+  if (b.payment_state === 'held' && pi.status === 'canceled' && pi.cancellation_reason === 'automatic') {
+    await problems.record({ kind: 'hold_expired', dedupeKey: `hold_expired:${pi.id}`, amountPence: pi.amount ?? b.value_pence, bookingId: b.id, householdId: b.household_id, hostId: b.host_id, offerId: b.offer_id, stripeRef: pi.id, detail: { by: 'stripe' } });
+  }
+  if (pi.last_payment_error && ['requires_payment_method', 'canceled'].includes(pi.status)) {
+    await recordFailedPayment(pi, { bookingId: b.id, householdId: b.household_id, hostId: b.host_id, offerId: b.offer_id });
+  }
   if (b.payment_state === 'none' && (pi.status === 'canceled' || (pi.status === 'requires_payment_method' && pi.last_payment_error))) {
     // Cancelled by the guest, or failed: the places go back now rather than at the cleanup (Codex, 2 Oct 2026).
     await query(`update experience_bookings set payment_state = 'failed', state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'payment_failed' where id = $1 and payment_state = 'none'`, [b.id]);
@@ -551,6 +575,7 @@ async function applyTipIntent(pi) {
   await query('update booking_tips set stripe_ref = $2 where id = $1 and stripe_ref is null', [tipId, pi.id]);
   // A tip whose payment failed or was abandoned frees the booking for another try (Codex, 2 Oct 2026).
   if (pi.status === 'canceled' || (pi.status === 'requires_payment_method' && pi.last_payment_error)) {
+    if (pi.last_payment_error) await recordFailedPayment(pi, { bookingId: pi.metadata?.epic_booking_id ?? null, householdId: pi.metadata?.epic_household_id ?? null, offerId: pi.metadata?.epic_offer_id ?? null, kind: 'tip' });
     await query(`update booking_tips set state = 'failed' where id = $1 and stripe_ref = $2 and state = 'pending'`, [tipId, pi.id]);
     return null;
   }
@@ -1404,6 +1429,10 @@ async function declineRequest(b, o, why) {
     return true;
   });
   if (!changed) return false;
+  // Nobody answered while the card was held: the hold goes, and the log says so (payment problems, "card hold expired").
+  if (why === 'lapsed' && b.payment_state === 'held') {
+    await problems.record({ kind: 'hold_expired', dedupeKey: `hold_expired:${b.stripe_payment_intent ?? b.id}`, amountPence: b.held_pence ?? b.value_pence, bookingId: b.id, householdId: b.household_id, hostId: b.host_id, offerId: b.offer_id, stripeRef: b.stripe_payment_intent, detail: { by: 'no_answer' } });
+  }
   await notifications.notify({ householdId: b.household_id, kind: 'ask_to_book_declined', title: why === 'lapsed' ? `No answer in time: ${o?.title ?? 'your request'}` : `Not this time: ${o?.title ?? 'your request'}`, body: 'Your card hold is released.', link: o ? `/experiences/${o.id}` : '/trips', dedupeKey: `ask_${why}:${b.id}` }).catch(() => null);
   return true;
 }

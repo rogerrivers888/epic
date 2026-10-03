@@ -29,6 +29,7 @@ import { standingOf } from '../domain/hostDesk.js';
 import { mediaRef } from './hosting.js';
 import { stripeMode, storedIdAsks, accountTrouble } from '../sources/stripe.js';
 import * as ledger from '../repositories/hostingLedger.js';
+import * as problems from '../repositories/paymentProblems.js';
 
 export const router = Router();
 
@@ -913,6 +914,39 @@ router.post('/complaints/:id/resolve', requires('manage_hosting'), async (req, r
     if (!k) throw refuse(404, 'not_found', 'That complaint isn’t open.');
     await logChange({ subjectKind: 'complaint', subjectId: k.id, field: 'state', after: { state }, why: req.body?.why ?? null, by: by(), byLabel: 'staff' });
     res.json({ state });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// The payment problems log (Stripe build, Phase 7): API only until Claude Design's screen arrives
+// ---------------------------------------------------------------------------
+
+router.get('/payment-problems/summary', requires('view_hosting'), async (_req, res, next) => {
+  try { res.json({ groups: await problems.summary() }); } catch (err) { next(err); }
+});
+
+router.get('/payment-problems', requires('view_hosting'), async (req, res, next) => {
+  try {
+    const q = req.query;
+    const kind = problems.KINDS.includes(q.kind) ? q.kind : null;
+    const group = q.group && problems.GROUPS[q.group] ? q.group : null;
+    const status = ['open', 'resolved'].includes(q.status) ? q.status : null;
+    const uuid = (v) => (typeof v === 'string' && UUID.test(v) ? v : null);
+    const rows = await problems.list({ kind, group, status, bookingId: uuid(q.booking), hostId: uuid(q.host), limit: Number(q.limit) || 100, offset: Number(q.offset) || 0 });
+    res.json({ problems: rows.map(problems.payload) });
+  } catch (err) { next(err); }
+});
+
+// A person puts it right and says how. Only open ones; the sentence is required — "resolved" with no reason is not a record.
+router.post('/payment-problems/:id/resolve', requires('manage_hosting'), async (req, res, next) => {
+  try {
+    if (!UUID.test(req.params.id)) throw refuse(404, 'not_found', 'That problem isn’t open.');
+    const resolution = String(req.body?.resolution ?? '').trim();
+    if (!resolution) throw refuse(400, 'resolution', 'Say how it was put right.');
+    const who = currentAccount();
+    const r = await problems.resolve({ id: req.params.id, resolution, by: who?.email ?? who?.name ?? 'staff' });
+    if (!r) throw refuse(404, 'not_found', 'That problem isn’t open.');
+    res.json({ problem: problems.payload(r) });
   } catch (err) { next(err); }
 });
 

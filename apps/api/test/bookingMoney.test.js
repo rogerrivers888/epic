@@ -133,6 +133,13 @@ test('Stripe refusing a refund marks it for a person; Stripe unreachable leaves 
   assert.deepEqual([out.failed, out.waiting], [1, 1]);
   const { rows } = await query(`select amount_pence, state, reason from hosting_payments where offer_id = $1 order by amount_pence`, [offer.id]);
   assert.deepEqual(rows.map((x) => [x.amount_pence, x.state]), [[1000, 'failed'], [2000, 'pending']]);
+  // The refusal is in the payment problems log, open, with Stripe's code; the one still waiting is not.
+  const { rows: logged } = await query(`select kind, status, amount_pence, detail from payment_problems where offer_id = $1`, [offer.id]);
+  assert.deepEqual(logged.map((x) => [x.kind, x.status, x.amount_pence, x.detail.code]), [['refund_failed', 'open', 1000, 'charge_already_refunded']]);
+  // Retried and sent: put right by the job itself.
+  await query(`update hosting_payments set state = 'pending' where offer_id = $1 and state = 'failed'`, [offer.id]);
+  await engine.processRefunds({ status: ready, refund: async (r) => ({ id: `re_again_${r.idempotencyKey}` }) });
+  assert.equal((await query(`select status from payment_problems where offer_id = $1`, [offer.id])).rows[0].status, 'resolved');
 });
 
 test('change date: a preview writes nothing; this and all after moves the rest by the same amount', async () => {
@@ -280,9 +287,12 @@ test('L5: a host cancelling refunds in full and Epic recovers 5% from the hostâ€
   // Not enough in the host's balance yet: it waits, and takes nothing below nought.
   let r = await money.processRecoveries({ status: () => ({ ready: true }), balance: async () => ({ availablePence: 150 }), debit: async (d) => { debits.push(d); return { id: 'py_x' }; } });
   assert.deepEqual([r.waiting >= 1, debits.length], [true, 0]);
+  const waiting = (await query(`select status, stage from payment_problems where dedupe_key = $1`, [`host_recovery:${rec.id}`])).rows[0];
+  assert.deepEqual([waiting.status, waiting.stage], ['open', 'waiting'], 'host recovery waiting, in the log');
   r = await money.processRecoveries({ status: () => ({ ready: true }), balance: async () => ({ availablePence: 5000 }), debit: async (d) => { debits.push(d); return { id: 'py_1' }; } });
   assert.deepEqual(debits.map((d) => [d.accountId, d.amountPence, d.idempotencyKey]), [[host.stripe_account_id, 200, `recovery:${line.id}`]]);
   assert.deepEqual((await query('select state, stripe_ref from hosting_payments where id = $1', [rec.id])).rows.map((x) => [x.state, x.stripe_ref]), [['succeeded', 'py_1']]);
+  assert.equal((await query(`select status from payment_problems where dedupe_key = $1`, [`host_recovery:${rec.id}`])).rows[0].status, 'resolved');
   await engine.processRefunds({ status: () => ({ ready: true }), refund: async () => ({ id: 're_h' }) });
   assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [bookings[0].id])).rows[0].n, 1, 'one recovery a refund');
 });

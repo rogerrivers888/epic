@@ -18,6 +18,7 @@
 
 import * as stripe from './stripe.js';
 import * as billing from '../repositories/membershipBilling.js';
+import * as problems from '../repositories/paymentProblems.js';
 import { sendMail } from './mail.js';
 
 const appUrl = () => (process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day').replace(/\/$/, '');
@@ -175,10 +176,12 @@ async function sync(subscriptionId, { pauseReason = null, changedAt = null, snap
   // (Codex, 3 Oct 2026).
   if (!(snapshotPriceId && snapshotPriceId === facts.priceId)) changedAt = null;
   try {
-    return await billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason, stamp, changedAt,
+    const row = await billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason, stamp, changedAt,
       // A renewal that failed leaves the period now running unpaid, so the pause starts with it. Any other failure (a
       // mid-cycle invoice, a plan switch's proration) falls in a period already paid: dated when it is seen (Codex).
       pausedFrom: renewalFailed ? facts.currentPeriodStart : null });
+    await noteProblem(row, { pauseReason });
+    return row;
   } catch (err) {
     if (err.code !== 'second_membership') throw err;
     // The backstop for two Checkouts finished at once: the household keeps the membership it had, and the second is
@@ -186,6 +189,23 @@ async function sync(subscriptionId, { pauseReason = null, changedAt = null, snap
     if (err.running?.stripe_subscription_id === sub.id) return err.running;
     await stripe.cancelSecondMembership(sub.id, { householdId, sub });
     return null;
+  }
+}
+
+/**
+ * The payment problems log: a membership paused by a failed payment is one problem a subscription, opened with the
+ * invoice that failed; paid again it is put right, and ended unpaid it is closed as that.
+ */
+async function noteProblem(m, { pauseReason = null } = {}) {
+  if (!m) return;
+  const key = `membership:${m.stripe_subscription_id}`;
+  if (m.status === 'paused') {
+    await problems.record({ kind: 'membership_payment_failed', dedupeKey: key, amountPence: m.amount_pence || m.monthly_pence, householdId: m.household_id, membershipId: m.id,
+      stripeRef: m.stripe_subscription_id, stage: 'retrying', detail: { plan: m.plan_key, reason: pauseReason ?? m.pause_reason ?? null }, at: m.paused_at, reopen: true });
+  } else if (m.status === 'active') {
+    await problems.resolve({ dedupeKey: key, resolution: 'Paid on a retry', by: 'stripe', stage: 'paid' });
+  } else if (m.status === 'cancelled') {
+    await problems.resolve({ dedupeKey: key, resolution: 'Ended without being paid', by: 'stripe', stage: 'ended' });
   }
 }
 
