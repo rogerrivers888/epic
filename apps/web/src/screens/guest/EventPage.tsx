@@ -111,6 +111,15 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const [joined, setJoined] = useState<number | null>(null);
   const toast = useToast();
 
+  // A held place's deadline: when it passes, ask again, so the page shows what is true now (Codex, 3 Oct 2026).
+  const until = opt?.waitlist.offeredUntil ?? null;
+  useEffect(() => {
+    if (!until) return undefined;
+    const ms = new Date(until).getTime() - Date.now();
+    if (!(ms > 0)) return undefined;
+    const t = setTimeout(() => { api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => null); }, Math.min(ms + 1000, 2_147_000_000));
+    return () => clearTimeout(t);
+  }, [until, id, linkToken, inviteToken]);
   useEffect(() => {
     if (initial?.offer.id !== id) api.experience(id, inviteToken, linkToken).then(setData).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
     api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => setOpt(null));
@@ -160,7 +169,8 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const ga = o.goingAhead;
   const most = o.maxCount ?? null;
   // G18 · a place offered from the waiting list: how long is left, until when, and Book now or Pass.
-  const offeredAt = opt?.waitlist.offeredUntil ? new Date(opt.waitlist.offeredUntil) : null;
+  // Only while the place is still held: past its deadline it has gone to the next person (Codex, 3 Oct 2026).
+  const offeredAt = opt?.waitlist.offeredUntil && new Date(opt.waitlist.offeredUntil).getTime() > Date.now() ? new Date(opt.waitlist.offeredUntil) : null;
   const hoursLeft = offeredAt ? Math.max(0, Math.floor((offeredAt.getTime() - Date.now()) / 3_600_000)) : null;
   const byWhen = offeredAt ? `${offeredAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${offeredAt.toDateString() === new Date().toDateString() ? ' tonight' : offeredAt.toDateString() === new Date(Date.now() + 86_400_000).toDateString() ? ' tomorrow' : ` ${dayWords(offeredAt.toISOString().slice(0, 10))}`}` : null;
   // The event's own price words: child rates, group discounts and drop-in or book-ahead prices are the booking screen's
@@ -168,7 +178,10 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const offerPrice = price.big;
   const pass = async () => {
     // Only the offered session's place: a Weekly's other waiting lists stay as they are (Codex, 3 Oct 2026).
-    try { await api.guestLeaveWaitlist(o.id, opt?.waitlist.offeredSession ?? null); toast.show('Passed to the next person'); api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => null); }
+    try {
+      const r = await api.guestLeaveWaitlist(o.id, opt?.waitlist.offeredSession ?? null);
+      // Said only when it happened: an offer that lapsed or was taken elsewhere meanwhile was not passed (Codex, 3 Oct 2026).
+      toast.show(r.passed ? 'Passed to the next person' : 'That place had already gone'); api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => null); }
     catch (e: any) { toast.show(e?.message ?? 'That didn’t go through.'); }
   };
   const sessions = opt?.sessions ?? [];
@@ -187,7 +200,7 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
       <Notice key="g18" bg={LIME} weight="800">{`Your place is ready · ${hoursLeft} h left`}</Notice>,
       <Para key="g18t" color={INK_MUTED}>{`A place came free. Take it before ${byWhen}, or it goes to the next person.`}</Para>,
       <Buttons key="g18b" row items={[
-        { label: `Book now · ${offerPrice}`, tone: 'ink', onPress: () => navigate(bookHref) },
+        { label: `Book now · ${offerPrice}`, tone: 'ink', onPress: () => navigate(withQuery(bookHref, { session: opt?.waitlist.offeredSession ?? null })) },
         { label: 'Pass', onPress: () => { void pass(); } },
       ]} />,
     );

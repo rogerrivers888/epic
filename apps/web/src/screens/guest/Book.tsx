@@ -57,7 +57,7 @@ function fromMember(m: Member, me: string | null): Who {
 }
 
 export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: Experience | null }) {
-  const { navigate, back } = useRouter();
+  const { navigate, back, query } = useRouter();
   const toast = useToast();
   const [offer, setOffer] = useState<Experience | null>(initial?.id === id ? initial : null);
   const [opt, setOpt] = useState<GuestOptions | null>(null);
@@ -73,6 +73,14 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   // the form
   const [mode, setMode] = useState<'drop_in' | 'book_ahead'>('drop_in');
   const [picks, setPicks] = useState<Set<string>>(new Set());
+  // A waiting-list place for one weekly session (G18): that session, chosen, so the booking is for the place held (Codex, 3 Oct 2026).
+  const heldSession = query.get('session');
+  useEffect(() => {
+    if (!opt || !heldSession || opt.lane !== 'weekly') return;
+    if (!opt.sessions.some((x) => x.id === heldSession)) return;
+    if (opt.sessions[0]?.id === heldSession && opt.kinds.includes('drop_in')) { setMode('drop_in'); return; }
+    if (opt.kinds.includes('book_ahead')) { setMode('book_ahead'); setPicks(new Set([heldSession])); }
+  }, [opt, heldSession]);
   const [month, setMonth] = useState<number>(0);
   const [day, setDay] = useState<string | null>(null);
   const [time, setTime] = useState<string | null>(null);
