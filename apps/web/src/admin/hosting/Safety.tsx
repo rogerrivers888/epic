@@ -29,7 +29,7 @@ type Safety = {
   incidents: { id: string; host: string | null; event: string | null; children: string[]; reporter: 'host' | 'guest' | 'staff'; body: string; at: string }[];
   reports?: { id: string; hostId: string; host: string; event: string | null; reason: string; at: string }[];
   /** Verified hosts Stripe is asking for ID again (L7): taken up in Stripe by a person, never sent to the host. */
-  idAskedAgain?: { hostId: string; host: string; asks: string[]; verifiedOn: string | null; stripeAccount: string | null; since: string }[];
+  idAskedAgain?: { hostId: string; host: string; asks: string[]; verifiedOn: string | null; stripeAccount: string | null }[];
 };
 type Checked = Safety['checked'][number];
 type Rating = NonNullable<Safety['ratings']>[number] & { cantSpeak?: boolean };
@@ -75,7 +75,7 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
 
   const reports = useSorted(data?.reports, rp.sort, rp.desc, (r, k) => (k === 'host' ? r.host : k === 'event' ? r.event : k === 'reason' ? r.reason : k === 'at' ? r.at : null));
 
-  const askedAgain = useSorted(data?.idAskedAgain, ia.sort, ia.desc, (r, k) => (k === 'host' ? r.host : k === 'verified' ? r.verifiedOn : k === 'since' ? r.since : null));
+  const askedAgain = useSorted(data?.idAskedAgain, ia.sort, ia.desc, (r, k) => (k === 'host' ? r.host : k === 'verified' ? r.verifiedOn : null));
 
   if (!data) return <Loading error={error} reload={reload} />;
   const askedCols: Col<AskedAgain>[] = [
@@ -83,7 +83,6 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
     { key: 'asks', label: 'What Stripe asks for', grow: true, tip: tip('What Stripe asks for', 'From Stripe’s requirements on their account. The host is not asked; take it up in Stripe.'), cell: (r) => <Word>{r.asks.join(', ')}</Word> },
     { key: 'verified', label: 'ID checked', sort: 'verified', width: 110, tip: tip('ID checked', 'The day Stripe confirmed their ID.'), cell: (r) => (r.verifiedOn ? <Word>{when(r.verifiedOn)}</Word> : <Blank />) },
     { key: 'account', label: 'Stripe account', width: 200, tip: tip('Stripe account', 'To find them in Stripe.'), cell: (r) => (r.stripeAccount ? <Word>{r.stripeAccount}</Word> : <Blank />) },
-    { key: 'since', label: 'Seen', sort: 'since', width: 110, tip: tip('Seen', 'When Stripe’s requirements last changed.'), cell: (r) => <Word>{when(r.since)}</Word> },
   ];
 
   const close = async () => {
