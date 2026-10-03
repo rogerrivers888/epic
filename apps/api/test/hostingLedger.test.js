@@ -464,6 +464,7 @@ test('Codex: a chargeback the host lost is never paid out — left out when the 
   await query(`update experience_bookings set dispute_state = 'lost' where id = $1`, [a.booking.id]);
   await money.schedulePayouts();
   assert.equal((await query('select count(*)::int as n from host_payouts where session_id = $1', [a.sessions[0].id])).rows[0].n, 0, 'nothing payable');
+  assert.equal((await ledger.sessionsEndedWithoutPayout()).some((r) => r.session_id === a.sessions[0].id), false, 'and not picked up again every run');
   // Lost after: the payout carrying it is held for the owner, and goes only on his Release.
   const b = await aPaidSession({ endedHoursAgo: 100 });
   await money.schedulePayouts();

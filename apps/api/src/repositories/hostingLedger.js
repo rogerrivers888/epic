@@ -79,7 +79,9 @@ export async function sessionsEndedWithoutPayout({ now = new Date(), limit = 200
                at time zone coalesce(o.time_zone, 'Europe/London')) <= $1
         and exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                      where bs.session_id = s.id and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded')
-                       and b.charge_model = 'destination')
+                       -- The same bookings schedulePayout pays, so a session with nothing payable is never picked up again
+                       -- every run, crowding out sessions that are (Codex, 3 Oct 2026).
+                       and b.charge_model = 'destination' and b.dispute_state is distinct from 'lost')
       order by 5 limit $2`,
     [now, limit],
   );
