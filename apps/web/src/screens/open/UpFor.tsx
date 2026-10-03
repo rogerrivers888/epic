@@ -124,7 +124,7 @@ export function ForkScreen() {
       <View style={wide ? k.wide : undefined}>
         <Cta
           label={pick === 'say' ? 'Next · say what you are up for' : 'Next · define an event'}
-          onPress={() => navigate(pick === 'say' ? paths.openSay() : paths.hostNewOffer('oneoff'))}
+          onPress={() => navigate(pick === 'say' ? paths.openSay() : paths.hostLanes())}
           style={{ paddingBottom: 14 }}
         />
       </View>

@@ -201,6 +201,9 @@ function Settings({ p, reload }: { p: DeskProfile; reload: () => Promise<unknown
   const { navigate } = useRouter();
   const s = p.settings;
   const [sheet, setSheet] = useState<CohostSheet>(null);
+  // Payouts and tax: one field at a time, as the old money screen had it (Roger, 3 Oct 2026).
+  const [tax, setTax] = useState<TaxField | null>(null);
+  const tx_ = s.payouts.taxDetails ?? { legalName: null, address: null, isCompany: false, companyNumber: null };
   const [notes, setNotes] = useState<Record<string, boolean>>(s.notifications);
   const [goal, setGoal] = useState(s.goalPence ? String(Math.round(s.goalPence / 100)) : '');
   const [goalSaved, setGoalSaved] = useState(false);
@@ -236,10 +239,13 @@ function Settings({ p, reload }: { p: DeskProfile; reload: () => Promise<unknown
     <View>
       {error ? <Text style={[tx(13.5, '600', INK_MUTED), { paddingHorizontal: 20, paddingTop: 14 }]}>{error}</Text> : null}
 
-      <Section title="Payouts">
+      <Section title="Payouts and tax">
         <View style={{ borderBottomWidth: 1, borderBottomColor: HAIRLINE }}>
           <Row title="Stripe account" right={s.payouts.ready ? 'Ready' : 'Not set up'} muted={!s.payouts.ready} />
-          <Row title="Tax details" right={s.payouts.tax ?? 'Add tax details'} muted={!s.payouts.tax} onPress={s.payouts.tax ? null : () => navigate(paths.hostEarnings({ tab: 'payouts' }))} />
+          <Row title="UTR or National Insurance number" right={s.payouts.tax ?? 'Add'} muted={!s.payouts.tax} onPress={() => setTax('ref')} />
+          <Row title="Legal name" right={tx_.legalName ?? 'Add'} muted={!tx_.legalName} onPress={() => setTax('name')} />
+          <Row title="Tax address" right={tx_.address ?? 'Add'} muted={!tx_.address} onPress={() => setTax('address')} />
+          <Row title="Hosting as a company" right={tx_.isCompany ? (tx_.companyNumber ?? 'Yes') : 'No'} onPress={() => setTax('company')} />
           <Row title="Earnings" onPress={() => navigate(paths.hostEarnings())} />
         </View>
       </Section>
@@ -290,6 +296,7 @@ function Settings({ p, reload }: { p: DeskProfile; reload: () => Promise<unknown
       </Section>
 
       {sheet ? <CohostSheetView sheet={sheet} onClose={() => setSheet(null)} onDone={async () => { setSheet(null); await reload(); }} /> : null}
+      {tax ? <TaxSheet which={tax} current={tax === 'name' ? tx_.legalName : tax === 'address' ? tx_.address : tax === 'company' ? tx_.companyNumber : null} company={tx_.isCompany} onClose={() => setTax(null)} onDone={async () => { setTax(null); await reload(); }} /> : null}
 
       {pause ? (
         <DeskSheet title="Pause hosting" onClose={() => setPause(false)}
@@ -315,6 +322,44 @@ function Settings({ p, reload }: { p: DeskProfile; reload: () => Promise<unknown
         </DeskSheet>
       ) : null}
     </View>
+  );
+}
+
+type TaxField = 'ref' | 'name' | 'address' | 'company';
+const TAX_TITLE: Record<TaxField, string> = { ref: 'UTR or National Insurance number', name: 'Legal name', address: 'Tax address', company: 'Hosting as a company' };
+
+/**
+ * One tax field. Epic reports what each host earned to HMRC every January (DAC7); these are the details it reports
+ * under. The legal name and tax address have their own columns: this never changes the name guests see.
+ */
+function TaxSheet({ which, current, company, onClose, onDone }: { which: TaxField; current: string | null; company: boolean; onClose: () => void; onDone: () => void }) {
+  const [v, setV] = useState(current ?? '');
+  const [isCompany, setIsCompany] = useState(company);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    const value = v.trim();
+    if (which !== 'company' && !value) { setError('Fill it in, or close.'); return; }
+    if (which === 'company' && isCompany && !value) { setError('The company number, from Companies House.'); return; }
+    const patch = which === 'ref' ? { taxReference: value } : which === 'name' ? { legalName: value } : which === 'address' ? { taxAddress: value }
+      : isCompany ? { taxIsCompany: true, companyNumber: value } : { taxIsCompany: false };
+    setBusy(true);
+    try { await api.updateHost(patch); onDone(); } catch (e: any) { setError(e?.body?.message ?? e.message ?? 'That didn’t save.'); } finally { setBusy(false); }
+  };
+  return (
+    <DeskSheet title={TAX_TITLE[which]} onClose={onClose} footer={<Btn label="Save" disabled={busy} onPress={save} />}>
+      <View style={{ gap: 8 }}>
+        {which === 'company' ? (
+          <Tabs tabs={[{ key: 'no', label: 'As me' }, { key: 'yes', label: 'As a company' }]} value={isCompany ? 'yes' : 'no'} onPick={(k) => setIsCompany(k === 'yes')} />
+        ) : null}
+        {which !== 'company' || isCompany ? (
+          <TextInput value={v} onChangeText={setV} autoFocus multiline={which === 'address'} accessibilityLabel={TAX_TITLE[which]}
+            placeholder={which === 'company' ? '8 digits, from Companies House' : which === 'ref' ? '10-digit UTR or NI number' : undefined}
+            style={[inputStyle, which === 'address' ? { minHeight: 88, textAlignVertical: 'top' } : null]} />
+        ) : null}
+        {error ? <Text style={tx(13.5, '700', INK)}>{error}</Text> : null}
+      </View>
+    </DeskSheet>
   );
 }
 

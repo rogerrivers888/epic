@@ -16,7 +16,7 @@ import { Icon } from '../../../components/Icon';
 import { asOneOf, useQueryState, useRouter } from '../../../router';
 import { HOST_LANES, paths, type HostLane } from '../../../routes';
 import { api } from '../../../api';
-import { CREAM, HAIRLINE, INK, INK_MUTED, MOSS } from '../../../theme';
+import { CREAM, HAIRLINE, INACTIVE, INK, INK_MUTED, MOSS } from '../../../theme';
 import { LANES, LANE_ORDER } from '../v7/model';
 import { DeskSheet, Empty, Head, Loading, Page, Photo, Section, StatusChip, Tabs, tx } from './kit';
 import { LANE_TAG, dayWords, shortDate, type DeskEvents as Events, type EventRow } from './model';
@@ -44,6 +44,7 @@ function lineOf(r: EventRow): string | null {
   if (r.group === 'drafts') return r.draft ? `Step ${r.draft.step} of ${r.draft.of}` : null;
   if (r.group === 'finished') return [r.endedOn ? `Ended ${dayMonth(r.endedOn)}` : 'Ended', r.came != null ? `${r.came} came` : null].filter(Boolean).join(' · ');
   if (!r.next) return null;
+  if (r.next.booked == null) return dayWords(r.next.date);
   return `${dayWords(r.next.date)} · ${r.next.booked}${r.next.max ? ` of ${r.next.max}` : ' booked'}`;
 }
 
@@ -88,7 +89,7 @@ export function DeskEvents() {
         <Section key={g.key} title={`${g.title} · ${g.rows.length}`}>
           <View style={{ borderBottomWidth: 1, borderBottomColor: HAIRLINE }}>
             {g.rows.map((r) => (
-              <EventLine key={r.id} r={r} onPress={() => navigate(r.group === 'drafts' ? paths.hostSetup(r.id) : paths.hostEvent(r.id))} />
+              <EventLine key={r.id} r={r} onPress={() => navigate(r.older ? paths.hostOffer(r.id) : r.group === 'drafts' ? paths.hostSetup(r.id) : paths.hostEvent(r.id))} />
             ))}
           </View>
         </Section>
@@ -114,7 +115,8 @@ export function DeskEvents() {
 
 function EventLine({ r, onPress }: { r: EventRow; onPress: () => void }) {
   const line = lineOf(r);
-  const lane = LANES[r.lane];
+  // An offer from before the lanes carries no lane tag of its own.
+  const lane = r.lane ? LANES[r.lane] : { tag: 'Older', bg: INACTIVE, fg: INK };
   return (
     <Press onPress={onPress} accessibilityRole="button" accessibilityLabel={r.title ?? 'Untitled'}
       style={[{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: HAIRLINE }, r.group === 'finished' && { opacity: 0.7 }]}>

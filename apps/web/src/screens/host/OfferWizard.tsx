@@ -1401,7 +1401,7 @@ function Done({ offer: o }: { offer: OwnOffer }) {
               ))}
             </View>
             <Text style={[t.tiny, { color: colors.accent }]}>Tom hosts both. Same person, two audiences.</Text>
-            <Press onPress={() => navigate(paths.hostNewOffer())} accessibilityRole="button" style={styles.addSkill}>
+            <Press onPress={() => navigate(paths.hostLanes())} accessibilityRole="button" style={styles.addSkill}>
               <Text style={[t.body, { fontWeight: '700', color: INK }]}>Add another skill</Text>
               <Icon name="add" size={17} color={INK} strokeWidth={2.2} />
             </Press>

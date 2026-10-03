@@ -83,15 +83,8 @@ export function HostScreen({ route }: { route: Extract<Route, { name: 'host' }> 
   }, []);
   useEffect(() => { void load(); }, [load, route.page]);
 
-  // A new offer: the draft is made on the first tap, then it continues on its own address.
-  const creating = useRef(false);
-  useEffect(() => {
-    if (route.page !== 'new' || creating.current) return;
-    creating.current = true;
-    const shape = (query.get('shape') as OfferShape | null) ?? 'oneoff';
-    const vis = (query.get('vis') as Visibility | null) ?? undefined;
-    api.createOffer(shape, vis).then((r) => navigate(paths.hostOfferEdit(r.offer.id, 'plan'), { replace: true })).catch((e) => { setError(e.message); creating.current = false; });
-  }, [route.page]);
+  // A new offer is made one of the four ways to host; the old way's address goes there (Roger, 3 Oct 2026).
+  useEffect(() => { if (route.page === 'new') navigate(paths.hostLanes(), { replace: true }); }, [route.page]);
   useEffect(() => { if (route.page === 'start') navigate(paths.hostMe(), { replace: true }); }, [route.page]);
   // The old dashboard is replaced by All events (hosting v4, E7); its address goes there.
   useEffect(() => { if (route.page === 'manage' && !query.get('legacy')) navigate(paths.hostEvents(), { replace: true }); }, [route.page]);

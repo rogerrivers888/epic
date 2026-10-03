@@ -50,7 +50,7 @@ export function HostSkills({ home, onBack }: { home: HostHome; onBack: () => voi
             </View>
           </View>
         ))}
-        <Press onPress={() => navigate(paths.hostNewOffer())} accessibilityRole="button" style={styles.dashed}>
+        <Press onPress={() => navigate(paths.hostLanes())} accessibilityRole="button" style={styles.dashed}>
           <Icon name="add" size={18} color={colors.inkFaint} strokeWidth={2} />
           <Text style={[t.body, { color: colors.inkFaint }]}>Add an offer</Text>
         </Press>

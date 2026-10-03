@@ -775,19 +775,9 @@ async function attachSkills(offers) {
 }
 
 /** POST /api/host/offers — a draft, of one shape. Step 1 is the fork. */
-router.post('/host/offers', async (req, res, next) => {
-  try {
-    const { household } = await myHost();
-    let host = await repo.hostByHousehold(household.id);
-    // Who you are is asked only when the offer is public, and later in the
-    // flow; the row exists from the first tap so every step has somewhere
-    // to save. The name is filled in at basics.
-    if (!host) host = await repo.insertHost(household.id, { name: currentAccount()?.name ?? household.name ?? 'A host', type: null, accountId: currentAccount()?.id ?? null });
-    const shape = oneOf(SHAPES, req.body?.shape);
-    if (!shape) throw refuse(400, 'shape_required', 'Pick a shape: one-off, series or anytime.');
-    const offer = await repo.insertOffer(host.id, shape, { ageLimit: host.local_kind === 'night_out' ? 18 : null, visibility: oneOf(VISIBILITIES, req.body?.visibility) ?? 'public', money: 'free' });
-    res.status(201).json({ offer: await ownOfferPayload(offer, host) });
-  } catch (err) { next(err); }
+router.post('/host/offers', async (_req, _res, next) => {
+  // New events are made one of the four ways to host (/host/new); this older way makes none (Roger, 3 Oct 2026).
+  next(refuse(410, 'use_lanes', 'New events are made from Host › New.'));
 });
 
 router.get('/host/offers/:id', async (req, res, next) => {

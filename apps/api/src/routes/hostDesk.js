@@ -37,6 +37,7 @@ import { ladderProgress, feeWords, introState } from '../domain/money.js';
 import { localInstant, localDay, SEQ } from '../domain/lanes.js';
 import { bookingHostShare, shareForSession } from '../repositories/hostingLedger.js';
 import { mediaRef } from './hosting.js';
+import { lastDate, occurrenceDate } from '../domain/hosting.js';
 import * as notifications from '../repositories/notifications.js';
 
 export const router = Router();
@@ -216,7 +217,8 @@ router.get('/host/desk', async (_req, res, next) => {
     const s = await settingsRepo.current();
     const offers = await offersWithSessions(host.id);
     const helping = await helpingWith(account?.id);
-    if (!offers.length && !helping.length) return res.json({ home: '4e' });
+    // A host whose offers all pre-date the lanes still has a desk, and finds them in All events.
+    if (!offers.length && !helping.length && !(await olderOffers(host.id)).length) return res.json({ home: '4e' });
     const upcoming = offers.flatMap((o) => (o.state === 'draft' ? [] : o.sessionsList.filter((x) => x.state === 'scheduled' && endOf(x, o) > now).map((x) => ({ o, x }))))
       .sort((a, b) => startOf(a.x, a.o) - startOf(b.x, b.o));
     const state = hostState({ offers, upcomingSessions: upcoming.length });
@@ -431,11 +433,33 @@ function eventRow(o, now, { cohost = false } = {}) {
   };
 }
 
+/**
+ * Offers made before the four lanes, so they are managed from All events too (Roger, 3 Oct 2026): Live until
+ * their last date, Finished after it, and each opens on the page it was built with (`older`).
+ */
+async function olderOffers(hostId) {
+  const { rows } = await query(`select * from host_offers where host_id = $1 and lane is null and state <> 'draft' order by updated_at desc`, [hostId]);
+  return rows;
+}
+function olderRow(o, today) {
+  const last = lastDate(o, null);
+  const finished = o.state === 'ended' || Boolean(last && last < today);
+  const on = finished ? null : occurrenceDate(o, null);
+  return {
+    id: o.id, title: o.title, lane: null, older: true, visibility: o.visibility, photo: mediaRef(o.photo_ids?.[0]),
+    group: finished ? 'finished' : 'live',
+    next: on ? { date: on, time: o.starts_at ? String(o.starts_at).slice(0, 5) : null, booked: null, max: o.max_count ?? null } : null,
+    endedOn: finished ? last ?? null : null, came: null, draft: null,
+    chip: finished ? 'finished' : 'on', chipWords: CHIP_WORDS[finished ? 'finished' : 'on'],
+  };
+}
+
 router.get('/host/desk/events', async (_req, res, next) => {
   try {
     const { host, account } = await me({ hostOptional: true });
     const now = new Date();
-    const own = host ? (await offersWithSessions(host.id)).map((o) => eventRow(o, now)) : [];
+    const today = localDay(now, 'Europe/London');
+    const own = host ? [...(await offersWithSessions(host.id)).map((o) => eventRow(o, now)), ...(await olderOffers(host.id)).map((o) => olderRow(o, today))] : [];
     const helping = [];
     for (const h of await helpingWith(account?.id)) {
       const [withS] = await offersWithSessionsOf([h.id]);
@@ -1004,7 +1028,15 @@ router.get('/host/desk/profile', async (_req, res, next) => {
         insurance: { expires: ymd(host.insurance_expires) },
       },
       settings: {
-        payouts: { ready: host.payouts_state === 'ready', tax: host.tax_reference ? `•••• ${String(host.tax_reference).slice(-3)}` : null },
+        payouts: {
+          ready: host.payouts_state === 'ready', tax: host.tax_reference ? `•••• ${String(host.tax_reference).slice(-3)}` : null,
+          // Tax identity for the yearly HMRC report (DAC7), edited here now (Roger, 3 Oct 2026). The legal name and
+          // address fall back to the profile for display only; an edit writes their own columns, which DAC7 reads.
+          taxDetails: {
+            legalName: host.legal_name ?? host.name ?? null, address: host.tax_address ?? host.address ?? null,
+            isCompany: Boolean(host.tax_is_company), companyNumber: host.company_number ?? null,
+          },
+        },
         cohosts: [...people.values()].map(({ key, ...p }) => ({ ...p, id: key })),
         notifications: host.notification_prefs ?? {}, goalPence: host.earnings_goal_pence ?? null,
         paused: Boolean(host.paused), stopped: Boolean(host.stopped_at),
@@ -1076,6 +1108,14 @@ router.post('/host/desk/stop', async (_req, res, next) => {
                 (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`,
         [host.id],
       );
+      // Bookings on offers made before the lanes count too: their dates live on the booking, not in sessions (Roger, 3 Oct 2026).
+      const { rows: olderBooked } = await c.query(
+        `select b.occurrence, o.* from experience_bookings b join host_offers o on o.id = b.offer_id
+          where b.host_id = $1 and o.lane is null and b.state in ('pending', 'confirmed')`,
+        [host.id],
+      );
+      const today = localDay(new Date(), 'Europe/London');
+      o.bookings += olderBooked.filter((r) => (lastDate(r, r.occurrence) ?? today) >= today).length;
       if (o.bookings || o.payouts) return { refused: o };
       await c.query(`update hosts set stopped_at = now(), paused = true, updated_at = now() where id = $1`, [host.id]);
       await c.query(`update host_offers set state = 'ended' where host_id = $1 and state in ('live', 'paused', 'approved', 'in_review')`, [host.id]);

@@ -41,8 +41,9 @@ export type AtRisk = {
 };
 
 export type EventRow = {
-  id: string; title: string | null; lane: HostLane; visibility: string; photo: string | null; group: 'live' | 'helping' | 'drafts' | 'finished';
-  next: { date: string; time: string | null; booked: number; max: number | null } | null; endedOn: string | null; came: number | null;
+  /** `older`: made before the four lanes — no lane, and it opens on the page it was built with. */
+  id: string; title: string | null; lane: HostLane | null; older?: boolean; visibility: string; photo: string | null; group: 'live' | 'helping' | 'drafts' | 'finished';
+  next: { date: string; time: string | null; booked: number | null; max: number | null } | null; endedOn: string | null; came: number | null;
   draft: { step: number; of: number; words: string } | null; chip: Chip; chipWords: string; owner?: string;
 };
 export type DeskEvents = { live: EventRow[]; helping: EventRow[]; drafts: EventRow[]; finished: EventRow[] };
@@ -111,7 +112,7 @@ export type DeskProfile = {
   ratings: { avg: number | null; count: number; tips: { count: number; pence: number }; standing: Standing };
   checks: { identity: { state: string; on: string | null }; checked: { state: string; level: string | null; on: string | null; renewBy: string | null }; insurance: { expires: string | null } };
   settings: {
-    payouts: { ready: boolean; tax: string | null };
+    payouts: { ready: boolean; tax: string | null; taxDetails?: { legalName: string | null; address: string | null; isCompany: boolean; companyNumber: string | null } };
     cohosts: Cohost[];
     notifications: Record<string, boolean>; goalPence: number | null;
     paused: boolean; stopped: boolean; canStop: boolean; outstanding: { bookings: number; payouts: number };

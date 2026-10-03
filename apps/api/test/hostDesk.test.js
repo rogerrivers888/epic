@@ -369,3 +369,34 @@ test('Codex: a host’s automatic message goes with the guest’s notification, 
   await query(`update host_auto_messages set is_on = false where host_id = $1`, [host.id]);
   assert.equal(await notifications.hostWords(host.id, 'confirmed'), null);
 });
+
+test('offers made before the lanes: in All events, counted by Stop hosting, and the desk holds the tax details (Roger, 3 Oct 2026)', async () => {
+  const { account, host } = await aHost();
+  // One older offer still to come, one long past.
+  const { rows: [soon] } = await query(
+    `insert into host_offers (host_id, shape, lane, state, title, visibility, starts_on) values ($1, 'oneoff', null, 'live', 'Older walk', 'public', $2) returning *`,
+    [host.id, plusDays(today(), 5)],
+  );
+  await query(`insert into host_offers (host_id, shape, lane, state, title, visibility, starts_on) values ($1, 'oneoff', null, 'live', 'Older talk', 'public', $2)`, [host.id, plusDays(today(), -40)]);
+  const srv = await server(account);
+  try {
+    assert.notDeepEqual((await srv.get('/api/host/desk')).body, { home: '4e' }, 'a host with only older offers has a desk');
+    const ev = (await srv.get('/api/host/desk/events')).body;
+    const live = ev.live.find((r) => r.title === 'Older walk');
+    assert.ok(live?.older, 'still to come: Live, and it opens on its own page');
+    assert.equal(live.lane, null);
+    assert.ok(ev.finished.some((r) => r.title === 'Older talk' && r.older), 'past its date: Finished');
+
+    // A booking on the older offer stops Stop hosting.
+    const { household } = await aHousehold(query);
+    await query(`insert into experience_bookings (offer_id, host_id, household_id, heads, state) values ($1, $2, $3, 2, 'confirmed')`, [soon.id, host.id, household.id]);
+    const stop = await srv.send('POST', '/api/host/desk/stop');
+    assert.equal(stop.status, 409, JSON.stringify(stop.body));
+    assert.match(stop.body.message, /1 booking is still to happen/);
+
+    // Payouts and tax: legal name, address and company, from their own columns.
+    await query(`update hosts set legal_name = 'Katherine Morris', tax_address = '1 High St, Ascot', tax_is_company = true, company_number = '12345678' where id = $1`, [host.id]);
+    const t = (await srv.get('/api/host/desk/profile')).body.settings.payouts.taxDetails;
+    assert.deepEqual(t, { legalName: 'Katherine Morris', address: '1 High St, Ascot', isCompany: true, companyNumber: '12345678' });
+  } finally { await srv.close(); }
+});

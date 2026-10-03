@@ -2937,7 +2937,6 @@ export const api = {
     post<{ venueRef: string; filed: PhotoFiled | null }>(`/api/places/photo/${imageId}/place`, body),
   trimHostMedia: (id: string, trimStartS: number, trimEndS: number | null) => patch<{ media: HostMedia }>(`/api/host/media/${id}`, { trimStartS, trimEndS }),
   deleteHostMedia: (id: string) => del<void>(`/api/host/media/${id}`),
-  createOffer: (shape: OfferShape, visibility?: Visibility) => post<{ offer: OwnOffer }>('/api/host/offers', { shape, visibility }),
   /** A PDF for guests, read and seeded into the fields; null takes it off again. */
   seedOfferDoc: (id: string, mediaId: string | null) => post<{ offer: OwnOffer; seeded: string[] }>(`/api/host/offers/${id}/doc`, { mediaId }),
   /** The listing written from the video. `force` overwrites what the host typed. */

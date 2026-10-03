@@ -120,7 +120,7 @@ export function LearnShape({ shape, wide }: { shape: OfferShape; wide: boolean }
         </View>
       </ScrollView>
       <View style={wide ? k.wide : undefined}>
-        <Cta label="Make it epic" onPress={() => navigate(paths.hostNewOffer(shape))} style={{ paddingBottom: 14 }} />
+        <Cta label="Make it epic" onPress={() => navigate(paths.hostLanes())} style={{ paddingBottom: 14 }} />
       </View>
     </View>
   );
@@ -221,7 +221,7 @@ export function LearnExample({ exampleKey, wide }: { exampleKey: string; wide: b
         </View>
       </ScrollView>
       <View style={[wide && k.wide, k.ctaWrap, { paddingBottom: 14, gap: 8 }]}>
-        <Press onPress={() => navigate(paths.hostNewOffer(e.shape))} accessibilityRole="button" style={k.cta}>
+        <Press onPress={() => navigate(paths.hostLanes())} accessibilityRole="button" style={k.cta}>
           <Text style={k.ctaText}>I could do something like this</Text>
           <Icon name="forward" size={18} color={colors.primaryFg} strokeWidth={2} />
         </Press>
