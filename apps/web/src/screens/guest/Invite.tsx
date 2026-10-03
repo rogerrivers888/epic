@@ -46,7 +46,9 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
   const o = v.offer;
   const host = firstName(o.host?.name);
   const each = opt?.price.mode && opt.price.mode !== 'free' ? opt.price.pence ?? 0 : 0;
-  const people = hh?.members?.length ? hh.members.map((m) => ({ key: m.id, name: m.name, line: m.id === hh.me ? 'You' : m.isMinor ? (m.age != null ? `Age ${m.age}` : 'Child') : 'Adult', adult: !m.isMinor, age: m.age ?? null }))
+  // You first, then the grown-ups, then the children — as on the booking screen.
+  const rank = (p: { line: string; adult: boolean }) => (p.line === 'You' ? 0 : p.adult ? 1 : 2);
+  const people = hh?.members?.length ? hh.members.map((m) => ({ key: m.id, name: m.name, line: m.id === hh.me ? 'You' : m.isMinor ? (m.age != null ? `Age ${m.age}` : 'Child') : 'Adult', adult: !m.isMinor, age: m.age ?? null })).sort((x, y) => rank(x) - rank(y))
     : [{ key: 'you', name: 'You', line: 'You', adult: true, age: null as number | null }];
   const going = people.filter((p) => ticked.has(p.key) || (people.length === 1 && p.key === 'you'));
   const heads = Math.max(1, going.length);
