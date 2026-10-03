@@ -18,7 +18,7 @@
  *                A row it could not read is "not checked", never a match.
  */
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import * as ledger from '../repositories/hostingLedger.js';
 import * as settings from '../repositories/hostingSettings.js';
 import * as notifications from '../repositories/notifications.js';
@@ -205,15 +205,26 @@ export async function reconcile({ days = 3, read = stripe.retrieveRef, status = 
  */
 export async function refreshAccountFacts({ limit = 20, status = stripe.stripeStatus, read = stripe.retrieveAccount } = {}) {
   if (!status().ready) return { skipped: 'stripe_not_ready' };
-  const { rows } = await query(
-    `select id, household_id, stripe_account_id from hosts
-      where stripe_account_model = 'v2' and stripe_account_id is not null
-        and (stripe_requirements is null or not (stripe_requirements ? 'detailsSubmitted'))
-      order by updated_at limit $1`, [limit],
-  );
+  // The batch is claimed first, so two instances of the API never read the same accounts (Codex, 3 Oct 2026); a claim
+  // left by an instance that died lapses after ten minutes.
+  const rows = await withTransaction(async (c) => {
+    const { rows: picked } = await c.query(
+      `select id, household_id, stripe_account_id from hosts
+        where stripe_account_model = 'v2' and stripe_account_id is not null
+          and (stripe_requirements is null or not (stripe_requirements ? 'detailsSubmitted'))
+          and (stripe_requirements->>'claimedAt' is null or (stripe_requirements->>'claimedAt')::timestamptz < now() - interval '10 minutes')
+        order by updated_at limit $1 for update skip locked`, [limit],
+    );
+    if (picked.length) {
+      await c.query(`update hosts set stripe_requirements = coalesce(stripe_requirements, '{}'::jsonb) || jsonb_build_object('claimedAt', now()) where id = any($1::uuid[])`, [picked.map((h) => h.id)]);
+    }
+    return picked;
+  });
   const { applyAccountFacts } = await import('../routes/hostLanes.js');
   let refreshed = 0;
-  for (const h of rows) {
+  // A run that stops early gives back the claims on rows it didn't reach, so the next run picks them up at once.
+  const release = (rest) => (rest.length ? query(`update hosts set stripe_requirements = stripe_requirements - 'claimedAt' where id = any($1::uuid[])`, [rest.map((h) => h.id)]) : null);
+  for (const [i, h] of rows.entries()) {
     try {
       await applyAccountFacts(h.id, async () => stripe.hostPatchFromAccount(await read(h.stripe_account_id, { householdId: h.household_id })));
       refreshed += 1;
@@ -227,6 +238,7 @@ export async function refreshAccountFacts({ limit = 20, status = stripe.stripeSt
       const gone = ['account_invalid', 'resource_missing'].includes(err.detail);
       if (err.code === 'stripe_refused' && !gone) {
         console.error(`epic-api: account facts refresh stopped — Stripe refused (${err.detail ?? err.httpStatus ?? 'no code'}), not about one account`);
+        await release(rows.slice(i));
         break;
       }
       if (err.code === 'stripe_refused') {

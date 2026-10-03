@@ -1133,18 +1133,21 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
  * person (Safety › Stripe account trouble) and the payment problems log takes the history. Nothing goes to the host.
  */
 /**
- * A stamp for when a read of a host's account began: microseconds and a counter, as fixed-width text so it compares
- * in order and never loses digits the way a number that large would (Codex, 3 Oct 2026). A tie is treated as stale.
+ * A stamp for when a read of a host's account began, from the database's clock — the one clock every API instance
+ * shares (Codex, 3 Oct 2026) — as fixed-width text that compares in order: microseconds, then a random tail so two
+ * reads in the same microsecond still differ. A tie is treated as stale.
  */
-let stampCount = 0;
-const readStamp = () => `${String(Math.round((performance.timeOrigin + performance.now()) * 1000)).padStart(17, '0')}-${String((stampCount = (stampCount + 1) % 1_000_000)).padStart(6, '0')}`;
+async function readStamp() {
+  const { rows: [r] } = await query(`select lpad((extract(epoch from clock_timestamp()) * 1000000)::bigint::text, 17, '0') as us`);
+  return `${r.us}-${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`;
+}
 
 export async function applyAccountFacts(hostId, patchOrRead) {
   // Given a read, Stripe is asked first — never while a database connection is held, since the read's own metering
   // needs one (Codex, 3 Oct 2026) — and the read is stamped with when it began. Under the host row's lock it is then
   // stored only if no read that began later has been stored already, so overlapping deliveries can't put an older
   // view back over a newer one.
-  const readAt = readStamp();
+  const readAt = typeof patchOrRead === 'function' ? await readStamp() : null;
   const read = typeof patchOrRead === 'function' ? await patchOrRead() : patchOrRead;
   return withTransaction(async (c) => {
     const { rows: [was] } = await c.query('select * from hosts where id = $1 for update', [hostId]);
@@ -1156,7 +1159,7 @@ export async function applyAccountFacts(hostId, patchOrRead) {
     // Once sign-up was finished it stays finished for the trouble watch: Stripe un-marks it when new requirements go
     // overdue, which is exactly the account the watch must keep showing (Codex, 3 Oct 2026).
     const patch = read.stripeRequirements
-      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted || prev.detailsSubmitted || was.payouts_state === 'ready' || was.stripe_charges_enabled), readAt: typeof patchOrRead === 'function' ? readAt : readStamp() } }
+      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted || prev.detailsSubmitted || was.payouts_state === 'ready' || was.stripe_charges_enabled), readAt: readAt ?? await readStamp() } }
       : read;
     const before = stripe.accountTrouble(prev);
     const now = stripe.accountTrouble(patch.stripeRequirements ?? prev);
