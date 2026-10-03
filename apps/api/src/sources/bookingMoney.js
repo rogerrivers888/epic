@@ -70,7 +70,7 @@ async function bookingsOn(c, sessionIds) {
  * A held card that loses all its sessions is released rather than refunded.
  * Returns the ledger row, or null when nothing is owed.
  */
-export async function owe(c, booking, { amountPence, cause, key, sessionId = null, wholeBooking = false }) {
+export async function owe(c, booking, { amountPence, cause, key, sessionId = null, wholeBooking = false, feeKeptPence = 0, triggeredBy = null }) {
   if (booking.payment_state === 'held') {
     if (!wholeBooking) return null;
     const { rows: [row] } = await c.query(
@@ -82,22 +82,40 @@ export async function owe(c, booking, { amountPence, cause, key, sessionId = nul
     return row ?? null;
   }
   if (!['charged', 'partially_refunded'].includes(booking.payment_state)) return null;
-  const left = Math.max(0, Number(booking.charged_pence ?? 0) - Number(booking.refunded_pence ?? 0));
-  const amount = Math.min(left, Math.max(0, Math.round(amountPence)));
-  if (amount <= 0) return null;
-  // What of the refund was Epic's fee and what was the host's, in the booking's own proportions, so DAC7 and
-  // the streams net it out (Codex, 2 Oct 2026).
+  // What is left: neither refunded nor kept as a cancellation fee (L5).
+  const left = Math.max(0, Number(booking.charged_pence ?? 0) - Number(booking.refunded_pence ?? 0) - Number(booking.cancellation_fee_pence ?? 0));
+  // The cancellation fee (L5) comes out of the cancelled amount; the guest gets the rest.
+  const kept = Math.max(0, Math.min(left, Math.round(Number(feeKeptPence) || 0)));
+  const amount = Math.min(left - kept, Math.max(0, Math.round(amountPence)));
+  if (amount <= 0 && kept <= 0) return null;
   const charged = Number(booking.charged_pence ?? 0) || 1;
-  const epicBack = Math.round((amount * Number(booking.fee_pence ?? 0)) / charged);
+  let epicBack; let hostBack; let mode;
+  if (kept > 0) {
+    // Keep the fee: the host's whole share of the cancelled amount comes back to Epic and the guest gets the cancelled
+    // amount less the fee, so Epic is left holding exactly the fee and the host nothing of it (sandbox, 3 Oct 2026).
+    const cancelled = amount + kept;
+    const feeOnIt = Math.round((cancelled * Number(booking.fee_pence ?? 0)) / charged);
+    hostBack = cancelled - feeOnIt;
+    epicBack = amount - hostBack; // Epic's fee on it, less what it keeps — negative when the fee kept is more than Epic's fee was
+    mode = 'keep_fee';
+  } else {
+    // What of the refund was Epic's fee and what was the host's, in the booking's own proportions, so DAC7 and
+    // the streams net it out (Codex, 2 Oct 2026).
+    epicBack = Math.round((amount * Number(booking.fee_pence ?? 0)) / charged);
+    hostBack = amount - epicBack;
+    mode = 'proportional';
+  }
   const { rows: [row] } = await c.query(
-    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, session_id, amount_pence, epic_pence, host_pence, state, mode, cause, idem_key)
-     values ('refund', $1, $2, $3, $4, $5, $6, $9, $10, 'pending', 'test', $7, $8)
+    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, session_id, amount_pence, epic_pence, host_pence, state, mode, cause, idem_key,
+                                   fee_kept_pence, triggered_by, refund_mode)
+     values ('refund', $1, $2, $3, $4, $5, $6, $9, $10, 'pending', 'test', $7, $8, $11, $12, $13)
      on conflict (idem_key) where idem_key is not null do nothing returning *`,
-    [booking.id, booking.offer_id, booking.host_id, booking.household_id, sessionId, amount, cause, key, epicBack, amount - epicBack],
+    [booking.id, booking.offer_id, booking.host_id, booking.household_id, sessionId, amount, cause, key, epicBack, hostBack, kept, triggeredBy, mode],
   );
   if (row) {
-    await c.query('update experience_bookings set refunded_pence = refunded_pence + $2 where id = $1', [booking.id, amount]);
+    await c.query('update experience_bookings set refunded_pence = refunded_pence + $2, cancellation_fee_pence = cancellation_fee_pence + $3 where id = $1', [booking.id, amount, kept]);
     booking.refunded_pence = Number(booking.refunded_pence ?? 0) + amount;
+    booking.cancellation_fee_pence = Number(booking.cancellation_fee_pence ?? 0) + kept;
   }
   return row ?? null;
 }
@@ -109,7 +127,7 @@ export async function owe(c, booking, { amountPence, cause, key, sessionId = nul
  */
 export function shareOf(booking, losing) {
   const all = booking.all_sessions?.length || 1;
-  const left = Math.max(0, Number(booking.charged_pence ?? 0) - Number(booking.refunded_pence ?? 0));
+  const left = Math.max(0, Number(booking.charged_pence ?? 0) - Number(booking.refunded_pence ?? 0) - Number(booking.cancellation_fee_pence ?? 0));
   const stillBooked = (booking.booked_sessions ?? []).filter((id) => !losing.includes(id));
   // Money kept for a session the guest gave up stays kept (Codex, 2 Oct 2026).
   if (!stillBooked.length && !Number(booking.forfeited ?? 0)) return { amount: left, whole: true };
@@ -160,7 +178,7 @@ export async function cancelSessions({ offerId, hostId, sessionIds = null, reaso
     for (const b of bookings) {
       const losing = b.booked_sessions.filter((id) => ids.includes(id));
       const { amount, whole } = shareOf(b, losing);
-      const row = await owe(c, b, { amountPence: amount, cause: 'host_cancelled', key: `cancel:${b.id}:${[...losing].sort().join(',')}`, wholeBooking: whole });
+      const row = await owe(c, b, { amountPence: amount, cause: 'host_cancelled', key: `cancel:${b.id}:${[...losing].sort().join(',')}`, wholeBooking: whole, triggeredBy: 'host' });
       if (row) refunds.push(row);
       await c.query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, losing]);
       if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'host', cancel_cause = 'host_cancelled' where id = $1`, [b.id]);
@@ -334,7 +352,7 @@ async function decideOne(offerId, sessionId, now) {
       for (const b of await bookingsOn(c, ids)) {
         const losing = b.booked_sessions.filter((id) => ids.includes(id));
         const { amount, whole } = shareOf(b, losing);
-        const row = await owe(c, b, { amountPence: amount, cause: 'called_off', key: `called_off:${b.id}:${[...losing].sort().join(',')}`, wholeBooking: whole });
+        const row = await owe(c, b, { amountPence: amount, cause: 'called_off', key: `called_off:${b.id}:${[...losing].sort().join(',')}`, wholeBooking: whole, triggeredBy: 'epic' });
         await c.query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, losing]);
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'called_off' where id = $1`, [b.id]);
         told.push({ householdId: b.household_id, kind: 'called_off', title: `${offer.title ?? 'Your booking'} isn’t going ahead`, body: [`It needed ${min} and had ${heads}.${row ? ' You get a full refund.' : ''}`, ownOff].filter(Boolean).join('\n\n'), link: guestLink(b.id), dedupeKey: `called_off:${b.id}:${ids.join(',')}` });
@@ -353,7 +371,7 @@ async function decideOne(offerId, sessionId, now) {
       const finalEach = perPersonAt(offer.total_pence, Math.max(heads, min));
       for (const b of bookings) {
         const back = Math.max(0, (paidEach - finalEach) * Number(b.heads ?? 1));
-        if (back > 0) await owe(c, b, { amountPence: back, cause: 'numbers_settled', key: `numbers:${b.id}` });
+        if (back > 0) await owe(c, b, { amountPence: back, cause: 'numbers_settled', key: `numbers:${b.id}`, triggeredBy: 'epic' });
         await c.query('update experience_bookings set final_price_pence = $2, settled_at = now() where id = $1', [b.id, finalEach * Number(b.heads ?? 1)]);
       }
     }
@@ -397,9 +415,10 @@ export async function warnUnderMinimum({ now = new Date(), withinHours = 48 } = 
  * look at; Stripe unreachable leaves it pending for the next run; Stripe not
  * ready (no key, or a live one) sends nothing.
  */
-export async function processRefunds({ status = stripe.stripeStatus, refund = stripe.refund, release = stripe.cancelPayment, limit = 50 } = {}) {
+export async function processRefunds({ status = stripe.stripeStatus, refund = stripe.refund, release = stripe.cancelPayment, reverseHostShare = stripe.reverseHostShare, limit = 50 } = {}) {
   const out = { sent: 0, failed: 0, waiting: 0 };
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
+  const s = await settings.current();
   const { rows } = await query(
     // A refund names its own PaymentIntent when it is not the booking's (a tip charged twice); otherwise the booking's.
     `select p.*, coalesce(p.refund_of, b.stripe_payment_intent) as stripe_payment_intent, b.charged_pence, b.refunded_pence,
@@ -417,9 +436,15 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
       continue;
     }
     try {
-      const r = p.kind === 'release'
-        ? await release(p.stripe_payment_intent, { householdId: p.household_id, idempotencyKey: p.idem_key })
-        : await refund({ paymentIntentId: p.stripe_payment_intent, amountPence: p.amount_pence, cause: p.cause, bookingId: p.booking_id, householdId: p.household_id, idempotencyKey: p.idem_key, destination: p.charge_model === 'destination' });
+      const keepFee = p.refund_mode === 'keep_fee' && p.charge_model === 'destination';
+      let r = null;
+      if (p.kind === 'release') r = await release(p.stripe_payment_intent, { householdId: p.household_id, idempotencyKey: p.idem_key });
+      else if (p.amount_pence > 0) r = await refund({ paymentIntentId: p.stripe_payment_intent, amountPence: p.amount_pence, cause: p.cause, bookingId: p.booking_id, householdId: p.household_id, idempotencyKey: p.idem_key, destination: p.charge_model === 'destination', keepFee });
+      // Keeping the cancellation fee: the host's whole share of the cancelled amount comes back as well (L5). Its own
+      // key, so a retry after a crash between the two is the same reversal, never a second.
+      if (keepFee && Number(p.host_pence) > 0) {
+        await reverseHostShare({ paymentIntentId: p.stripe_payment_intent, amountPence: Number(p.host_pence), householdId: p.household_id, idempotencyKey: `${p.idem_key}:host_share`, refundId: r?.id ?? null });
+      }
       await withTransaction(async (c) => {
         const { rowCount } = await c.query(`update hosting_payments set state = 'succeeded', stripe_ref = $2, updated_at = now() where id = $1 and state = 'pending'`, [p.id, r?.id ?? null]);
         if (!rowCount) return;
@@ -428,10 +453,23 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
         else if (p.tip_id) await c.query(`update booking_tips set state = 'refunded' where id = $1`, [p.tip_id]);
         else {
           await c.query(
-            `update experience_bookings set payment_state = case when refunded_pence >= charged_pence then 'refunded' else 'partially_refunded' end
+            `update experience_bookings set payment_state = case when refunded_pence + cancellation_fee_pence >= charged_pence then 'refunded' else 'partially_refunded' end
               where id = $1 and payment_state in ('charged', 'partially_refunded')`,
             [p.booking_id],
           );
+          // The host caused it — cancelled, or moved a date the guest then left (owner, 3 Oct 2026) — so Epic recovers
+          // the cancellation fee from the host's own balance. Not for a missed minimum unless the owner switches it on.
+          const recover = p.kind === 'refund' && p.charge_model === 'destination' && (['host_cancelled', 'date_changed'].includes(p.cause) || (p.cause === 'called_off' && s.recovery_on_minimum === true));
+          const pct = typeof s.cancellation_fee_pct === 'number' ? s.cancellation_fee_pct : 0;
+          const owed = recover ? Math.round((Number(p.amount_pence) * pct) / 100) : 0;
+          if (owed > 0) {
+            await c.query(
+              `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, epic_pence, host_pence, state, mode, cause, idem_key, recovers, triggered_by)
+               values ('host_recovery', $1, $2, $3, (select household_id from hosts where id = $3), $4, $4, $5, 'pending', 'test', $6, $7, $8, $9)
+               on conflict (recovers) where recovers is not null do nothing`,
+              [p.booking_id, p.offer_id, p.host_id, owed, -owed, p.cause, `recovery:${p.id}`, p.id, p.cause === 'called_off' ? 'epic' : 'host'],
+            );
+          }
         }
       });
       if (p.kind === 'refund' || p.kind === 'tip_refund') {

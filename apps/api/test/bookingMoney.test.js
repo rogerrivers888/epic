@@ -21,9 +21,12 @@ const today = () => localDay(new Date(), 'Europe/London');
 const ready = () => ({ ready: true, mode: 'test' });
 
 /** A live event with `days` sessions (first one `inDays` away) and guests booked on all of them. */
-async function anEvent({ lane = 'oneoff', inDays = 10, days = 1, min = null, priceMode = 'same_each', totalPence = null, guests = [{ heads: 2, charged: 4000 }], decidesInHours = null } = {}) {
+async function anEvent({ lane = 'oneoff', inDays = 10, days = 1, min = null, priceMode = 'same_each', totalPence = null, guests = [{ heads: 2, charged: 4000 }], decidesInHours = null, destination = false } = {}) {
   const { household: hh } = await aHousehold(query);
-  const { rows: [host] } = await query(`insert into hosts (household_id, name) values ($1, 'Kate') returning *`, [hh.id]);
+  // destination: the register-L way — the host's own account took the money, Epic's 20% fee its application fee.
+  const { rows: [host] } = await query(
+    `insert into hosts (household_id, name, stripe_account_id, stripe_account_model, stripe_payouts_manual) values ($1, 'Kate', $2, $3, $4) returning *`,
+    [hh.id, destination ? `acct_k_${hh.id.slice(0, 6)}` : null, destination ? 'v2' : null, destination]);
   const { rows: [offer] } = await query(
     `insert into host_offers (host_id, shape, lane, state, title, min_count, price_mode, total_pence, starts_on, starts_at)
      values ($1, $2, $3, 'live', 'Pottery', $4, $5, $6, $7, '10:00') returning *`,
@@ -42,9 +45,9 @@ async function anEvent({ lane = 'oneoff', inDays = 10, days = 1, min = null, pri
   for (const [i, g] of guests.entries()) {
     const { household: gh } = await aHousehold(query);
     const { rows: [b] } = await query(
-      `insert into experience_bookings (offer_id, host_id, household_id, heads, state, payment_state, charged_pence, held_pence, host_pence, stripe_payment_intent)
-       values ($1, $2, $3, $4, 'confirmed', $5, $6, $7, $8, $9) returning *`,
-      [offer.id, host.id, gh.id, g.heads, g.held ? 'held' : 'charged', g.held ? null : g.charged, g.held ? g.charged : null, Math.round((g.charged ?? 0) * 0.8), `pi_${offer.id.slice(0, 8)}_${i}`],
+      `insert into experience_bookings (offer_id, host_id, household_id, heads, state, payment_state, charged_pence, held_pence, host_pence, fee_pence, stripe_payment_intent, charge_model)
+       values ($1, $2, $3, $4, 'confirmed', $5, $6, $7, $8, $9, $10, $11) returning *`,
+      [offer.id, host.id, gh.id, g.heads, g.held ? 'held' : 'charged', g.held ? null : g.charged, g.held ? g.charged : null, Math.round((g.charged ?? 0) * 0.8), Math.round((g.charged ?? 0) * 0.2), `pi_${offer.id.slice(0, 8)}_${i}`, destination ? 'destination' : null],
     );
     for (const s of g.sessions ? g.sessions.map((n) => sessions[n]) : sessions) await query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, s.id]);
     bookings.push(b);
@@ -216,4 +219,87 @@ test('Codex: a time move keeps the session’s length across midnight, and a wee
   const { rows: [after] } = await query(`select to_char(starts_at, 'HH24:MI') as s, to_char(ends_at, 'HH24:MI') as e, ends_on, decides_at from offer_sessions where id = $1`, [sessions[0].id]);
   assert.deepEqual([after.s, after.e, after.ends_on], ['01:00', '03:00', null], 'two hours, all on the one day');
   assert.equal(Math.round((new Date(after.decides_at) - new Date(before.decides_at)) / 3_600_000), -22, 'the deadline moves with the start');
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3: cancellations and the 5% (register L5; owner, 3 Oct 2026)
+// ---------------------------------------------------------------------------
+
+test('L5: the fee is kept only where the guest would otherwise get everything back — never on a part refund or a moved date', async () => {
+  const { cancelQuote } = await import('../src/domain/booking.js');
+  const at = (h) => new Date(Date.now() + h * 3_600_000);
+  const booking = { charged_pence: 4000, refunded_pence: 0, payment_state: 'charged', refund_policy: 'flexible' };
+  const terms = { flexible: { fullHoursBefore: 24 }, strict: { partHoursBefore: 168, partPct: 50 } };
+  const one = (b, sessions) => cancelQuote({ booking: b, lane: 'oneoff', sessions, losing: sessions.map((x) => x.id), terms, feePct: 5 });
+  assert.deepEqual(['pence', 'feeKeptPence'].map((k) => one(booking, [{ id: 's', startsAt: at(72) }])[k]), [3800, 200], 'in time: all of it, less 5%');
+  assert.equal(one({ ...booking, refund_policy: 'strict' }, [{ id: 's', startsAt: at(200) }]).feeKeptPence, 0, 'a part refund: exactly what the policy says');
+  assert.equal(one({ ...booking, refund_policy: 'strict' }, [{ id: 's', startsAt: at(200) }]).pence, 2000);
+  assert.deepEqual(['pence', 'feeKeptPence', 'cause'].map((k) => one(booking, [{ id: 's', startsAt: at(72), movedAfterBooking: true }])[k]), [4000, 0, 'date_changed'], 'the host moved it: all of it');
+  assert.equal(cancelQuote({ booking, lane: 'oneoff', sessions: [{ id: 's', startsAt: at(72) }], losing: ['s'], terms, feePct: null }).feeKeptPence, 0, 'no fee set, none kept');
+  // A weekly: one session the host moved and one the guest gives up in time — the moved part said apart, the fee on the rest.
+  const w = cancelQuote({ booking: { ...booking, all_sessions_count: 2 }, lane: 'weekly', sessions: [{ id: 'a', startsAt: at(72), movedAfterBooking: true }, { id: 'b', startsAt: at(96) }], losing: ['a', 'b'], terms, feePct: 5 });
+  assert.deepEqual([w.pence, w.movedPence, w.feeKeptPence], [3900, 2000, 100]);
+});
+
+test('L5: a guest cancelling in time gets it back less 5%; the host keeps none of it; Epic keeps exactly the fee', async () => {
+  settings.forget();
+  const { offer, bookings } = await anEvent({ destination: true, guests: [{ heads: 1, charged: 6000 }] });
+  const b = bookings[0];
+  const { withTransaction } = await import('../src/db.js');
+  await withTransaction(async (c) => {
+    const { rows: [fresh] } = await c.query('select * from experience_bookings where id = $1', [b.id]);
+    await engine.owe(c, fresh, { amountPence: 5700, cause: 'guest_cancelled', key: `t:${b.id}`, feeKeptPence: 300, triggeredBy: 'guest' });
+  });
+  const [line] = await pendingFor(offer.id);
+  // £60 charged, Epic's fee £12: the host's £48 of it comes back to Epic, the guest gets £57, Epic is left with £3.
+  assert.deepEqual([line.amount_pence, line.fee_kept_pence, line.refund_mode, line.triggered_by, line.host_pence, line.epic_pence], [5700, 300, 'keep_fee', 'guest', 4800, 900]);
+  const sent = [];
+  await engine.processRefunds({
+    status: () => ({ ready: true }),
+    // Other tests' refunds are in the queue too; only this booking's calls are looked at.
+    refund: async (r) => { if (r.bookingId === b.id) sent.push(['refund', r.amountPence, r.keepFee]); return { id: `re_${r.bookingId.slice(0, 6)}` }; },
+    reverseHostShare: async (r) => { if (r.idempotencyKey.startsWith(`t:${b.id}`)) sent.push(['reverse', r.amountPence, r.idempotencyKey]); return { id: 'trr_k' }; },
+  });
+  assert.deepEqual(sent, [['refund', 5700, true], ['reverse', 4800, `t:${b.id}:host_share`]], 'the guest’s part, then the host’s whole share');
+  const { rows: [after] } = await query('select refunded_pence, cancellation_fee_pence, payment_state from experience_bookings where id = $1', [b.id]);
+  assert.deepEqual([after.refunded_pence, after.cancellation_fee_pence, after.payment_state], [5700, 300, 'refunded'], 'all of it settled: none left to pay the host');
+  assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [b.id])).rows[0].n, 0, 'the guest’s own cancellation: nothing recovered from the host');
+});
+
+test('L5: a host cancelling refunds in full and Epic recovers 5% from the host’s balance — when it is there, before any payout', async () => {
+  settings.forget();
+  const { host, offer, bookings } = await anEvent({ destination: true, guests: [{ heads: 1, charged: 4000 }] });
+  await engine.cancelSessions({ offerId: offer.id, hostId: host.id, reason: 'illness' });
+  const [line] = await pendingFor(offer.id);
+  assert.deepEqual([line.cause, line.triggered_by, line.refund_mode, line.fee_kept_pence], ['host_cancelled', 'host', 'proportional', 0]);
+  await engine.processRefunds({ status: () => ({ ready: true }), refund: async () => ({ id: 're_h' }) });
+  const { rows: [rec] } = await query(`select * from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [bookings[0].id]);
+  assert.deepEqual([rec.amount_pence, rec.state, rec.cause, rec.triggered_by, rec.recovers], [200, 'pending', 'host_cancelled', 'host', line.id], '5% of the £40 refunded');
+  const money = await import('../src/sources/hostingMoney.js');
+  const debits = [];
+  // Not enough in the host's balance yet: it waits, and takes nothing below nought.
+  let r = await money.processRecoveries({ status: () => ({ ready: true }), balance: async () => ({ availablePence: 150 }), debit: async (d) => { debits.push(d); return { id: 'py_x' }; } });
+  assert.deepEqual([r.waiting >= 1, debits.length], [true, 0]);
+  r = await money.processRecoveries({ status: () => ({ ready: true }), balance: async () => ({ availablePence: 5000 }), debit: async (d) => { debits.push(d); return { id: 'py_1' }; } });
+  assert.deepEqual(debits.map((d) => [d.accountId, d.amountPence, d.idempotencyKey]), [[host.stripe_account_id, 200, `recovery:${line.id}`]]);
+  assert.deepEqual((await query('select state, stripe_ref from hosting_payments where id = $1', [rec.id])).rows.map((x) => [x.state, x.stripe_ref]), [['succeeded', 'py_1']]);
+  await engine.processRefunds({ status: () => ({ ready: true }), refund: async () => ({ id: 're_h' }) });
+  assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [bookings[0].id])).rows[0].n, 1, 'one recovery a refund');
+});
+
+test('L5: a missed minimum refunds in full and recovers nothing — unless the owner switches it on', async () => {
+  settings.forget();
+  const off = await anEvent({ destination: true, min: 5, decidesInHours: -1, guests: [{ heads: 2, charged: 4000 }] });
+  await engine.decideDue();
+  await engine.processRefunds({ status: () => ({ ready: true }), refund: async () => ({ id: 're_m' }) });
+  assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [off.bookings[0].id])).rows[0].n, 0, 'off by default');
+  await query(`update hosting_settings set value = 'true' where key = 'recovery_on_minimum'`);
+  settings.forget();
+  try {
+    const on = await anEvent({ destination: true, min: 5, decidesInHours: -1, guests: [{ heads: 2, charged: 4000 }] });
+    await engine.decideDue();
+    await engine.processRefunds({ status: () => ({ ready: true }), refund: async () => ({ id: 're_m2' }) });
+    const { rows: [rec] } = await query(`select amount_pence, triggered_by from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [on.bookings[0].id]);
+    assert.deepEqual([rec.amount_pence, rec.triggered_by], [200, 'epic']);
+  } finally { await query(`update hosting_settings set value = 'false' where key = 'recovery_on_minimum'`); settings.forget(); }
 });

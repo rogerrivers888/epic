@@ -104,8 +104,20 @@ export function childAge(k, onDate) {
  * left to refund. Returns `{ pence, cause, words }` or `{ pence: null, ... }`
  * when the terms are unknown and a person must decide.
  */
-export function cancelQuote({ booking, lane, sessions, losing, now = new Date(), terms }) {
-  const left = Math.max(0, Number(booking.charged_pence ?? 0) - Number(booking.refunded_pence ?? 0));
+export function cancelQuote({ booking, lane, sessions, losing, now = new Date(), terms, feePct = null }) {
+  const q = cancelQuoteWithoutFee({ booking, lane, sessions, losing, now, terms });
+  // The cancellation fee (register L5): kept from what the guest would otherwise get back in full — never from a part
+  // refund, never when the host moved the date, never when there is nothing to give back.
+  const pct = Number(feePct);
+  const full = q.fullPence ?? 0;
+  if (!(pct > 0) || q.pence == null || !full) return { ...q, feeKeptPence: 0 };
+  const fee = Math.min(full, Math.round((full * pct) / 100));
+  return { ...q, pence: q.pence - fee, feeKeptPence: fee, words: q.words ?? `A ${pct}% cancellation fee is kept.` };
+}
+
+/** The quote before any cancellation fee; `fullPence` is the part that was refunded in full because the guest cancelled. */
+function cancelQuoteWithoutFee({ booking, lane, sessions, losing, now = new Date(), terms }) {
+  const left = Math.max(0, Number(booking.charged_pence ?? 0) - Number(booking.refunded_pence ?? 0) - Number(booking.cancellation_fee_pence ?? 0));
   if (booking.request_state === 'asked') return { pence: 0, cause: 'declined', release: true, words: 'Your card hold is released.' };
   if (!['charged', 'partially_refunded'].includes(booking.payment_state) || !left) return { pence: 0, cause: 'guest_cancelled', words: null };
   const lose = sessions.filter((s) => losing.includes(s.id));
@@ -121,22 +133,31 @@ export function cancelQuote({ booking, lane, sessions, losing, now = new Date(),
     if (lane === 'course' && first && first.startsAt <= now) return { pence: 0, cause: 'guest_cancelled', words: 'The course has started: no refund.' };
     const r = refundFor({ policy: booking.refund_policy, paidPence: share, hoursBefore: (first.startsAt.getTime() - now.getTime()) / 3_600_000, cause: 'guest_cancelled' }, s);
     if (r == null) return { pence: null, cause: 'guest_cancelled', words: 'Epic will look at this one and come back to you.' };
-    return { pence: Math.min(left, r), cause: 'guest_cancelled', words: null };
+    const pence = Math.min(left, r);
+    return { pence, cause: 'guest_cancelled', words: null, fullPence: r >= share ? pence : 0 };
   }
   // Weekly and On request: each session on its own — its own share (the odd pence on the last, so nothing is lost),
   // its own window, and a full refund only for a session the host moved (Codex, 2 Oct 2026).
   const each = Math.floor(share / Math.max(1, lose.length));
   let pence = 0;
   let moved = 0;
+  let fullPence = 0;
+  let movedPence = 0;
   lose.forEach((x, i) => { x.part = i === lose.length - 1 ? share - each * (lose.length - 1) : each; });
   for (const x of lose) {
-    if (x.movedAfterBooking) { pence += x.part; moved += 1; continue; }
+    if (x.movedAfterBooking) { pence += x.part; movedPence += x.part; moved += 1; continue; }
     const r = refundFor({ policy: booking.refund_policy, paidPence: x.part, hoursBefore: (x.startsAt.getTime() - now.getTime()) / 3_600_000, cause: 'guest_cancelled' }, s);
     if (r == null) return { pence: null, cause: 'guest_cancelled', words: 'Epic will look at this one and come back to you.' };
     pence += r;
+    // A session given up in time for all of it back: that part carries the cancellation fee.
+    if (r >= x.part) fullPence += r;
   }
   pence = Math.min(left, pence);
-  return { pence, cause: moved === lose.length && moved ? 'date_changed' : 'guest_cancelled', words: moved === lose.length && moved ? 'The host moved the date: a full refund.' : null };
+  fullPence = Math.min(fullPence, pence);
+  const allMoved = moved === lose.length && moved > 0;
+  // A mix of sessions the host moved and sessions the guest gave up: the moved part is said apart (`movedPence`), so
+  // it becomes its own, host-caused refund line — the fee is never kept from it, and the host pays it back (owner, 3 Oct 2026).
+  return { pence, fullPence: allMoved ? 0 : fullPence, movedPence: allMoved ? 0 : Math.min(pence, movedPence), cause: allMoved ? 'date_changed' : 'guest_cancelled', words: allMoved ? 'The host moved the date: a full refund.' : null };
 }
 
 /** Answers can be changed until 24 hours before the first session still ahead (guest brief §6). */

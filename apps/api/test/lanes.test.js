@@ -140,8 +140,9 @@ test('refunds follow the policy, and a host cancelling or a call-off is always f
   assert.equal(refundPct('strict', 100), 0);
   assert.equal(refundPct('strict', 1, { hostCancelled: true }), 100);
   assert.equal(refundPct('strict', 1, { calledOff: true }), 100);
-  assert.equal(refundWords('flexible'), 'Full refund up to 24h before');
-  assert.equal(refundWords('moderate'), 'Full refund up to 5 days before');
+  // The cancellation fee is said before anybody books (L5).
+  assert.equal(refundWords('flexible'), 'Full refund less a 5% cancellation fee up to 24h before');
+  assert.equal(refundWords('moderate'), 'Full refund less a 5% cancellation fee up to 5 days before');
   assert.equal(refundWords('strict'), '50% up to 7 days before, none after');
 });
 

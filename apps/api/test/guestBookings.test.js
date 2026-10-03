@@ -35,17 +35,24 @@ const fake = http.createServer((req, res) => {
       intents.set(pi.id, pi);
       return json(pi);
     }
-    const m = /^\/v1\/payment_intents\/([^/]+)(\/(capture|cancel))?$/.exec(req.url);
+    // The host's share of a cancelled amount, taken back from their balance when the fee is kept (L5).
+    const rev = /^\/v1\/transfers\/([^/]+)\/reversals$/.exec(req.url);
+    if (rev && req.method === 'POST') return json({ id: `trr_${calls.length}`, object: 'transfer_reversal', amount: Number(form.get('amount')), transfer: rev[1] });
+    const m = /^\/v1\/payment_intents\/([^/?]+)(\/(capture|cancel))?(\?.*)?$/.exec(req.url);
     if (m) {
       const pi = intents.get(m[1]);
       if (!pi) return json({ error: { code: 'resource_missing' } }, 404);
       if (m[3] === 'capture') { pi.status = 'succeeded'; pi.amount_received = pi.amount; }
       if (m[3] === 'cancel') pi.status = 'canceled';
+      // Read back with its charge: the charge's transfer to the host is what a kept fee reverses.
+      if (m[4] && m[4].includes('latest_charge')) return json({ ...pi, latest_charge: { id: `ch_${pi.id}`, transfer: `tr_${pi.id}` } });
       return json(pi);
     }
     if (req.url === '/v1/refunds' && req.method === 'POST') {
-      // A refund of a destination charge comes back out of the host's balance, and Epic's fee in proportion (K11).
-      if (form.get('reverse_transfer') !== 'true' || form.get('refund_application_fee') !== 'true') return json({ error: { code: 'l1_refund_from_platform' } }, 400);
+      // A refund of a destination charge comes back out of the host's balance, and Epic's fee in proportion (K11) —
+      // except a guest's own cancellation that keeps the fee (L5), whose host share comes back by a reversal instead.
+      const keepsFee = form.get('metadata[epic_cause]') === 'guest_cancelled' && form.get('reverse_transfer') == null;
+      if (!keepsFee && (form.get('reverse_transfer') !== 'true' || form.get('refund_application_fee') !== 'true')) return json({ error: { code: 'l1_refund_from_platform' } }, 400);
       return json({ id: `re_${calls.length}`, object: 'refund', status: 'succeeded', amount: Number(form.get('amount')) });
     }
     return json({ error: { code: 'not_found' } }, 404);
@@ -254,7 +261,7 @@ test('cancelling: the policy agreed at booking, a full refund after a date chang
   try {
     const id = await paidBooking(srv, flex.o, { kind: 'whole' });
     const quote = await srv.get(`/api/booked/${id}/cancel-quote`);
-    assert.equal(quote.body.pence, 4000, 'flexible, five days out: everything');
+    assert.equal(quote.body.pence, 3800, 'flexible, five days out: everything back less the 5% cancellation fee (L5)');
     // Inside a day: nothing.
     const soon = new Date(Date.now() + 5 * 3_600_000);
     await query(`update offer_sessions set on_date = $2, starts_at = $3, ends_at = null where offer_id = $1`, [flex.o.id, localDay(soon, 'Europe/London'), soon.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })]);
@@ -284,7 +291,7 @@ test('cancelling: the policy agreed at booking, a full refund after a date chang
     const ids = weekly.sessions.map((s) => s.id);
     const id = await paidBooking(srv2, weekly.o, { kind: 'book_ahead', sessionIds: ids });
     const one = await srv2.send('POST', `/api/booked/${id}/cancel`, { sessionIds: [ids[3]] });
-    assert.deepEqual([one.body.refundPence, one.body.whole], [1000, false], 'one session of four: its share');
+    assert.deepEqual([one.body.refundPence, one.body.whole], [950, false], 'one session of four: its share, less the 5% cancellation fee (L5)');
   } finally { await srv2.close(); }
 });
 

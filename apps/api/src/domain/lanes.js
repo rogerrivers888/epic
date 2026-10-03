@@ -66,6 +66,9 @@ export const DEFAULT_CONFIG = Object.freeze({
     { pct: 15, ratedEvents: 5, avgAtLeast: 4.5 },
     { pct: 10, ratedEvents: 10, avgAtLeast: 4.8 },
   ],
+  // Kept by Epic from a guest's cancellation that would otherwise be a full refund, and recovered from a host who
+  // causes one (register L5). A setting; 5% unless the owner changes it.
+  cancellationFeePct: 5,
   refunds: {
     flexible: { fullHoursBefore: 24 },
     moderate: { fullHoursBefore: 120 },
@@ -393,7 +396,9 @@ export function refundWords(policy, cfg = DEFAULT_CONFIG) {
   const t = cfg.refunds[policy];
   if (!t) return null;
   const span = (h) => (h % 24 === 0 && h >= 48 ? `${h / 24} days` : `${h}h`);
-  if (t.fullHoursBefore != null) return `Full refund up to ${span(t.fullHoursBefore)} before`;
+  // The cancellation fee is said before anybody books (L5).
+  const fee = Number(cfg.cancellationFeePct ?? 0);
+  if (t.fullHoursBefore != null) return `Full refund${fee > 0 ? ` less a ${fee}% cancellation fee` : ''} up to ${span(t.fullHoursBefore)} before`;
   return `${t.partPct}% up to ${span(t.partHoursBefore)} before, none after`;
 }
 

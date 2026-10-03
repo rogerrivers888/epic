@@ -555,3 +555,22 @@ test('Codex: an older account Stripe won’t let Epic read is marked closed for 
   assert.equal((await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'stripe_account_trouble'`, [h.id])).rows[0].after.reason, 'account_closed');
   assert.equal((await money.refreshAccountFacts({ limit: 1000, status: () => ({ ready: true }), read: async () => { throw new Error('not again'); } })).refreshed, 0);
 });
+
+test('L5: a payout never takes the balance a host owes Epic back from — it waits until both fit', async () => {
+  settings.forget();
+  const status = () => ({ ready: true, mode: 'test' });
+  const a = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  await query(
+    `insert into hosting_payments (kind, host_id, amount_pence, state, mode, cause, idem_key) values ('host_recovery', $1, 500, 'pending', 'test', 'host_cancelled', $2)`,
+    [a.host.id, `recovery:test:${a.host.id}`],
+  );
+  const asked = [];
+  const payout = async (x) => { if (x.hostId === a.host.id) asked.push(x.amountPence); return { id: `po_r_${asked.length}` }; };
+  const row = async () => (await query('select state from host_payouts where session_id = $1', [a.sessions[0].id])).rows[0].state;
+  await money.releasePayouts({ payout, balance: async () => ({ availablePence: 8200 }), status });
+  assert.deepEqual([asked.length, await row()], [0, 'released'], '£82 there, £80 to pay out and £5 owed: it waits');
+  await query(`update host_payouts set updated_at = now() - interval '1 hour' where session_id = $1`, [a.sessions[0].id]);
+  await money.releasePayouts({ payout, balance: async () => ({ availablePence: 9000 }), status });
+  assert.deepEqual([asked, await row()], [[8000], 'paid']);
+});

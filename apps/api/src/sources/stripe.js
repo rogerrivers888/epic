@@ -452,17 +452,44 @@ export function cancelPayment(id, { householdId, idempotencyKey }) {
  * nought, a part refund leaves each with the same share of what is kept.
  * `cause` is Epic's own word for why, kept in Stripe's metadata.
  */
-export function refundBody({ paymentIntentId, amountPence, cause, bookingId, destination = true }) {
+export function refundBody({ paymentIntentId, amountPence, cause, bookingId, destination = true, keepFee = false }) {
   return {
     payment_intent: paymentIntentId, amount: amountPence,
-    // A payment from before L1 (charged on Epic's own balance) has no transfer or fee to unwind.
-    ...(destination ? { reverse_transfer: true, refund_application_fee: true } : {}),
+    // A payment from before L1 (charged on Epic's own balance) has no transfer or fee to unwind. A refund that keeps
+    // the cancellation fee unwinds the host's share explicitly instead (reverseHostShare), so neither is set (L5).
+    ...(destination && !keepFee ? { reverse_transfer: true, refund_application_fee: true } : {}),
     metadata: { epic_kind: 'refund', epic_booking_id: bookingId, epic_cause: cause },
   };
 }
 
-export function refund({ paymentIntentId, amountPence, cause, bookingId, householdId, idempotencyKey, destination = true }) {
-  return call('POST', '/refunds', refundBody({ paymentIntentId, amountPence, cause, bookingId, destination }), { householdId, purpose: 'booking.refund', idempotencyKey });
+export function refund({ paymentIntentId, amountPence, cause, bookingId, householdId, idempotencyKey, destination = true, keepFee = false }) {
+  return call('POST', '/refunds', refundBody({ paymentIntentId, amountPence, cause, bookingId, destination, keepFee }), { householdId, purpose: 'booking.refund', idempotencyKey });
+}
+
+/**
+ * The cancellation fee's other half (L5): after refunding the guest the cancelled amount less the fee, the host's
+ * whole share of the cancelled amount comes back from their balance — a reversal of the charge's transfer by that
+ * amount. Epic then holds exactly the fee (sandbox, 3 Oct 2026: £60 cancelled, £57 back, £51 reversed, Epic £3).
+ */
+export async function reverseHostShare({ paymentIntentId, amountPence, householdId, idempotencyKey, refundId }) {
+  const pi = await call('GET', `/payment_intents/${encodeURIComponent(paymentIntentId)}`, { expand: ['latest_charge'] }, { householdId, purpose: 'booking.read' });
+  const transfer = pi?.latest_charge?.transfer;
+  if (!transfer) throw Object.assign(new Error('Stripe hasn’t made the transfer for this payment yet.'), { status: 503, code: 'stripe_unreachable', detail: 'no_transfer_yet' });
+  return call('POST', `/transfers/${encodeURIComponent(typeof transfer === 'string' ? transfer : transfer.id)}/reversals`, {
+    amount: amountPence, metadata: { epic_kind: 'cancellation_fee', epic_refund: refundId ?? null },
+  }, { householdId, purpose: 'booking.refund.host_share', idempotencyKey });
+}
+
+/**
+ * Recovering the fee from a host (L5): an account debit, taking it from their own Stripe balance to Epic's. Needs
+ * the host's consent in the host terms (legal pack), and never takes a balance below nought — the caller checks.
+ */
+export function accountDebit({ accountId, amountPence, householdId, idempotencyKey, recoveryId }) {
+  if (!/^acct_/.test(String(accountId ?? ''))) throw Object.assign(new Error('This host has no Stripe account.'), { status: 409, code: 'host_not_ready' });
+  return call('POST', '/charges', {
+    amount: amountPence, currency: 'gbp', source: accountId,
+    metadata: { epic_kind: 'host_recovery', epic_recovery_id: recoveryId },
+  }, { householdId, purpose: 'host.recovery', idempotencyKey });
 }
 
 export function retrieveRefund(id, { householdId } = {}) {
@@ -511,6 +538,8 @@ export function stripeView(obj) {
     case 'payment_intent': return { amountPence: obj.amount_received ?? 0, ok: obj.status === 'succeeded', held: obj.status === 'requires_capture' };
     case 'refund': return { amountPence: obj.amount ?? 0, ok: obj.status === 'succeeded' };
     case 'payout': return { amountPence: obj.amount ?? 0, ok: ['paid', 'in_transit', 'pending'].includes(obj.status) };
+    // A host recovery: an account debit, which Stripe answers as a charge (py_).
+    case 'charge': return { amountPence: (obj.amount ?? 0) - (obj.amount_refunded ?? 0), ok: obj.status === 'succeeded' };
     case 'checkout.session': return { amountPence: obj.amount_total ?? 0, ok: obj.payment_status === 'paid' };
     default: return null;
   }
@@ -527,6 +556,7 @@ export function retrieveRef(ref, { householdId, accountId = null } = {}) {
   if (r.startsWith('pi_')) return retrievePaymentIntent(r, { householdId });
   if (r.startsWith('re_')) return retrieveRefund(r, { householdId });
   if (r.startsWith('po_')) return accountId ? retrievePayout(r, { accountId, householdId }) : null;
+  if (r.startsWith('py_')) return call('GET', `/charges/${encodeURIComponent(r)}`, null, { householdId, purpose: 'host.recovery.read' });
   if (r.startsWith('cs_')) return retrieveCheckout(r, { householdId });
   return null;
 }

@@ -114,7 +114,9 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
       // Is the money there to pay out yet? Asked first, so Stripe is not asked for a Payout it would refuse — a
       // refusal it would then remember under this payout's key (Codex, 3 Oct 2026). Can't tell: ask anyway.
       const held = await balance(p.stripe_account_id, { householdId: p.household_id }).catch(() => null);
-      if (held && held.availablePence < amount) { out.waiting += 1; continue; }
+      // Not more than is there — and not the part of it the host owes Epic back (a cancellation fee, L5), which is
+      // collected first (processRecoveries) and would otherwise be paid out from under it.
+      if (held && held.availablePence < amount + Number(p.recovery_owed ?? 0)) { out.waiting += 1; continue; }
       po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: payoutKey(claimed) });
     } catch (err) {
       // Stripe unreachable — or a reply lost after Stripe accepted it: the payout stays released, and the next
@@ -155,6 +157,33 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
       // same key and Stripe answers with this same Payout.
       console.error(`epic-api: payout ${p.id} made at Stripe (${po.id}) but not recorded — ${err.code ?? err.message}; it will be read back next run`);
       out.waiting += 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * Collect what hosts owe back (register L5): the cancellation fee on a refund they caused, taken from their own
+ * Stripe balance by account debit — only when the balance holds it (a debit never takes it below nought), so it
+ * waits otherwise, and payouts wait behind it. Each recovery carries its own key, so a retry is the same debit.
+ * Waiting ones show as "host recovery waiting" in the back office (Phase 7 log).
+ */
+export async function processRecoveries({ status = stripe.stripeStatus, balance = stripe.hostBalance, debit = stripe.accountDebit } = {}) {
+  const out = { recovered: 0, waiting: 0, failed: 0 };
+  if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
+  for (const x of await ledger.recoveriesDue()) {
+    if (!x.stripe_account_id || x.stripe_account_model !== 'v2') { out.waiting += 1; continue; }
+    try {
+      const b = await balance(x.stripe_account_id, { householdId: x.host_household });
+      if (b.availablePence < x.amount_pence) { out.waiting += 1; continue; }
+      const py = await debit({ accountId: x.stripe_account_id, amountPence: x.amount_pence, householdId: x.host_household, idempotencyKey: x.idem_key, recoveryId: x.id });
+      await query(`update hosting_payments set state = 'succeeded', stripe_ref = $2, updated_at = now() where id = $1 and state = 'pending'`, [x.id, py.id]);
+      out.recovered += 1;
+    } catch (err) {
+      if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
+      await query(`update hosting_payments set state = 'failed', reason = $2, updated_at = now() where id = $1 and state = 'pending'`, [x.id, String(err.detail ?? err.code ?? 'failed').slice(0, 80)]);
+      console.error(`epic-api: host recovery ${x.id} failed — ${err.detail ?? err.code ?? err.message}`);
+      out.failed += 1;
     }
   }
   return out;
@@ -270,6 +299,8 @@ export async function moneyTick({ now = new Date() } = {}) {
   await decideDue({ now });
   await processRefunds();
   await refreshAccountFacts().catch((err) => console.error(`epic-api: account facts refresh — ${err.message}`));
+  // What hosts owe back is collected before anything is paid out to them (L5).
+  await processRecoveries().catch((err) => console.error(`epic-api: host recoveries — ${err.message}`));
   await schedulePayouts({ now });
   const released = await releasePayouts({ now });
   const last = await ledger.lastReconciliation().catch(() => null);

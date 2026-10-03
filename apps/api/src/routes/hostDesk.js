@@ -115,7 +115,7 @@ function sessionCard(o, s, now) {
  */
 async function sharesOf(hostId) {
   const { rows } = await query(
-    `select b.id, b.offer_id, b.charged_pence, b.refunded_pence, b.host_pence, b.fee_pence, b.fee_rate_pct, b.fee_reason, b.value_pence,
+    `select b.id, b.offer_id, b.charged_pence, b.refunded_pence, b.cancellation_fee_pence, b.host_pence, b.fee_pence, b.fee_rate_pct, b.fee_reason, b.value_pence,
             b.via_host_link, b.source, b.created_at, b.household_id,
             o.title, o.time_zone,
             array(select bs.session_id::text from booking_sessions bs where bs.booking_id = b.id and bs.state in ('booked', 'forfeited')) as session_ids
@@ -367,7 +367,7 @@ async function atRiskEvents(offers, now, { days = 14 } = {}) {
       const decides = new Date(first.decides_at);
       if (decides < now || decides - now > days * 86_400_000 || first.booked >= min) continue;
       const { rows: [paid] } = await query(
-        `select coalesce(sum(b.charged_pence - b.refunded_pence), 0)::int as pence, count(*)::int as n
+        `select coalesce(sum(b.charged_pence - b.refunded_pence - b.cancellation_fee_pence), 0)::int as pence, count(*)::int as n
            from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
           where bs.session_id = $1 and bs.state = 'booked' and b.state in ('pending', 'confirmed') and b.payment_state in ('charged', 'partially_refunded')`,
         [first.id],
@@ -574,7 +574,7 @@ router.get('/host/desk/events/:id', async (req, res, next) => {
         // "You get" booking by booking, each at its own rate (Codex, 2 Oct 2026).
         `select coalesce(sum(b.value_pence), 0)::int as booked, coalesce(sum(b.fee_pence), 0)::int as fee,
                 coalesce(sum(b.refunded_pence), 0)::int as refunds, coalesce(sum(b.host_pence), 0)::int as host,
-                coalesce(sum(floor(b.host_pence::numeric * greatest(0, b.charged_pence - b.refunded_pence) / nullif(b.charged_pence, 0))), 0)::int as you_get
+                coalesce(sum(floor(b.host_pence::numeric * greatest(0, b.charged_pence - b.refunded_pence - b.cancellation_fee_pence) / nullif(b.charged_pence, 0))), 0)::int as you_get
            from experience_bookings b where b.offer_id = $1 and b.payment_state in ('charged', 'partially_refunded', 'refunded')`, [o.id],
       );
       const { rows: payouts } = await query(`select amount_pence, tips_pence, release_at, state from host_payouts where offer_id = $1 order by release_at`, [o.id]);

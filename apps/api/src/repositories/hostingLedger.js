@@ -45,7 +45,8 @@ export function bookingHostShare(b) {
   const charged = Number(b.charged_pence ?? 0);
   const host = Number(b.host_pence ?? 0);
   if (!charged || !host) return 0;
-  const kept = Math.max(0, charged - Number(b.refunded_pence ?? 0));
+  // A cancellation fee kept by Epic (L5) is no more the host's than a refund is.
+  const kept = Math.max(0, charged - Number(b.refunded_pence ?? 0) - Number(b.cancellation_fee_pence ?? 0));
   return Math.floor((host * kept) / charged);
 }
 
@@ -92,7 +93,7 @@ export async function sessionsEndedWithoutPayout({ now = new Date(), limit = 200
 export async function paidBookingsOfSession(sessionId, client = null) {
   const q = client ? (t, p) => client.query(t, p) : query;
   const { rows } = await q(
-    `select b.id, b.charged_pence, b.refunded_pence, b.host_pence, b.confirmed_happened,
+    `select b.id, b.charged_pence, b.refunded_pence, b.cancellation_fee_pence, b.host_pence, b.confirmed_happened,
             array(select bs2.session_id::text from booking_sessions bs2 where bs2.booking_id = b.id and bs2.state in ('booked', 'forfeited')) as session_ids
        from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
       where bs.session_id = $1 and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded')
@@ -150,6 +151,8 @@ export async function payoutsDue({ now = new Date(), limit = 100 } = {}) {
             ((coalesce(s.ends_on, s.on_date) + coalesce(s.ends_at, s.starts_at, time '23:59'))
                at time zone coalesce(o.time_zone, 'Europe/London')) as session_ends_at,
             exists (select 1 from hosting_complaints k where k.session_id = p.session_id and k.state = 'open') as complaint_open,
+            -- What the host owes Epic back (cancellation fees, L5): a payout never takes the balance it is owed from.
+            (select coalesce(sum(x.amount_pence), 0) from hosting_payments x where x.kind = 'host_recovery' and x.state = 'pending' and x.voided_at is null and x.host_id = p.host_id)::int as recovery_owed,
             exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                      where bs.session_id = p.session_id and b.dispute_state = 'open') as dispute_open,
             exists (select 1 from jsonb_array_elements(p.lines) l join experience_bookings b on b.id = (l->>'bookingId')::uuid
@@ -238,6 +241,17 @@ export async function finishPayout(id, { state, stripePayout = null, mode = 'tes
  * cleared): the payout stays released, and its next try is a new attempt with a
  * new key, so a cleared balance is never met with the old refusal replayed.
  */
+/** Fees owed back by hosts (L5), oldest first, with the host's account. */
+export async function recoveriesDue({ limit = 50 } = {}) {
+  const { rows } = await query(
+    `select x.*, h.stripe_account_id, h.stripe_account_model, h.household_id as host_household
+       from hosting_payments x join hosts h on h.id = x.host_id
+      where x.kind = 'host_recovery' and x.state = 'pending' and x.voided_at is null and x.idem_key is not null
+      order by x.created_at limit $1`, [limit],
+  );
+  return rows;
+}
+
 export async function nextAttempt(id) {
   const { rows: [row] } = await query(`update host_payouts set attempt = attempt + 1, updated_at = now() where id = $1 and state = 'released' returning *`, [id]);
   return row ?? null;

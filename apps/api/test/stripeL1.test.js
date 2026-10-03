@@ -37,19 +37,21 @@ test('L1: a guest’s payment is a destination charge to the host’s own accoun
 });
 
 test('L1: nothing in the server can make a Stripe transfer — no separate charges and transfers, ever', () => {
+  // Every Stripe call goes through sources/stripe.js; nothing else talks to Stripe directly.
   const offenders = [];
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith('.js')) {
-        const text = fs.readFileSync(p, 'utf8');
-        if (/['"`]\/(v1\/)?transfers['"`/]/.test(text)) offenders.push(path.relative(SRC, p));
-      }
+      else if (e.name.endsWith('.js') && p !== path.join(SRC, 'sources', 'stripe.js') && /api\.stripe\.com/.test(fs.readFileSync(p, 'utf8'))) offenders.push(path.relative(SRC, p));
     }
   };
   walk(SRC);
-  assert.deepEqual(offenders, [], 'a call to Stripe’s /transfers would pass guest money through Epic’s balance');
+  assert.deepEqual(offenders, [], 'only stripe.js talks to Stripe');
+  // In stripe.js, /transfers appears only as a reversal: taking a host's share of a cancelled amount back when the
+  // cancellation fee is kept (L5). Creating a transfer would pass guest money through Epic's balance.
+  const lines = fs.readFileSync(path.join(SRC, 'sources', 'stripe.js'), 'utf8').split('\n').filter((l) => /['"`]\/transfers/.test(l));
+  assert.deepEqual(lines.filter((l) => !/\/reversals[`'"]/.test(l)), [], 'no transfer is ever created');
   assert.equal(typeof stripe.transfer, 'undefined', 'and stripe.js has no transfer to call');
 });
 

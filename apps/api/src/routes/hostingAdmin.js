@@ -502,7 +502,7 @@ router.get('/events/:id', requires('view_hosting'), async (req, res, next) => {
          from offer_sessions s where s.offer_id = $1 order by s.on_date, s.starts_at`, [o.id],
     );
     const { rows: refunds } = await query(
-      `select p.amount_pence, p.cause, p.state, p.stripe_ref, p.stripe_match, p.created_at, hh.name as household, hh.id as household_id, b.heads, b.id as booking_id
+      `select p.amount_pence, p.fee_kept_pence, p.triggered_by, p.cause, p.state, p.stripe_ref, p.stripe_match, p.created_at, hh.name as household, hh.id as household_id, b.heads, b.id as booking_id
          from hosting_payments p join experience_bookings b on b.id = p.booking_id join households hh on hh.id = b.household_id
         where p.offer_id = $1 and p.kind in ('refund', 'release') order by p.created_at`, [o.id],
     );
@@ -515,7 +515,7 @@ router.get('/events/:id', requires('view_hosting'), async (req, res, next) => {
       numbers,
       hostIsPaid: typeof s.payout_release === 'number' ? { hours: s.payout_release, earlyOnConfirm: s.payout_early_on_confirm === true } : null,
       sessions: sessions.map((x) => ({ id: x.id, n: x.n, date: ymd(x.on_date), time: hm(x.starts_at), booked: x.booked, state: x.state, decided: x.decided_outcome, decidesAt: x.decides_at, confirmedBy: x.confirmed_by, payout: x.payout_state ?? null, payoutId: x.payout_id ?? null, late: x.late })),
-      refunds: refunds.map((r) => ({ booking: r.booking_id.slice(0, 8), bookingId: r.booking_id, household: r.household, householdId: r.household_id, heads: r.heads, pence: r.amount_pence, cause: r.cause, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null, at: r.created_at })),
+      refunds: refunds.map((r) => ({ booking: r.booking_id.slice(0, 8), bookingId: r.booking_id, household: r.household, householdId: r.household_id, heads: r.heads, pence: r.amount_pence, feeKeptPence: r.fee_kept_pence ?? 0, triggeredBy: r.triggered_by ?? null, cause: r.cause, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null, at: r.created_at })),
     });
   } catch (err) { next(err); }
 });

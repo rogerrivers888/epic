@@ -508,7 +508,7 @@ export async function applyPaymentIntent(pi) {
       // Stripe answered before our own ledger row was written: write it now, already succeeded; the later write is then a no-op (Codex, 2 Oct 2026).
       if (!ledgered) await ledger.record({ kind: 'charge', bookingId: charged.id, offerId: charged.offer_id, hostId: charged.host_id, householdId: charged.household_id, amountPence: charged.charged_pence, epicPence: charged.fee_pence, hostPence: charged.host_pence, bookingValuePence: charged.value_pence, ratePct: charged.fee_rate_pct, state: 'succeeded', stripeRef: pi.id, mode: 'test', reason: charged.fee_reason }, c);
       if (charged.state === 'cancelled') {
-        await owe(c, charged, { amountPence: charged.charged_pence, cause: 'paid_after_cancel', key: `paid_after_cancel:${b.id}`, wholeBooking: true });
+        await owe(c, charged, { amountPence: charged.charged_pence, cause: 'paid_after_cancel', key: `paid_after_cancel:${b.id}`, wholeBooking: true, triggeredBy: 'epic' });
         return 'refunded';
       }
       return 'confirmed';
@@ -976,7 +976,7 @@ router.get('/booked/:id', async (req, res, next) => {
     const o = await repo.offerById(b.offer_id);
     const host = await repo.hostById(b.host_id);
     const { rows: kids } = await query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1 order by created_at', [b.id]);
-    const { rows: refunds } = await query(`select amount_pence, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
+    const { rows: refunds } = await query(`select amount_pence, fee_kept_pence, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
     const live = b.sessionsList.filter((x) => x.held === 'booked' && x.state === 'scheduled');
     const firstAhead = live.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     const lastEnd = b.sessionsList.length ? new Date(Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime()))) : null;
@@ -1007,7 +1007,7 @@ router.get('/booked/:id', async (req, res, next) => {
         goingAhead: o.min_count ? { min: o.min_count, booked: b.cancel_cause === 'called_off' ? (b.sessionsList[0]?.booked_at_decision ?? 0) : live[0]?.booked ?? 0, decidesOn: decides ? localDay(new Date(decides.decides_at), tzOf(o)) : null, outcome: decides?.decided_outcome ?? null } : null,
         numbers: settlement,
         dateChange: changed.some((x) => !b.change_seen_at || new Date(x.changed_from.at) > new Date(b.change_seen_at)) ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
-        money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy, refunds: refunds.map((r) => ({ pence: r.amount_pence, cause: r.cause, state: r.state, at: r.created_at })) },
+        money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy, refunds: refunds.map((r) => ({ pence: r.amount_pence, feeKeptPence: r.fee_kept_pence ?? 0, cause: r.cause, state: r.state, at: r.created_at })) },
         // The fee rule as the server will charge it, so the screen never shows a different one (Codex, 3 Oct 2026).
         after: lastEnd && lastEnd <= now ? { happened: b.confirmed_happened ?? null, rated: Boolean(b.rated_at), tipOpen: tipOpen(lastEnd, now), tipFee: await tipFeeRule() } : null,
         dropOff: o.parents === 'drop_off',
@@ -1041,7 +1041,7 @@ async function quoteFor(b, o, sessionIds, now = new Date()) {
   const forfeited = held.filter((x) => x.held === 'forfeited').length;
   const q = o.lane === 'course' && everStarted
     ? { pence: 0, cause: 'guest_cancelled', words: 'The course has started: no refund.' }
-    : cancelQuote({ booking: { ...b, all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms });
+    : cancelQuote({ booking: { ...b, all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms, feePct: typeof s.cancellation_fee_pct === 'number' ? s.cancellation_fee_pct : null });
   return { ...q, losing, liveCount: live.length };
 }
 
@@ -1089,13 +1089,21 @@ export async function cancelBooking({ bookingId, household, account, sessionIds 
         // payout counts it; the place itself is free again either way (Codex, 2 Oct 2026). What was due is
         // read before the refund is written, so a part refund still leaves the rest forfeited.
         const { rows: [{ n: allN }] } = await c.query('select count(*)::int as n from booking_sessions where booking_id = $1', [b.id]);
-        const due = whole ? Math.max(0, Number(b.charged_pence ?? 0) - Number(b.refunded_pence ?? 0)) : Math.floor((Number(b.charged_pence ?? 0) * q.losing.length) / Math.max(1, allN));
-        if (q.pence > 0) await owe(c, b, { amountPence: q.pence, cause: q.cause, key: `guest_cancel:${b.id}:${[...q.losing].sort().join(',')}`, wholeBooking: whole });
-        const kept = ['charged', 'partially_refunded'].includes(b.payment_state) && q.pence < due;
+        const due = whole ? Math.max(0, Number(b.charged_pence ?? 0) - Number(b.refunded_pence ?? 0) - Number(b.cancellation_fee_pence ?? 0)) : Math.floor((Number(b.charged_pence ?? 0) * q.losing.length) / Math.max(1, allN));
+        const key = `guest_cancel:${b.id}:${[...q.losing].sort().join(',')}`;
+        // Sessions the host moved are their own, host-caused line (no fee kept; the host pays the fee back); the rest
+        // is the guest's own cancellation, less the cancellation fee where it would otherwise be all back (L5).
+        const moved = Math.max(0, Number(q.movedPence ?? 0));
+        if (moved > 0) await owe(c, b, { amountPence: moved, cause: 'date_changed', key: `${key}:moved`, triggeredBy: 'guest' });
+        if (q.pence - moved > 0 || q.feeKeptPence > 0) {
+          await owe(c, b, { amountPence: q.pence - moved, cause: q.cause, key, wholeBooking: whole, feeKeptPence: q.cause === 'guest_cancelled' ? q.feeKeptPence : 0, triggeredBy: 'guest' });
+        }
+        // Money the policy keeps is the host's (forfeited); a cancellation fee is Epic's and is not.
+        const kept = ['charged', 'partially_refunded'].includes(b.payment_state) && q.pence + (q.feeKeptPence ?? 0) < due;
         await c.query(`update booking_sessions set state = $3 where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, q.losing, kept ? 'forfeited' : 'cancelled']);
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'guest', cancel_cause = $2 where id = $1`, [b.id, q.cause]);
       }
-      await logChange({ subjectKind: 'booking', subjectId: b.id, field: 'cancelled', after: { sessions: q.losing.length, refund: q.pence, cause: q.cause }, by: account?.id ?? null, byLabel: 'guest' }, c);
+      await logChange({ subjectKind: 'booking', subjectId: b.id, field: 'cancelled', after: { sessions: q.losing.length, refund: q.pence, feeKept: q.feeKeptPence ?? 0, cause: q.cause }, by: account?.id ?? null, byLabel: 'guest' }, c);
       return { refundPence: q.pence ?? 0, whole };
     });
     // A freed place goes to the waiting list straight away.
@@ -1389,7 +1397,7 @@ async function declineRequest(b, o, why) {
   const changed = await withTransaction(async (c) => {
     const { rows: [again] } = await c.query('select * from experience_bookings where id = $1 for update', [b.id]);
     if (again.request_state !== 'asked') return false;
-    await owe(c, again, { amountPence: 0, cause: why, key: `request_${why}:${b.id}`, wholeBooking: true });
+    await owe(c, again, { amountPence: 0, cause: why, key: `request_${why}:${b.id}`, wholeBooking: true, triggeredBy: (why === 'declined' ? 'host' : 'epic') });
     await c.query(`update experience_bookings set request_state = $2, state = 'cancelled', cancelled_by = $3, cancel_cause = $2 where id = $1`, [b.id, why, why === 'lapsed' ? 'epic' : 'host']);
     return true;
   });

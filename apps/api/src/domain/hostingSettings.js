@@ -95,6 +95,7 @@ export function configOverlay(m = {}) {
   if (n('private_payment_fee') != null) o.privateCollectPct = m.private_payment_fee;
   if (ladderOk(m.public_commission)) o.publicShare = m.public_commission;
   if (refundsOk(m.refund_terms)) o.refunds = m.refund_terms;
+  if (n('cancellation_fee_pct') != null) o.cancellationFeePct = m.cancellation_fee_pct;
   if (n('decides_by_default') != null) o.decidesDaysBefore = m.decides_by_default;
   if (n('weekly_session_decides') != null) o.weeklyDecidesHoursBefore = m.weekly_session_decides;
   if (n('review_window') != null) o.reviewHours = m.review_window;
