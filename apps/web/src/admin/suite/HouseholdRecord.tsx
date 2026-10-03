@@ -245,10 +245,10 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
               />
               <KvAction
                 label="Extend the current trial"
-                action={(record.accountStatus ?? record.status) === 'active' && record.monthPence === 0
+                action={record.onTrial
                   ? (trialBusy === 'extend' ? 'Extending…' : 'Extend by 30 days')
                   : 'Not on trial'}
-                done={!((record.accountStatus ?? record.status) === 'active' && record.monthPence === 0) || !!trialBusy}
+                done={!record.onTrial || !!trialBusy}
                 onPress={() => onTrial('extend')}
               />
             </>

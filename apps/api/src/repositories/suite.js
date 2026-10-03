@@ -511,7 +511,8 @@ async function households(period, classified) {
     const c = byId.get(r.id) ?? null;
     const cls = c?.cls ?? 'none';
     const status = STATUS_OF[cls];
-    const atRisk = cls === 'member_paid' && lastSeenDays != null && lastSeenDays >= 30;
+    // Nothing opened in thirty days, including never at all — as the estate count has it (Codex, 3 Oct 2026).
+    const atRisk = cls === 'member_paid' && (lastSeenDays == null || lastSeenDays >= 30);
     return {
       id: r.id,
       accountId: r.account_id,
@@ -1977,6 +1978,9 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
     statusWord: CLASS_WORDS[cls],
     // The account's own status beside the membership class: the trial controls read it (Codex, 3 Oct 2026).
     accountStatus: h.status ?? null,
+    // Whether a trial is running, from the account itself — not from what the membership is billed (Codex, 3 Oct 2026).
+    onTrial: h.plan === 'trial' && h.status === 'active',
+    trialEndsOn: h.trial_ends_on ? new Date(h.trial_ends_on).toISOString().slice(0, 10) : null,
     suspended: h.status === 'suspended',
     billed: MEMBERSHIP_BILLING,
     joined: h.joined ? new Date(h.joined).toISOString().slice(0, 10) : null,

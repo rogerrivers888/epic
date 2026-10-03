@@ -69,6 +69,9 @@ export const NOT_BILLED = 'Not billed yet';
  * anywhere in the schema yet, and inventing one from `accounts.plan` is exactly
  * the account counting this module exists to stop.
  */
+// When Stripe plugs in here, two things follow (Codex, 3 Oct 2026): lifetime spend must be summed over each
+// membership's billing periods (startedAt → endedAt), not today's price × the account's age; and a closed period's
+// stock must classify the memberships running at that period's end, so classification will need an as-of date.
 export async function billedMemberships() {
   // Stripe goes here: read the household memberships it holds and answer them in
   // the shape above, then set MEMBERSHIP_BILLING to true. Nothing else in the
