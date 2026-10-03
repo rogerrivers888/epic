@@ -92,7 +92,7 @@ export async function placeOf(typed, { fetchImpl = fetch } = {}) {
       .sort((a, b) => rank(a.local_type) - rank(b.local_type));
     const p = exact[0];
     if (!p) return null;
-    return { name: p.name_1, county: p.county_unitary ?? null, region: p.region ?? null, country: p.country ?? null, lat: p.latitude ?? null, lng: p.longitude ?? null, source: 'os-open-names' };
+    return { id: p.code ?? null, name: p.name_1, county: p.county_unitary ?? null, region: p.region ?? null, country: p.country ?? null, lat: p.latitude ?? null, lng: p.longitude ?? null, source: 'os-open-names' };
   } catch (err) {
     console.error(`epic-api: guide alert — place not looked up: ${err.message}`);
     return null;
@@ -100,3 +100,20 @@ export async function placeOf(typed, { fetchImpl = fetch } = {}) {
 }
 
 const rank = (t) => { const i = KIND_RANK.indexOf(t); return i < 0 ? KIND_RANK.length : i; };
+
+/**
+ * One spelling for one place, so an ask is one ask however it was typed: a
+ * postcode is `pc:RG1 1AA` whether or not it had a space (and whether or not
+ * the lookup answered), an outward code `oc:RG1`, a county `county:Dorset`, an
+ * Open Names place its OS id; only what could not be told falls back to the
+ * words, lowercased with the spaces closed up.
+ */
+export function placeKeyOf(typed, place) {
+  const compact = String(typed ?? '').toUpperCase().replace(/\s+/g, '');
+  const full = FULL_POSTCODE.exec(compact);
+  if (full) return `pc:${full[1]} ${full[2]}`;
+  if (OUTCODE.test(compact)) return `oc:${compact}`;
+  if (place?.source === 'county') return `county:${place.county}`;
+  if (place?.source === 'os-open-names' && place.id) return `os:${place.id}`;
+  return `typed:${keyOf(typed)}`;
+}

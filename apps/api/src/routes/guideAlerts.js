@@ -18,7 +18,7 @@ import express from 'express';
 import { readFileSync } from 'node:fs';
 import { interestEdgeLimit, interestLimit } from '../limits.js';
 import { addAlert } from '../repositories/guideAlerts.js';
-import { placeOf } from '../sources/ukPlace.js';
+import { placeKeyOf, placeOf } from '../sources/ukPlace.js';
 import { LOCALES, text } from './interest.js';
 
 /** The sentence beside each guide's tick (sources/consentWordings.json › guide), and so the guides there are. */
@@ -73,7 +73,7 @@ export function guideAlertsRouter({ lookup = placeOf } = {}) {
       if (refusal) return res.status(400).json(refusal);
 
       const place = await lookup(alert.placeTyped);
-      await addAlert({ ...alert, place });
+      await addAlert({ ...alert, place, placeKey: placeKeyOf(alert.placeTyped, place) });
       // Where it was filed, so the page can say it back; the same whether or not this was a repeat.
       return res.json({ ok: true, place: place?.name ?? null });
     } catch (err) {

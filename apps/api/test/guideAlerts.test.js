@@ -17,7 +17,7 @@ const { query, pool } = await testDatabase();
 
 const { guideAlertsRouter, readAlert, GUIDE_CONSENT } = await import('../src/routes/guideAlerts.js');
 const { demandByPlace } = await import('../src/repositories/guideAlerts.js');
-const { placeOf } = await import('../src/sources/ukPlace.js');
+const { placeOf, placeKeyOf } = await import('../src/sources/ukPlace.js');
 const { isPublicPath } = await import('../src/auth.js');
 
 const looked = [];
@@ -92,6 +92,39 @@ test('a repeat is the same 200 and one row; another place or another guide is an
   await post({ ...POTTERY, email: 'again@example.com', where: 'Bath' });
   await post({ ...POTTERY, email: 'again@example.com', subcategory: 'fossil-hunting', consentWording: GUIDE_CONSENT['fossil-hunting'] });
   assert.equal((await rowsFor('again@example.com')).length, 3);
+});
+
+test('a second ask for the same place is the latest word: its radius wins, and a lookup that failed before is filled in', async () => {
+  await post({ ...POTTERY, email: 'latest@example.com', where: 'Narnia', within: 15 });
+  PLACES.narnia = { name: 'Narnia', county: 'Lantern Waste', region: null, country: null, lat: 1, lng: 2, source: 'os-open-names' };
+  try {
+    const r = await post({ ...POTTERY, email: 'latest@example.com', where: 'narnia', within: 50 });
+    assert.deepEqual(r.body, { ok: true, place: 'Narnia' }, 'answered like a first ask');
+  } finally { delete PLACES.narnia; }
+  const rows = await rowsFor('latest@example.com');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].within_miles, 50);
+  assert.equal(rows[0].county, 'Lantern Waste');
+  // A lookup that fails the third time never erases what the second found.
+  await post({ ...POTTERY, email: 'latest@example.com', where: 'NARNIA', within: 10 });
+  const [after] = await rowsFor('latest@example.com');
+  assert.equal(after.within_miles, 10);
+  assert.equal(after.county, 'Lantern Waste');
+  // Asking again after unsubscribing is asking again.
+  await query(`update guide_alerts set unsubscribed_at = now() where email = 'latest@example.com'`);
+  await post({ ...POTTERY, email: 'latest@example.com', where: 'narnia' });
+  assert.equal((await rowsFor('latest@example.com'))[0].unsubscribed_at, null);
+});
+
+test('one postcode however it is written is one ask', async () => {
+  for (const where of ['RG1 1AA', 'rg11aa', ' Rg1  1aA ']) await post({ ...POTTERY, email: 'postcode@example.com', where });
+  const rows = await rowsFor('postcode@example.com');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].place_key, 'pc:RG1 1AA');
+  assert.equal(placeKeyOf('rg1', null), 'oc:RG1');
+  assert.equal(placeKeyOf('Dorset', { source: 'county', county: 'Dorset' }), 'county:Dorset');
+  assert.equal(placeKeyOf('Bath', { source: 'os-open-names', id: 'osgb400' }), 'os:osgb400');
+  assert.equal(placeKeyOf('  Lyme   Regis ', null), 'typed:lyme regis');
 });
 
 test('the honeypot is thanked, and nothing is stored or looked up', async () => {
