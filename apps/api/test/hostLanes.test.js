@@ -601,3 +601,41 @@ test('the older offer routes refuse a lane offer: it is sent only through its ow
     assert.equal((await query('select state, cancelled_at from host_offers where id = $1', [offer.id])).rows[0].cancelled_at, null, 'and nothing was ended');
   } finally { await srv.close(); await new Promise((r) => s.close(r)); }
 });
+
+test('L7: the passport check is tied to the host’s Stripe Person only while Stripe allows it — before the hosted form opens', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await readyHost(h, member));
+  try {
+    const host = await repo.hostByHousehold(h.id);
+    await repo.updateHost(host.id, { stripeAccountId: 'acct_test_1', stripeAccountModel: 'v2', stripePersonId: 'person_test_1' });
+    const sessions = () => calls.filter((c) => c.url === '/v1/identity/verification_sessions' && c.method === 'POST');
+    await withStripe('sk_test_fake', async () => {
+      await srv.send('POST', '/api/host/lanes/verify', { offerId: null });
+      const tied = new URLSearchParams(sessions().at(-1).body);
+      assert.deepEqual([tied.get('related_person[account]'), tied.get('related_person[person]')], ['acct_test_1', 'person_test_1']);
+      assert.equal(tied.get('options[document][allowed_types][0]'), 'passport');
+      assert.equal(tied.get('options[document][allowed_types][1]'), null, 'passport only while the licence setting is off');
+      // Once Stripe's form has been opened Stripe refuses the tie, so it isn't asked for.
+      await repo.updateHost(host.id, { identityState: 'none', identitySessionId: null, stripeLinkMadeAt: new Date() });
+      await srv.send('POST', '/api/host/lanes/verify', { offerId: null });
+      assert.equal(new URLSearchParams(sessions().at(-1).body).get('related_person[account]'), null);
+    });
+  } finally { await srv.close(); }
+});
+
+test('an account from before register L is left alone for the owner’s void, never replaced by set-up', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await readyHost(h, member));
+  try {
+    const host = await repo.hostByHousehold(h.id);
+    await repo.updateHost(host.id, { stripeAccountId: 'acct_old_1', payoutsState: 'ready' });
+    const made = () => calls.filter((c) => c.url === '/v2/core/accounts').length;
+    const before = made();
+    await withStripe('sk_test_fake', async () => {
+      const r = await srv.send('POST', '/api/host/lanes/payouts', { offerId: null });
+      assert.deepEqual([r.status, r.body.error], [409, 'old_stripe_account']);
+    });
+    assert.equal(made(), before, 'no new account made');
+    assert.equal((await repo.hostById(host.id)).stripe_account_id, 'acct_old_1', 'the old id is still there for the void to keep');
+  } finally { await srv.close(); }
+});

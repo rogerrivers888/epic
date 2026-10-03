@@ -769,9 +769,11 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
     await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-payouts:${first.id}`]);
     const host = await repo.hostById(first.id);
     const back = `${appUrl()}/host/offers/${encodeURIComponent(str(req.body?.offerId, 40) ?? '')}/publish?back=payouts`;
-    // An account from before this build (no model) took money the old way and is not used again: the host gets a
-    // new one, made the L1 way, on manual payouts (owner, 3 Oct 2026: void the old, recreate under the new model).
-    let accountId = host.stripe_account_model === 'v2' ? host.stripe_account_id : null;
+    // An account from before this build (no model) took money the old way. It is voided by the owner's own action
+    // (G7), which keeps its id; until then it is left exactly as it is, and set-up waits rather than replacing it
+    // (owner, 3 Oct 2026: void the old, recreate under the new model). Once voided, a new one is made the L1 way.
+    if (host.stripe_account_id && host.stripe_account_model !== 'v2') throw refuse(409, 'old_stripe_account', 'Payouts are being moved to a new set-up. Try again shortly.');
+    let accountId = host.stripe_account_id;
     if (!accountId) {
       const a = await stripe.createConnectAccount({
         email: account?.email, householdId: household.id, hostId: host.id,
@@ -784,6 +786,8 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
       });
     }
     const link = await stripe.accountLink({ accountId, refreshUrl: back, returnUrl: back, householdId: household.id });
+    // From here Stripe no longer lets an Identity check be tied to the account's Person (L7).
+    if (!host.stripe_link_made_at) await repo.updateHost(host.id, { stripeLinkMadeAt: new Date() });
     res.json({ url: link.url });
     } finally {
       await lockClient.query('select pg_advisory_unlock(hashtext($1))', [`host-payouts:${first.id}`]).catch(() => null);
@@ -814,7 +818,12 @@ router.post('/host/lanes/verify', async (req, res, next) => {
       if (open?.status === 'processing') return res.json({ url: null, processing: true });
     }
     const cfg = await hostingSettings.current();
-    const s = await stripe.identitySession({ returnUrl: back, hostId: host.id, householdId: household.id, allowDrivingLicence: cfg.identity_driving_licence === true });
+    // Tied to the host's Stripe Person when there is one and Stripe still allows it — before the hosted form was first
+    // opened — so the same check satisfies Stripe's own and the host is never asked for ID twice (L7). A free-event
+    // host has no account, and the check stands on its own.
+    const relatedPerson = host.stripe_account_model === 'v2' && host.stripe_account_id && host.stripe_person_id && !host.stripe_link_made_at
+      ? { account: host.stripe_account_id, person: host.stripe_person_id } : null;
+    const s = await stripe.identitySession({ returnUrl: back, hostId: host.id, householdId: household.id, relatedPerson, allowDrivingLicence: cfg.identity_driving_licence === true });
     await repo.updateHost(host.id, { identitySessionId: s.id, identityState: 'pending', stripeMode: 'test' });
     res.json({ url: s.url });
     } finally {

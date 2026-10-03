@@ -86,7 +86,7 @@ const HOST_COLUMNS = {
   dbsNumber: 'dbs_number', insuranceMediaId: 'insurance_media_id', checkedSubmittedAt: 'checked_submitted_at',
   // Payments (register L, migration 368): what Epic keeps about the host's own account — never a bank detail.
   stripePersonId: 'stripe_person_id', stripeChargesEnabled: 'stripe_charges_enabled', stripePayoutsEnabled: 'stripe_payouts_enabled',
-  stripePayoutsManual: 'stripe_payouts_manual', stripeAccountModel: 'stripe_account_model',
+  stripePayoutsManual: 'stripe_payouts_manual', stripeAccountModel: 'stripe_account_model', stripeLinkMadeAt: 'stripe_link_made_at',
 };
 const HOST_JSON = { credentials: 'credentials', languages: 'languages', childrenAges: 'children_ages', referees: 'referees', stripeRequirements: 'stripe_requirements' };
 

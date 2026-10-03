@@ -24,7 +24,10 @@ alter table hosts
   add column if not exists stripe_requirements     jsonb,
   add column if not exists stripe_payouts_manual   boolean not null default false,
   -- 'v2': made by Accounts v2 on manual payouts (this build). Null: an account from before it.
-  add column if not exists stripe_account_model    text;
+  add column if not exists stripe_account_model    text,
+  -- When Stripe's hosted form was first opened for the account. Identity can only be tied to the
+  -- account's Person before then (Stripe refuses related_person after the first link, sandbox 3 Oct 2026).
+  add column if not exists stripe_link_made_at     timestamptz;
 alter table hosts drop constraint if exists hosts_stripe_account_model_check;
 alter table hosts add constraint hosts_stripe_account_model_check check (stripe_account_model is null or stripe_account_model in ('v2'));
 
