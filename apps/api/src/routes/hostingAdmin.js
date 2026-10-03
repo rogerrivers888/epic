@@ -273,7 +273,7 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
                   or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id join host_offers xo on xo.id = x.offer_id
                               where bs.booking_id = b.id and bs.state = 'booked' and x.state = 'scheduled'
                                 and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
-              (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`, [h.id],
+              (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`, [h.id],
     );
     res.json({
       host: { id: h.id, name: h.name, town: h.location_label, photo: mediaRef(h.photo_id), since: h.created_at, paused: Boolean(h.paused), stopped: Boolean(h.stopped_at), adult: h.date_of_birth ? ageOn(h.date_of_birth) >= 18 : null },
@@ -374,7 +374,7 @@ router.post('/hosts/:id/remove', requireOwnerSignedIn('remove a host'), async (r
                   or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id join host_offers xo on xo.id = x.offer_id
                               where bs.booking_id = b.id and bs.state = 'booked' and x.state = 'scheduled'
                                 and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
-                (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`, [req.params.id],
+                (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`, [req.params.id],
       );
       if (o.bookings || o.payouts) return { refused: o };
       const { rowCount } = await c.query(`update hosts set stopped_at = now(), paused = true where id = $1`, [req.params.id]);
@@ -547,6 +547,20 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
       refundsNeedingAPerson: stuck.map((r) => ({ id: r.id, event: r.title, pence: r.amount_pence, cause: r.cause, stripe: r.reason, at: r.created_at })),
       cardHolds: holds.map((h) => ({ bookingId: h.id, event: h.title, host: h.host, household: h.household, pence: h.held_pence, replyBy: h.respond_by })),
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * A payout Stripe refused, back into the queue once the reason is fixed (a host's account re-enabled, say). Money
+ * moves, so it is the owner's (Codex, 2 Oct 2026); the run decides it afresh and transfers with the payout's own key.
+ */
+router.post('/money/payouts/:id/retry', requireOwnerSignedIn('retry a payout'), async (req, res, next) => {
+  try {
+    if (!UUID.test(String(req.params.id))) throw refuse(404, 'not_found', 'No such payout.');
+    const { rows: [p] } = await query(`update host_payouts set state = 'scheduled', hold_reason = null, updated_at = now() where id = $1 and state = 'failed' returning id`, [req.params.id]);
+    if (!p) throw refuse(404, 'not_found', 'That payout isn’t waiting on a person.');
+    await logChange({ subjectKind: 'payout', subjectId: p.id, field: 'retry', after: { state: 'scheduled' }, why: typeof req.body?.why === 'string' ? req.body.why.slice(0, 500) : null, by: by(), byLabel: 'staff' });
+    res.json({ retried: true });
   } catch (err) { next(err); }
 });
 

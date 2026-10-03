@@ -1510,12 +1510,16 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
     // A lane event's bookings live in booking_sessions (hosting v4): "Going ahead?" counts from there (Codex, 2 Oct 2026).
     if (offer.goingAhead) {
       const { rows: [n] } = await query(
-        `select coalesce(max(heads), 0)::int as booked from (
-           select (select coalesce(sum(b.heads), 0) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+        `select coalesce(max(heads), 0)::int as booked, min(decides_at) as decides_at, bool_or(decided_outcome = 'on') as on_ from (
+           select s.decides_at, s.decided_outcome,
+                  (select coalesce(sum(b.heads), 0) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                     where bs.session_id = s.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')) as heads
              from offer_sessions s where s.offer_id = $1 and s.state = 'scheduled') x`, [o.id],
       );
-      offer.goingAhead = { ...offer.goingAhead, booked: n.booked };
+      // The deadline the sessions actually carry, and whether it has already been decided — not one worked out again (Codex, 2 Oct 2026).
+      const tz = o.time_zone ?? 'Europe/London';
+      const decided = n.decides_at ? new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(n.decides_at)) : offer.goingAhead.decidesOn;
+      offer.goingAhead = { ...offer.goingAhead, booked: n.booked, decidesOn: decided, decided: n.on_ ? 'on' : null };
     }
     res.json({ offer, payments: paymentsConfig() });
   } catch (err) { next(err); }

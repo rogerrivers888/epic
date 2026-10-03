@@ -990,7 +990,7 @@ router.get('/host/desk/profile', async (_req, res, next) => {
                               where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled'
                                 -- only a session still to finish counts; one that has happened is done (Codex, 2 Oct 2026)
                                 and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
-              (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`,
+              (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`,
       [host.id],
     );
     res.json({
@@ -1072,7 +1072,7 @@ router.post('/host/desk/stop', async (_req, res, next) => {
                               where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled'
                                 -- only a session still to finish counts; one that has happened is done (Codex, 2 Oct 2026)
                                 and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
-                (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`,
+                (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`,
         [host.id],
       );
       if (o.bookings || o.payouts) return { refused: o };

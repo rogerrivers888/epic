@@ -429,6 +429,7 @@ const REFUND_STATE: Record<string, string> = { succeeded: 'Refunded', pending: '
 
 function PayoutsView() {
   const { data, error, reload } = useLoad(() => api.hostingAdmin<Payouts>('/money/payouts'), []);
+  const [retryError, setRetryError] = React.useState<string | null>(null);
   const w = useSortParam('wsort');
   const h = useSortParam('hsort');
   const f = useSortParam('fsort');
@@ -468,6 +469,8 @@ function PayoutsView() {
     { key: 'state', label: 'Stripe', width: 110, tip: tip('Stripe', 'The transfer failed at Stripe.'), cell: () => <Said colour={red()}>Failed</Said> },
     { key: 'pays', label: 'Was due', sort: 'pays', width: 130, tip: tip('Was due', 'When it was released.'), cell: (p) => <Word>{when(p.releaseAt, true)}</Word> },
     amount('Not paid, tips included.'),
+    { key: 'retry', label: '', width: 110, tip: tip('Retry', 'Back into the queue once the reason is fixed. Money moves, so it needs the owner signed in; anyone else is told to file it for approval.'),
+      cell: (p) => <TextAction label="Retry" onPress={() => { void api.hostingAdminPost(`/money/payouts/${p.id}/retry`, {}).then(reload).catch((e) => setRetryError(e?.message ?? 'That didn’t go.')); }} /> },
   ];
   const refundCols: Col<RefundRow>[] = [
     { key: 'cause', label: 'Cause', sort: 'cause', grow: true, tip: tip('Cause', 'Why the money went back.'), cell: (x) => <Word strong={x.total}>{x.total ? 'Total' : reasonWords(x.cause) ?? '—'}</Word> },
@@ -511,6 +514,7 @@ function PayoutsView() {
       </View>
       <View>
         <TableHead tip={tip('Failed', 'Released, and the transfer did not go through.')}>Failed payouts</TableHead>
+        {retryError ? <Text style={{ color: red(), fontSize: 13 }}>{retryError}</Text> : null}
         <Ladder columns={failedCols} rows={failed} keyOf={(p) => p.id} sort={f.sort} desc={f.desc} onSort={f.onSort} empty={<Blank />} />
       </View>
       <View>
