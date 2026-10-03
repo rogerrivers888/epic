@@ -877,8 +877,7 @@ router.post('/host/lanes/offers/:id/sync', async (req, res, next) => {
       if (host.stripe_account_id && host.stripe_account_model === 'v2' && host.payouts_state !== 'ready') {
         // Back from Stripe's form: transfers asked for too, for an account made before it was known to be needed.
         if (host.stripe_link_made_at) await stripe.ensureTransfers(host.stripe_account_id, { householdId: household.id }).catch(() => null);
-        const a = await stripe.retrieveAccount(host.stripe_account_id, { householdId: household.id });
-        host = await applyAccountFacts(host.id, stripe.hostPatchFromAccount(a));
+        host = await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(await stripe.retrieveAccount(host.stripe_account_id, { householdId: household.id })));
       }
       if (host.identity_session_id && host.identity_state !== 'verified') {
         const s = await stripe.retrieveIdentity(host.identity_session_id, { householdId: household.id });
@@ -1133,10 +1132,13 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
  * and a log that fails takes the update with it, to be retried (Codex, 3 Oct 2026). The back office raises it for a
  * person (Safety › Stripe account trouble) and the payment problems log takes the history. Nothing goes to the host.
  */
-export async function applyAccountFacts(hostId, patch) {
+export async function applyAccountFacts(hostId, patchOrRead) {
   return withTransaction(async (c) => {
     const { rows: [was] } = await c.query('select * from hosts where id = $1 for update', [hostId]);
     if (!was) return null;
+    // Given a read, Stripe is asked while the host's row is held, so two overlapping deliveries apply in the order
+    // they read and an older read can never land after a newer one (Codex, 3 Oct 2026).
+    const patch = typeof patchOrRead === 'function' ? await patchOrRead(was) : patchOrRead;
     const before = stripe.accountTrouble(was.stripe_requirements);
     const now = stripe.accountTrouble(patch.stripeRequirements ?? was.stripe_requirements);
     const updated = await repo.updateHost(hostId, patch, c);
@@ -1160,8 +1162,7 @@ export async function applyStripeEvent(event) {
         // Stripe's events can arrive out of order, so the account as it is now is read back and stored — never the
         // event's own snapshot, which may be older than one already applied. Unreadable: the event fails and Stripe
         // retries it (Codex, 3 Oct 2026).
-        const current = await stripe.retrieveAccount(obj.id, { householdId: host.household_id });
-        await applyAccountFacts(host.id, stripe.hostPatchFromAccount(current));
+        await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(await stripe.retrieveAccount(obj.id, { householdId: host.household_id })));
         // Stripe asking for ID from a host whose check passed is never sent to the host (L7 point 4, owner, 3 Oct
         // 2026): the requirements just stored raise it in the back office for a person (hostingAdmin › host, Safety).
       }
