@@ -105,12 +105,36 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
     const claimed = p.state === 'released' ? p : await ledger.claimPayout(p.id, { by: d.by });
     if (!claimed) continue; // another run has it
     const amount = claimed.amount_pence + claimed.tips_pence;
+    // Asking Stripe, and writing down what it said, are kept apart: only a definite refusal from Stripe marks the
+    // payout failed and moves it to a new key. Anything that goes wrong once Stripe has said yes leaves it released
+    // under the same key, so the next run is answered with the Payout Stripe already made — never a second one
+    // (Codex, 3 Oct 2026).
+    let po;
     try {
       // Is the money there to pay out yet? Asked first, so Stripe is not asked for a Payout it would refuse — a
       // refusal it would then remember under this payout's key (Codex, 3 Oct 2026). Can't tell: ask anyway.
       const held = await balance(p.stripe_account_id, { householdId: p.household_id }).catch(() => null);
       if (held && held.availablePence < amount) { out.waiting += 1; continue; }
-      const po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: payoutKey(claimed) });
+      po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: payoutKey(claimed) });
+    } catch (err) {
+      // Stripe unreachable — or a reply lost after Stripe accepted it: the payout stays released, and the next
+      // run tries again with the same key, so it is the same Payout (Codex, 2 Oct 2026).
+      if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
+      // The money is in the host's balance but has not cleared yet: Stripe refused, and remembers it; a new key next run.
+      if (err.code === 'funds_pending') { await ledger.nextAttempt(p.id); out.waiting += 1; continue; }
+      // A definite refusal: failed, for a person to look at, and a retry is a new Payout.
+      if (err.code === 'stripe_refused' || err.code === 'host_not_ready') {
+        await ledger.finishPayout(p.id, { state: 'failed' });
+        console.error(`epic-api: payout ${p.id} failed — ${err.detail ?? err.code}`);
+        out.failed += 1;
+        continue;
+      }
+      // Anything else: nobody can say whether Stripe acted, so nothing is decided — released, same key, next run.
+      console.error(`epic-api: payout ${p.id} — not sure it reached Stripe (${err.code ?? err.message}); trying again with the same key`);
+      out.waiting += 1;
+      continue;
+    }
+    try {
       // Stripe's payout.failed can land before this write: then the row is failed already, and it is neither
       // recorded as paid nor announced (Codex, 3 Oct 2026).
       const done = await ledger.payoutPaid(p.id, {
@@ -127,15 +151,10 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
       }).catch(() => null);
       out.released += 1;
     } catch (err) {
-      // Stripe unreachable — or a reply lost after Stripe accepted it: the payout stays released, and the next
-      // run tries again with the same key, so it is the same Payout (Codex, 2 Oct 2026). Only a definite
-      // refusal marks it failed for a person to look at.
-      if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
-      // The money is in the host's balance but has not cleared yet: wait, released, and try again next run.
-      if (err.code === 'funds_pending') { await ledger.nextAttempt(p.id); out.waiting += 1; continue; }
-      await ledger.finishPayout(p.id, { state: 'failed' });
-      console.error(`epic-api: payout ${p.id} failed — ${err.code ?? err.message}`);
-      out.failed += 1;
+      // Stripe made the Payout but Epic couldn't write it down: still released, so the next run asks again with the
+      // same key and Stripe answers with this same Payout.
+      console.error(`epic-api: payout ${p.id} made at Stripe (${po.id}) but not recorded — ${err.code ?? err.message}; it will be read back next run`);
+      out.waiting += 1;
     }
   }
   return out;

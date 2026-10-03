@@ -492,3 +492,30 @@ test('Codex: a bounce reported between the Payout and its ledger line leaves no 
   assert.equal(await ledger.payoutPaid(p.id, { stripePayout: 'po_late', ledgerLine: { kind: 'payout', hostId: a.host.id, amountPence: 1 } }), null);
   assert.equal((await query(`select count(*)::int as n from hosting_payments where stripe_ref = 'po_late'`)).rows[0].n, 0);
 });
+
+test('Codex: a Payout Stripe made but Epic failed to write down is asked for again with the same key — never paid twice', async () => {
+  settings.forget();
+  const status = () => ({ ready: true, mode: 'test' });
+  const a = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  const { rows: [p] } = await query('select * from host_payouts where session_id = $1', [a.sessions[0].id]);
+  const keys = [];
+  const payout = async (x) => { if (x.hostId !== a.host.id) return { id: 'po_other' }; keys.push(x.idempotencyKey); return { id: 'po_boom' }; };
+  // Epic's write after Stripe said yes fails (here: the ledger refuses the line).
+  await query(`create or replace function test_payout_boom() returns trigger language plpgsql as $$ begin if new.stripe_ref = 'po_boom' then raise exception 'disk full'; end if; return new; end $$`);
+  await query(`create trigger boom before insert on hosting_payments for each row execute function test_payout_boom()`);
+  try {
+    await money.releasePayouts({ payout, balance: async () => ({ availablePence: 999999 }), status });
+  } finally { await query('drop trigger if exists boom on hosting_payments'); await query('drop function if exists test_payout_boom()'); }
+  const mid = (await query('select * from host_payouts where id = $1', [p.id])).rows[0];
+  assert.deepEqual([mid.state, mid.attempt], ['released', 0], 'not failed, not moved to a new key');
+  // Not sure whether Stripe acted at all (an error that is not Stripe's refusal): the same.
+  await query(`update host_payouts set updated_at = now() - interval '1 hour' where id = $1`, [p.id]);
+  await money.releasePayouts({ payout: async (x) => { if (x.hostId === a.host.id) { keys.push(x.idempotencyKey); throw new Error('socket hang up'); } return { id: 'po_other' }; }, balance: async () => ({ availablePence: 999999 }), status });
+  assert.equal((await query('select attempt from host_payouts where id = $1', [p.id])).rows[0].attempt, 0);
+  // The next run: the same key, so Stripe answers with the Payout it already made.
+  await query(`update host_payouts set updated_at = now() - interval '1 hour' where id = $1`, [p.id]);
+  await money.releasePayouts({ payout, balance: async () => ({ availablePence: 999999 }), status });
+  assert.deepEqual(keys, [`payout-${p.id}`, `payout-${p.id}`, `payout-${p.id}`]);
+  assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'paid');
+});
