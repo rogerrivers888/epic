@@ -191,7 +191,8 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
     // is the action until it lapses (Codex, 3 Oct 2026).
     const asker = await householdOnPublicPath(req);
     const { rows: mineOffered } = asker ? await query(
-      `select session_id, party, offer_expires_at from offer_waitlist where offer_id = $1 and household_id = $2 and state = 'offered' and offer_expires_at > now()`,
+      `select session_id, party, offer_expires_at from offer_waitlist where offer_id = $1 and household_id = $2 and state = 'offered' and offer_expires_at > now()
+        order by offer_expires_at, session_id`,
       [o.id, asker],
     ) : { rows: [] };
     const sessions = e.sessions.map((x) => ({ ...x, reserved: Math.max(0, x.reserved - mineOffered.filter((w) => w.session_id == null || w.session_id === x.id).reduce((n, w) => n + w.party, 0)) }));

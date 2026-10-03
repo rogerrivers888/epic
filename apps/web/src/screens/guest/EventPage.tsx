@@ -170,7 +170,8 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const most = o.maxCount ?? null;
   // G18 · a place offered from the waiting list: how long is left, until when, and Book now or Pass.
   // Only while the place is still held: past its deadline it has gone to the next person (Codex, 3 Oct 2026).
-  const offeredAt = opt?.waitlist.offeredUntil && new Date(opt.waitlist.offeredUntil).getTime() > Date.now() ? new Date(opt.waitlist.offeredUntil) : null;
+  // …and only while it can be booked: a host who paused, or a session already started, closes it (Codex, 3 Oct 2026).
+  const offeredAt = opt?.action === 'book' && opt.waitlist.offeredUntil && new Date(opt.waitlist.offeredUntil).getTime() > Date.now() ? new Date(opt.waitlist.offeredUntil) : null;
   const hoursLeft = offeredAt ? Math.max(0, Math.floor((offeredAt.getTime() - Date.now()) / 3_600_000)) : null;
   const byWhen = offeredAt ? `${offeredAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${offeredAt.toDateString() === new Date().toDateString() ? ' tonight' : offeredAt.toDateString() === new Date(Date.now() + 86_400_000).toDateString() ? ' tomorrow' : ` ${dayWords(offeredAt.toISOString().slice(0, 10))}`}` : null;
   // The event's own price words: child rates, group discounts and drop-in or book-ahead prices are the booking screen's
