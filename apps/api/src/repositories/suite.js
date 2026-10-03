@@ -1975,6 +1975,8 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
     monthPence: membership?.monthlyPence ?? 0,
     status: STATUS_OF[cls],
     statusWord: CLASS_WORDS[cls],
+    // The account's own status beside the membership class: the trial controls read it (Codex, 3 Oct 2026).
+    accountStatus: h.status ?? null,
     suspended: h.status === 'suspended',
     billed: MEMBERSHIP_BILLING,
     joined: h.joined ? new Date(h.joined).toISOString().slice(0, 10) : null,

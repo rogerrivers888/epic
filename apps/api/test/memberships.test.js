@@ -130,3 +130,8 @@ test('paid and trialling members, when Stripe has them, count apart', () => {
   assert.equal(s.peopleCovered, 8, 'everyone on a membership, trialling included');
   assert.deepEqual(s.byPlan.household, { paid: 1, trialling: 1, mrrPence: 899 });
 });
+
+test('the Standard plan is retired: inactive, and still a row history can name (migration 370)', async () => {
+  const { rows: [p] } = await query(`select active from plans where key = 'standard'`);
+  assert.equal(p.active, false);
+});

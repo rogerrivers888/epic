@@ -181,17 +181,18 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
               <Kv
                 key={`${p.plan}-${p.from}`}
                 label={`${onDay(p.from, { year: '2-digit' })} · ${p.plan}`}
-                value={p.pence ? pence(p.pence) : 'Free'}
+                // Until Stripe records a real charge, a list price is not what anybody paid (Roger, 3 Oct 2026).
+                value={!record.billed ? 'Not billed yet' : p.pence ? pence(p.pence) : 'Free'}
                 strong={i === all.length - 1}
                 last={i === all.length - 1}
               />
             ))
           ) : record.plans?.soloMonths != null ? (
             <>
-              <Kv label={`${onDay(record.joined, { year: '2-digit' }) ?? 'Joined'} · joined`} value={record.plans.soloMonths ? 'Solo £5.99' : `${record.plan} ${pence(record.monthPence)}`} />
+              <Kv label={`${onDay(record.joined, { year: '2-digit' }) ?? 'Joined'} · joined`} value={!record.billed ? 'Not billed yet' : record.plans.soloMonths ? 'Solo £5.99' : `${record.plan} ${pence(record.monthPence)}`} />
               <Kv
                 label={record.plans.soloMonths ? `Upgraded after ${record.plans.soloMonths} months` : 'Stayed on the same plan'}
-                value={record.plans.soloMonths ? 'Household £8.99' : '—'}
+                value={!record.billed ? 'Not billed yet' : record.plans.soloMonths ? 'Household £8.99' : '—'}
                 lime={!!record.plans.soloMonths}
               />
               <Kv label="Live for" value={`${record.lifeMonths} months`} strong last />
@@ -244,10 +245,10 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
               />
               <KvAction
                 label="Extend the current trial"
-                action={record.status === 'active' && record.monthPence === 0
+                action={(record.accountStatus ?? record.status) === 'active' && record.monthPence === 0
                   ? (trialBusy === 'extend' ? 'Extending…' : 'Extend by 30 days')
                   : 'Not on trial'}
-                done={!(record.status === 'active' && record.monthPence === 0) || !!trialBusy}
+                done={!((record.accountStatus ?? record.status) === 'active' && record.monthPence === 0) || !!trialBusy}
                 onPress={() => onTrial('extend')}
               />
             </>

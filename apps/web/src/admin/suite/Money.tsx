@@ -39,7 +39,7 @@ export function Money({ canSeeMoney }: { canSeeMoney: boolean }) {
   useStickyQuery('admin.suite.money', ['stream', 'lens', 'per']);
   const [stream, setStream] = useQueryState<StreamKey>('stream', 'subscriptions', asOneOf(STREAMS, 'subscriptions'));
   const [lens, setLens] = useQueryState<'streams' | 'table'>('lens', 'streams', asOneOf(['streams', 'table'] as const, 'streams'));
-  const [per, setPer] = useQueryState<'total' | 'subscriber'>('per', 'total', asOneOf(['total', 'subscriber'] as const, 'total'));
+  const [askedPer, setPer] = useQueryState<'total' | 'subscriber'>('per', 'total', asOneOf(['total', 'subscriber'] as const, 'total'));
   const [chart, setChart] = useQueryState<boolean>('chart', false, { read: (r) => r === '1', write: (v) => (v ? '1' : null) });
 
   const { suite, error, reading, reload } = useSuite(period, source);
@@ -47,11 +47,16 @@ export function Money({ canSeeMoney }: { canSeeMoney: boolean }) {
   // Per member divides by the paid members there actually are — members, not
   // accounts (Roger, 3 Oct 2026) — which is a stock and therefore the same
   // figure whatever the window. The address keeps `per=subscriber`.
+  // With no paid members there is nothing to divide by: the figures are totals, and are labelled as totals —
+  // never totals under a per-member heading (Codex, 3 Oct 2026).
+  const noMembers = Boolean(suite) && !suite?.money.members;
+  const per: 'total' | 'subscriber' = askedPer === 'subscriber' && !noMembers ? 'subscriber' : 'total';
   const perSub = per === 'subscriber' ? (suite?.money.members || null) : null;
   const fmt = useFormatters(suite, perSub);
 
   const controls = (
     <SuiteControls period={period} setPeriod={setPeriod} source={source} setSource={setSource}>
+      {askedPer === 'subscriber' && noMembers ? <Gap says="No paid members yet, so these are totals" small /> : null}
       <Seg
         label="Total or per member"
         value={per}
