@@ -165,3 +165,12 @@ test('no up-front charge was made: the headcount takes the fee; a member’s ref
   assert.equal(r.topUpPence, 180, '3 × £20 = £60, 3%');
   assert.deepEqual(charged.map((c) => [c.kind, c.amountPence]), [['upfront', 180]]);
 });
+
+test('priced by numbers, no up-front charge: the fee is on the price a head at the minimum, never nought', async () => {
+  settings.forget();
+  const { session, host, offer } = await anEvent({ startsInHours: -3 });
+  await query(`update host_offers set price_mode = 'by_numbers', price_pence = null, total_pence = 10000, min_count = 5 where id = $1`, [offer.id]);
+  await query(`delete from booking_sessions where session_id = $1`, [session.id]);
+  const r = await pod.confirmHeadcount({ sessionId: session.id, hostId: host.id, heads: 5, charge: async () => ({ id: 'pi_bn', status: 'succeeded' }) });
+  assert.equal(r.topUpPence, 300, '5 × £20 = £100, 3%');
+});

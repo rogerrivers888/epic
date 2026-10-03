@@ -23,7 +23,7 @@ import * as problems from '../repositories/paymentProblems.js';
 import * as notifications from '../repositories/notifications.js';
 import { logChange } from '../repositories/hostingSettings.js';
 import { feeFor } from '../domain/money.js';
-import { localInstant } from '../domain/lanes.js';
+import { localInstant, perPersonAt } from '../domain/lanes.js';
 
 const refuse = (status, code, message) => Object.assign(new Error(message), { status, code });
 const ymd = (d) => (d ? (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10)) : null);
@@ -194,6 +194,17 @@ export async function retryOrganiserFees({ charge = stripe.organiserFeeCharge, s
 }
 
 /**
+ * The ticket price a head, for guests nobody had booked: what those who did booked at, a head — or, with none, the
+ * event's own rule: by numbers, the price a head at its minimum; otherwise its price a person (Codex, 3 Oct 2026).
+ */
+async function eachHead(s) {
+  const said = await saidComing(s.id);
+  if (said.heads > 0) return Math.round(said.basePence / said.heads);
+  if (s.price_mode === 'by_numbers') return perPersonAt(s.total_pence ?? 0, s.min_count ?? 1) ?? 0;
+  return Number(s.price_pence ?? 0);
+}
+
+/**
  * The organiser says how many came, within the window after the session (pay_on_day_headcount_hours). More than
  * said they were coming: the saved card is topped up for the extra. Fewer: no refund of Epic's fee.
  */
@@ -202,7 +213,7 @@ export async function confirmHeadcount({ sessionId, hostId, heads, now = new Dat
   if (!Number.isInteger(n) || n < 0 || n > 10_000) throw refuse(400, 'heads', 'How many came?');
   const s0 = await withTransaction(async (c) => {
     const { rows: [s] } = await c.query(
-      `select s.*, o.time_zone, o.money, o.price_mode, o.price_pence, o.host_id from offer_sessions s join host_offers o on o.id = s.offer_id where s.id = $1 and o.host_id = $2 for update of s`, [sessionId, hostId]);
+      `select s.*, o.time_zone, o.money, o.price_mode, o.price_pence, o.total_pence, o.min_count, o.per, o.host_id from offer_sessions s join host_offers o on o.id = s.offer_id where s.id = $1 and o.host_id = $2 for update of s`, [sessionId, hostId]);
     if (!s || !paidOnTheDay(s)) throw refuse(404, 'not_found', 'That session isn’t yours, or isn’t paid on the day.');
     const end = endOf(s, s);
     const hours = Number((await settings.current()).pay_on_day_headcount_hours ?? 48);
@@ -216,7 +227,7 @@ export async function confirmHeadcount({ sessionId, hostId, heads, now = new Dat
   const { rows: [up] } = await query(`select * from organiser_fees where session_id = $1 and kind = 'upfront'`, [sessionId]);
   // No up-front charge was ever made (the job missed its window): the fee is taken now, on how many came (Codex).
   if (!up) {
-    const base = n * Number(s0.price_pence ?? 0);
+    const base = n * await eachHead(s0);
     const fee = await feeOn(base);
     if (!fee || fee.feePence <= 0) return { heads: n, topUpPence: 0 };
     const { rows: [row] } = await query(
@@ -228,7 +239,7 @@ export async function confirmHeadcount({ sessionId, hostId, heads, now = new Dat
   if (n <= up.heads) return { heads: n, topUpPence: 0 };
   // The extra guests at the same ticket price per head as those who said they were coming — or, when nobody had said
   // so (walk-ins only), the event's own price per person (Codex, 3 Oct 2026).
-  const each = up.heads > 0 ? Math.round(up.base_pence / up.heads) : Number(s0.price_pence ?? 0);
+  const each = up.heads > 0 ? Math.round(up.base_pence / up.heads) : await eachHead(s0);
   const base = each * (n - up.heads);
   const fee = await feeOn(base);
   if (!fee || fee.feePence <= 0) return { heads: n, topUpPence: 0 };
