@@ -32,7 +32,8 @@ import { isLate } from '../domain/money.js';
 import { localInstant, localDay, plusDays, perPersonAt } from '../domain/lanes.js';
 
 export const CANCEL_REASONS = Object.freeze(['illness', 'weather', 'venue', 'numbers', 'other']);
-const LIVE_BOOKING = `b.state in ('pending', 'confirmed')`;
+// Attended counts too: a guest who came to the first session still holds the later ones (Codex, 2 Oct 2026).
+const LIVE_BOOKING = `b.state in ('pending', 'confirmed', 'attended')`;
 
 const refuse = (status, code, message) => Object.assign(new Error(message), { status, code });
 const tzOf = (o) => o?.time_zone ?? 'Europe/London';
