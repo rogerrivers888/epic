@@ -109,12 +109,13 @@ function joinSessionOf(opt: GuestOptions | null): string | null {
   return opt.sessions.find((x) => x.placesLeft === 0)?.id ?? opt.sessions[0]?.id ?? null;
 }
 
-export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: { offer: Experience; payments: PaymentsConfig } | null }) {
+export function EventPage({ id, webPage, linkToken, inviteToken, initial, asking = false }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: { offer: Experience; payments: PaymentsConfig } | null; asking?: boolean }) {
   const { navigate, back, path, query, setQuery } = useRouter();
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(initial?.offer.id === id ? initial : null);
   const [opt, setOpt] = useState<GuestOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<'ask' | 'account' | 'waitlist' | null>(null);
+  // The Ask sheet is an address of its own (`/experiences/<id>/ask`, `asking`); the waiting list's two are the page's.
+  const [sheet, setSheet] = useState<'account' | 'waitlist' | null>(null);
   const [question, setQuestion] = useState('');
   const [joined, setJoined] = useState<number | null>(null);
   const toast = useToast();
@@ -137,12 +138,13 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
     if (!then || thenDone.current || !opt) return;
     thenDone.current = true;
     if (signedIn()) {
-      if (then === 'ask') setSheet('ask');
+      // Ask is an address: the marker becomes it, in place of this entry.
+      if (then === 'ask') { navigate(withQuery(paths.experienceAsk(id), { l: linkToken ?? null, i: inviteToken ?? null }), { replace: true }); return; }
       // Already on the list (joined on another device, or before): the footer says where, nothing to confirm (G30).
       else if (then === 'waitlist' && opt.action === 'waitlist' && waitPosition(opt.waitlist.mine, joinSessionOf(opt)) == null) setSheet('waitlist');
     }
     setQuery({ then: null }, { replace: true });
-  }, [then, opt, setQuery]);
+  }, [then, opt, setQuery, navigate, id, linkToken, inviteToken]);
   useEffect(() => {
     if (initial?.offer.id !== id) api.experience(id, inviteToken, linkToken).then(setData).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
     api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => setOpt(null));
@@ -166,12 +168,14 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
     } catch { /* closed the share sheet */ }
   };
 
+  const openAsk = () => navigate(keep(paths.experienceAsk(o.id)));
+  const closeAsk = () => back(here);
   const askSend = async () => {
     const t = question.trim();
     if (!t) return;
     try {
       await api.chatAsk('offer', o.id, { title: t, body: null, tag: { kind: 'offer_aspect', ref: 'offer' }, audience: 'host_only' });
-      setSheet(null); setQuestion('');
+      closeAsk(); setQuestion('');
       toast.show(host?.replyWords ? `Sent · ${host.replyWords}` : 'Sent');
     } catch (e: any) { toast.show(e?.message ?? 'That didn’t send.'); }
   };
@@ -215,7 +219,7 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
     host ? (
       <HostRow key="host" face={mediaUrl(host.photo)} name={host.name} line={host.replyWords ? host.replyWords.replace(/^u/, 'U') : host.location ?? ''}
                onPress={() => navigate(webPage ? paths.hostProfile(host.id) : paths.hostProfile(host.id))}
-               ask={{ label: `Ask ${first}`, onPress: () => setSheet('ask') }} />
+               ask={{ label: `Ask ${first}`, onPress: openAsk }} />
     ) : null,
     <Facts key="facts" items={[{ label: 'When', value: whenWords(o, opt) }, { label: 'Price', value: [price.big, price.small].filter(Boolean).join(' ') }]} weights={[1.3, 1]} />,
   ];
@@ -272,8 +276,8 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
           : <Foot price={price.big} sub={price.small} label={action === 'finished' ? 'Finished' : 'Not taking bookings'} disabled onPress={() => {}} />;
   void full;
 
-  const sheets = sheet === 'ask' ? (
-    <GuestSheet title={`Ask ${first}`} onClose={() => setSheet(null)}>
+  const sheets = asking ? (
+    <GuestSheet title={`Ask ${first}`} onClose={closeAsk}>
       {signedIn() ? (
         <>
           <Field value={question} onChange={setQuestion} placeholder="Your question" height={96} maxLength={2000} />

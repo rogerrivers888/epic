@@ -22,7 +22,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import { api, ApiError, type Experience, type GuestBookBody, type GuestOptions, type HouseholdResponse, type Member } from '../../api';
+import { api, ApiError, type Experience, type GuestBookBody, type GuestOptions, type HouseholdResponse } from '../../api';
 import { CompactBand } from '../../components/Band';
 import { BirthdayPicker } from '../../components/BirthdayPicker';
 import { paths, withQuery } from '../../routes';
@@ -36,10 +36,9 @@ import { CardBox, confirmWithCard, finishWithBank, loadStripe, payWithWallet, pr
 import { whenWords } from './EventPage';
 import { FreeAccount } from './FreeAccount';
 import { storage } from '../../storage';
-import { ageAnswer, capToast, payProblemTitle, roomForOneMore, type AgeAnswer } from './whoGoing';
+import { ageAnswer, ageOn, cannotGo, capToast, fromMember, householdOrder, payProblemTitle, roomForOneMore, type AgeAnswer, type Who } from './whoGoing';
 import { presetSlot } from './bookingWords';
 
-type Who = { key: string; name: string; adult: boolean; age: number | null; dob: string | null; memberId: string | null; line: string };
 
 /**
  * What was filled in before leaving to make the free account (G21). Continue
@@ -78,22 +77,7 @@ function draftNonce(): string {
 const DIET: Record<string, string> = { vegetarian: 'Vegetarian', vegan: 'Vegan', gluten_free: 'Gluten free', nut_allergy: 'Nut allergy', dairy_free: 'Dairy free', halal: 'Halal' };
 
 /** A person's age on the day, from their age or date of birth; null when the household never said. */
-const ageOf = (w: Who, onDay: string | null): number | null => {
-  if (w.age != null) return w.age;
-  if (!w.dob) return null;
-  const [y, m, d] = w.dob.split('-').map(Number);
-  const [Y, M, D] = (onDay ?? new Date().toISOString().slice(0, 10)).split('-').map(Number);
-  return Y - y - (M < m || (M === m && D < d) ? 1 : 0);
-};
-
-function fromMember(m: Member, me: string | null): Who {
-  // Grown up is 18, from the age or birthday the household gave: isMinor means under 13, so a 15-year-old is not
-  // an adult here (Codex, 3 Oct 2026). With neither, the household's own word stands.
-  const w: Who = { key: m.id, name: m.name, adult: true, age: m.age ?? null, dob: m.birthDate ?? null, memberId: m.id, line: '' };
-  const age = ageOf(w, null);
-  const adult = age != null ? age >= 18 : !m.isMinor;
-  return { ...w, adult, line: m.id === me ? 'You' : adult ? 'Adult' : age != null ? `Age ${age} · from your household` : 'Child · from your household' };
-}
+const ageOf = (w: Who, onDay: string | null): number | null => ageOn(w, onDay);
 
 export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: Experience | null }) {
   const { navigate, back, query, setQuery } = useRouter();
@@ -180,7 +164,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   // Who can be ticked: the household (members and subscribers), or just you (the web, and anyone without a household yet).
   const people: Who[] = useMemo(() => {
     // You first, then the other grown-ups, then the children — as the household reads.
-    const rank = (w: Who) => (w.line === 'You' ? 0 : w.adult ? 1 : 2);
+    const rank = householdOrder;
     const base: Who[] = hh?.members?.length ? hh.members.map((m) => fromMember(dobs[m.id] ? { ...m, birthDate: dobs[m.id] } : ages[m.id] != null ? { ...m, age: ages[m.id] } : m, hh.me)).sort((x, y) => rank(x) - rank(y)) : [{ key: 'you', name: 'You', adult: true, age: null, dob: null, memberId: null, line: 'You' }];
     return [...base, ...extra];
   }, [hh, extra, dobs, ages]);
@@ -228,16 +212,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   const sessions = opt.sessions;
   const onDay = lane === 'onrequest' ? day : sessions[0]?.date ?? offer.startsOn;
   const who = opt.who;
-  const why = (p: Who): string | null => {
-    const age = ageOf(p, onDay);
-    if (who.adultsOnly && !p.adult) return 'Adults only';
-    if (who.dropOff && p.adult) return 'Drop off · children only';
-    if (!p.adult && age != null && ((who.ageMin != null && age < who.ageMin) || (who.ageMax != null && age > who.ageMax))) {
-      return `Age ${age} · this is for ages ${who.ageMin ?? 0}${who.ageMax != null ? `–${who.ageMax}` : ' and up'}`;
-    }
-    if (p.adult && who.ageMax != null && who.ageMax < 18 && !who.dropOff) return null;
-    return null;
-  };
+  const why = (p: Who): string | null => cannotGo(p, who, onDay);
   const chosen = people.filter((p) => ticked.has(p.key) && !why(p));
   const adults = chosen.filter((p) => p.adult);
   const kids = chosen.filter((p) => !p.adult);
@@ -528,7 +503,7 @@ function AgeOrBirthday({ value, onChange }: { value: AgeAnswer; onChange: (v: Ag
 }
 
 /** A household child with no age on record: the same age-or-date-of-birth control as + Add someone. */
-function AgeSheet({ onClose, onSave }: { onClose: () => void; onSave: (v: { age: number | null; dob: string | null }) => void }) {
+export function AgeSheet({ onClose, onSave }: { onClose: () => void; onSave: (v: { age: number | null; dob: string | null }) => void }) {
   const [a, setA] = useState<AgeAnswer>({ byDob: false, age: '', dob: '' });
   const got = ageAnswer(a);
   return (
@@ -540,7 +515,7 @@ function AgeSheet({ onClose, onSave }: { onClose: () => void; onSave: (v: { age:
 }
 
 /** + Add someone: a name, Adult or Child, and for a child their age or date of birth — their choice. */
-function AddSomeone({ onClose, onAdd }: { onClose: () => void; onAdd: (w: Who) => void }) {
+export function AddSomeone({ onClose, onAdd }: { onClose: () => void; onAdd: (w: Who) => void }) {
   const [name, setName] = useState('');
   const [child, setChild] = useState(false);
   const [a, setA] = useState<AgeAnswer>({ byDob: false, age: '', dob: '' });
@@ -565,7 +540,7 @@ function AddSomeone({ onClose, onAdd }: { onClose: () => void; onAdd: (w: Who) =
 }
 
 /** A child's emergency contact on a drop off: filled from the household, changed here if need be. */
-function ContactSheet({ initial, onClose, onSave }: { initial: string; onClose: () => void; onSave: (v: string) => void }) {
+export function ContactSheet({ initial, onClose, onSave }: { initial: string; onClose: () => void; onSave: (v: string) => void }) {
   const [v, setV] = useState(initial);
   const ok = /^\+?[0-9 ]{9,16}$/.test(v.trim());
   return (

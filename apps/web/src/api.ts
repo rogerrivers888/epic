@@ -2834,6 +2834,13 @@ export const api = {
   guestBooking: (id: string) => request<{ booking: GuestBooking }>(`/api/booked/${encodeURIComponent(id)}`),
   guestCancelQuote: (id: string, sessionIds?: string[] | null) => request<{ pence: number | null; cause: string; words: string | null; release: boolean; policy: string | null }>(`/api/booked/${encodeURIComponent(id)}/cancel-quote${qs({ sessions: sessionIds?.length ? sessionIds.join(',') : undefined })}`),
   guestCancel: (id: string, sessionIds?: string[] | null) => post<{ refundPence: number; feeKeptPence?: number; whole: boolean }>(`/api/booked/${encodeURIComponent(id)}/cancel`, { sessionIds: sessionIds ?? null }),
+  /** Change how many are going: what it would cost or give back, before confirming (routes/guestBookings.js partyQuote). */
+  guestPartyQuote: (id: string, party: GuestPartyChange) =>
+    request<GuestPartyQuote>(`/api/booked/${encodeURIComponent(id)}/party-quote${qs({ adults: party.adults, children: JSON.stringify(party.children), adultConfirmed: party.adultConfirmed ? 'true' : undefined })}`),
+  /** …and making it: `pay` only when more places are paid for now, held 30 minutes while the browser confirms it. */
+  guestChangeParty: (id: string, party: GuestPartyChange) =>
+    post<{ change: { id: string; fromHeads: number; toHeads: number; chargePence: number; refundPence: number; feeKeptPence: number; state: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number } | null }>(
+      `/api/booked/${encodeURIComponent(id)}/party`, { party }),
   guestKeep: (id: string) => post<{ kept: true }>(`/api/booked/${encodeURIComponent(id)}/keep`, {}),
   guestAnswers: (id: string, answers: Record<string, unknown>) => patch<{ answers: Record<string, unknown> }>(`/api/booked/${encodeURIComponent(id)}/answers`, { answers }),
   guestHappened: (id: string, answer: 'yes' | 'no' | 'wrong', reason?: string | null) => post<{ recorded: string }>(`/api/booked/${encodeURIComponent(id)}/happened`, { answer, reason: reason ?? null }),
@@ -6286,6 +6293,13 @@ export type GuestBookBody = {
   party: { adults: number; adultNames?: (string | null)[]; children: GuestChild[]; adultConfirmed?: boolean };
   answers?: Record<string, unknown>; linkToken?: string | null; inviteToken?: string | null;
 };
+/** A booking's party as a change asks for it: the grown-ups by count (and name), every child with what the booking holds for them. */
+export type GuestPartyChange = {
+  adults: number; adultNames?: (string | null)[]; adultConfirmed?: boolean;
+  children: { name?: string | null; age?: number; dob?: string; needs?: string[]; emergencyContact?: string | null }[];
+};
+/** `later`: a card saved for a booking far ahead (L4) — more places add to the later charge rather than paying now. */
+export type GuestPartyQuote = { fromHeads: number; toHeads: number; chargePence: number; refundPence: number; feeKeptPence: number; words: string | null; later: boolean };
 export type GuestQuote = { lines: { label: string; each: number; count: number; pence: number }[]; grossPence: number; discountPence: number; valuePence: number; numbers: { nowEach: number; decidesOn: string | null } | null; hold: boolean };
 export type GuestCard = {
   /** Null on a waiting-list place, which carries `waitlistId` (and `offered` once a place is held for it). */

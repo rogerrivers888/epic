@@ -17,7 +17,7 @@ import { Linking, Platform, Share } from 'react-native';
 import { api, ApiError, type GuestBooking as Booking, type GuestOptions, type PublicCard } from '../../api';
 import { CompactBand } from '../../components/Band';
 import { mediaUrl } from '../../components/hosting';
-import { paths, withQuery, type Route } from '../../routes';
+import { paths, withQuery, type BookingSheet, type Route } from '../../routes';
 import { useRouter } from '../../router';
 import { BookingScreen } from '../BookingScreen';
 import { Booked, addToCalendar } from './Booked';
@@ -27,10 +27,12 @@ import {
 } from './kit';
 import { CardBox, confirmWithCard, finishWithBank, loadStripe, type PayOutcome } from './pay';
 import { lastRefundAt } from './whoGoing';
+import { ChangeParty, PARTY_HOLD_MS, type PendingParty } from './ChangeParty';
 import { answersOf, dietChoices, formOf, whoGoingWords, type AnswerForm } from './bookingWords';
 import { eventPrice } from '../../components/InspireBody';
 
 const POLICY: Record<string, string> = { flexible: 'Flexible', moderate: 'Moderate', strict: 'Strict' };
+const heldUntil = (p: PendingParty) => new Date(p.at + PARTY_HOLD_MS).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 const at = (d: string, t: string | null) => `${dayWords(d)}${t ? ` · ${t}` : ''}`;
 
 /** `/bookings/<id>`: Booked after booking, the guest pages for a lane booking, the older page for anything else. */
@@ -43,7 +45,7 @@ export function GuestBooking({ route }: { route: Extract<Route, { name: 'booking
   if (!lane) return <BookingScreen route={route} />;
   if (query.get('done') === '1') return <Booked id={route.id} />;
   if (route.rate) return <After id={route.id} />;
-  return <BookingPage id={route.id} />;
+  return <BookingPage id={route.id} sheet={route.sheet ?? null} />;
 }
 
 /**
@@ -92,18 +94,47 @@ function similarCards(list: PublicCard[], navigate: (href: string) => void) {
   }));
 }
 
-export function BookingPage({ id }: { id: string }) {
-  const { navigate, back } = useRouter();
+/** The session a weekly booking's Cancel means by default: the next one still to come. */
+const nextSession = (bk: Booking) => bk.sessions.filter((s) => s.booked && s.state === 'scheduled').find((s) => !s.finished) ?? null;
+
+/**
+ * `sheet` is the layer the address opens over the page (guest side batch C): Cancel (G19) at `/bookings/<id>/cancel`
+ * (`?all=1` for every session of a weekly one), What you told the host at `/answers`, Change how many are going at
+ * `/party`. Opening one is a step; closing it goes back to the page.
+ */
+export function BookingPage({ id, sheet = null }: { id: string; sheet?: BookingSheet | null }) {
+  const { navigate, back, query, setQuery } = useRouter();
   const toast = useToast();
   const [b, setB] = useState<Booking | null>(null);
   const [opt, setOpt] = useState<GuestOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // quote: null while it is worked out, 'failed' when it couldn't be — Cancel waits for a real one (Codex, 3 Oct 2026).
-  const [cancelling, setCancelling] = useState<null | { whole: boolean; quote: { pence: number | null; words: string | null; policy: string | null } | null | 'failed' }>(null);
-  const [editing, setEditing] = useState(false);
+  // The refund for the Cancel sheet, for the choice it was asked for (`key`). quote: null while it is worked out,
+  // 'failed' when it couldn't be — Cancel waits for a real one (Codex, 3 Oct 2026).
+  const [cancelQ, setCancelQ] = useState<{ key: string; quote: { pence: number | null; words: string | null; policy: string | null } | null | 'failed' } | null>(null);
+  // A change of how many are going waiting on its payment: its places are held 30 minutes, one change at a time.
+  const [pendingParty, setPendingParty] = useState<PendingParty | null>(null);
   const load = useCallback(() => api.guestBooking(id).then((r) => { setB(r.booking); return r.booking; }).catch((e) => { setError(e?.message ?? 'That booking didn’t load.'); return null; }), [id]);
   useEffect(() => { void load().then((bk) => { if (bk) api.guestOptions(bk.event.id).then(setOpt).catch(() => setOpt(null)); }); }, [load]);
+  // Cancel: a weekly booking cancels its next session unless every one is asked for (`?all=1`); anything else, the lot.
+  const all = query.get('all') === '1';
+  const cancelKey = b && sheet === 'cancel' ? (b.event.lane !== 'weekly' || all || !nextSession(b) ? 'whole' : nextSession(b)!.id) : null;
+  useEffect(() => {
+    if (!cancelKey || !b) return undefined;
+    let gone = false;
+    setCancelQ({ key: cancelKey, quote: null });
+    api.guestCancelQuote(b.id, cancelKey === 'whole' ? null : [cancelKey])
+      .then((q) => { if (!gone) setCancelQ({ key: cancelKey, quote: q }); })
+      .catch(() => { if (!gone) setCancelQ({ key: cancelKey, quote: 'failed' }); });
+    return () => { gone = true; };
+  }, [cancelKey, b?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Past its 30 minutes a waiting change has let its places go: the page stops saying they're held.
+  useEffect(() => {
+    if (!pendingParty) return undefined;
+    const t = setTimeout(() => { setPendingParty(null); void load(); }, Math.max(0, pendingParty.at + PARTY_HOLD_MS - Date.now()) + 1000);
+    return () => clearTimeout(t);
+  }, [pendingParty, load]);
   if (!b) return <Waiting error={error} />;
+  const closeSheet = () => back(paths.booking(b.id));
 
   const lane = b.event.lane;
   const host = firstName(b.event.host.name);
@@ -112,6 +143,8 @@ export function BookingPage({ id }: { id: string }) {
   const declined = b.request && (b.request.state === 'declined' || b.request.state === 'lapsed');
   const calledOff = b.chip === 'called_off';
   const cancelled = b.state === 'cancelled';
+  // A booking that can change how many are going: confirmed, not still asked, with a session to come (the server checks the rest).
+  const canChangeParty = b.state === 'confirmed' && b.request?.state !== 'asked' && live.some((s) => !s.finished);
   const when = b.request?.date ? at(b.request.date, b.request.time) : next ? at(next.date, next.time) : b.sessions[0] ? at(b.sessions[0].date, b.sessions[0].time) : '';
   const blocks: React.ReactNode[] = [];
 
@@ -197,8 +230,11 @@ export function BookingPage({ id }: { id: string }) {
       <Rows key="where" items={[{ title: b.where.label ?? 'Where it happens is shared once you’re booked', sub: maps ? 'Directions' : null, onPress: maps ? () => { void Linking.openURL(maps); } : undefined }]} />,
       <Kick key="who-k" top={4}>Who’s going</Kick>,
       <Rows key="who" items={[{ title: going.title, sub: going.sub || null }]} />,
+      ...(pendingParty ? [<Notice key="who-pend" bg={AMBER} weight="700">{pendingParty.retry
+        ? `Paying for ${pendingParty.toHeads} going didn’t go through`
+        : `${pendingParty.toHeads} going once you’ve paid ${gbp(pendingParty.pence)} · held until ${heldUntil(pendingParty)}`}</Notice>] : []),
       <Kick key="told-k" top={4}>{`What you told ${host}`}</Kick>,
-      <Rows key="told" items={[{ title: answered.length ? answered.join(' · ') : 'Nothing yet', sub: b.answersEditable ? 'You can change this until 24 hours before' : null, onPress: b.answersEditable ? () => setEditing(true) : undefined }]} />,
+      <Rows key="told" items={[{ title: answered.length ? answered.join(' · ') : 'Nothing yet', sub: b.answersEditable ? 'You can change this until 24 hours before' : null, onPress: b.answersEditable ? () => navigate(paths.bookingAnswers(b.id)) : undefined }]} />,
       <Rows key="acts" items={[
         { title: `Message ${host}`, onPress: () => navigate(paths.bookingChat(b.id)) },
         ...(b.sessions.some((s) => s.booked) ? [{ title: 'Add to calendar', onPress: () => { if (addToCalendar(b)) toast.show('Added'); } }] : []),
@@ -212,48 +248,47 @@ export function BookingPage({ id }: { id: string }) {
       <Kick key="manage-k" top={4}>Manage</Kick>,
       <Rows key="manage" items={[
         ...(lane === 'weekly' ? [{ title: 'Book more sessions', onPress: () => navigate(paths.experienceBook(b.event.id)) }] : []),
-        // "Change how many are going" waits for a way to change a booking in place: opening Book here would make a second one (Codex, 3 Oct 2026).
-        { title: 'Cancel', weight: '700' as const, valueColor: GUEST_RED, onPress: async () => {
-          setCancelling({ whole: lane !== 'weekly', quote: null });
-          const q = await api.guestCancelQuote(b.id, lane === 'weekly' && next ? [next.id] : null).catch(() => 'failed' as const);
-          setCancelling({ whole: lane !== 'weekly', quote: q });
-        } },
+        // The booking changed in place (routes/guestBookings.js changeParty): more only with room, fewer under the refund policy.
+        ...(canChangeParty ? [{ title: 'Change how many are going', sub: pendingParty && !pendingParty.retry ? `Waiting for your payment · held until ${heldUntil(pendingParty)}` : null, onPress: () => navigate(paths.bookingParty(b.id)) }] : []),
+        { title: 'Cancel', weight: '700' as const, valueColor: GUEST_RED, onPress: () => navigate(paths.bookingCancel(b.id)) },
       ]} />,
     );
   }
 
-  const quoteFor = async (whole: boolean) => {
-    setCancelling({ whole, quote: null });
-    const q = await api.guestCancelQuote(b.id, whole || !next ? null : [next.id]).catch(() => 'failed' as const);
-    setCancelling({ whole, quote: q });
-  };
+  // ---- the sheets, each drawn from the address (`sheet`), and only over a booking that still has them
+  const managing = !calledOff && !declined && !cancelled;
+  const whole = cancelKey === 'whole';
+  const cq = cancelQ && cancelQ.key === cancelKey ? cancelQ.quote : null;
   const confirmCancel = async () => {
-    if (!cancelling || cancelling.quote == null || cancelling.quote === 'failed') return;
+    if (!cancelKey || cq == null || cq === 'failed') return;
     try {
-      const r = await api.guestCancel(b.id, cancelling.whole || !next ? null : [next.id]);
-      setCancelling(null); toast.show(r.refundPence ? `Cancelled · ${gbp(r.refundPence)} back to your card${r.feeKeptPence ? ` (${gbp(r.feeKeptPence)} cancellation fee kept)` : ''}` : 'Cancelled'); void load();
+      const r = await api.guestCancel(b.id, whole ? null : [cancelKey]);
+      closeSheet(); toast.show(r.refundPence ? `Cancelled · ${gbp(r.refundPence)} back to your card${r.feeKeptPence ? ` (${gbp(r.feeKeptPence)} cancellation fee kept)` : ''}` : 'Cancelled'); void load();
     } catch (e: any) { toast.show(e instanceof ApiError ? e.message : 'That didn’t go through.'); }
   };
-  const sheet = cancelling ? (
-    <GuestSheet title="Cancel" onClose={() => setCancelling(null)}>
+  const drawn = sheet === 'cancel' && managing ? (
+    <GuestSheet title="Cancel" onClose={closeSheet}>
       {lane === 'weekly' && next && live.length > 1 ? (
         <Seg items={[
-          { label: 'This session only', on: !cancelling.whole, onPress: () => { void quoteFor(false); } },
-          { label: `All ${live.length} sessions`, on: cancelling.whole, onPress: () => { void quoteFor(true); } },
+          { label: 'This session only', on: !whole, onPress: () => setQuery({ all: null }) },
+          { label: `All ${live.length} sessions`, on: whole, onPress: () => setQuery({ all: '1' }) },
         ]} />
       ) : null}
-      <Notice bg={LIME} weight="800">{cancelling.quote == null ? 'Working out your refund…' : cancelling.quote === 'failed' ? 'Your refund couldn’t be worked out just now. Try again in a moment.' : cancelling.quote.pence == null ? 'Epic will look at this one and come back to you' : `You’ll get ${gbp(cancelling.quote.pence)} back${cancelling.quote.policy ? ` · ${POLICY[cancelling.quote.policy] ?? cancelling.quote.policy} policy` : ''}`}</Notice>
+      <Notice bg={LIME} weight="800">{cq == null ? 'Working out your refund…' : cq === 'failed' ? 'Your refund couldn’t be worked out just now. Try again in a moment.' : cq.pence == null ? 'Epic will look at this one and come back to you' : `You’ll get ${gbp(cq.pence)} back${cq.policy ? ` · ${POLICY[cq.policy] ?? cq.policy} policy` : ''}`}</Notice>
       <Buttons row items={[
-        { label: 'Keep it', onPress: () => setCancelling(null) },
-        { label: lane === 'weekly' && next && !cancelling.whole && live.length > 1 ? `Cancel ${dayWords(next.date)}` : live.length > 1 ? `Cancel all ${live.length}` : 'Cancel', tone: 'red', onPress: confirmCancel, disabled: cancelling.quote == null || cancelling.quote === 'failed' },
+        { label: 'Keep it', onPress: closeSheet },
+        { label: lane === 'weekly' && next && !whole && live.length > 1 ? `Cancel ${dayWords(next.date)}` : live.length > 1 ? `Cancel all ${live.length}` : 'Cancel', tone: 'red', onPress: confirmCancel, disabled: cq == null || cq === 'failed' },
       ]} />
     </GuestSheet>
-  ) : editing ? (
-    <EditAnswers booking={b} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); toast.show('Saved'); void load(); }} />
+  ) : sheet === 'answers' && managing && b.answersEditable ? (
+    <EditAnswers booking={b} onClose={closeSheet} onSaved={() => { closeSheet(); toast.show('Saved'); void load(); }} />
+  ) : sheet === 'party' && managing && canChangeParty ? (
+    <ChangeParty booking={b} opt={opt} pending={pendingParty} setPending={setPendingParty} onClose={closeSheet}
+                 onChanged={(words) => { closeSheet(); toast.show(`Changed · ${words}`); void load(); }} />
   ) : null;
 
   return (
-    <GuestPage head={<CompactBand title={b.event.title ?? 'Your booking'} titleLines={2} context={when} onBack={() => back(paths.trips())} />} overlay={<>{toast.node}{sheet}</>}>
+    <GuestPage head={<CompactBand title={b.event.title ?? 'Your booking'} titleLines={2} context={when} onBack={() => back(paths.trips())} />} overlay={<>{toast.node}{drawn}</>}>
       {blocks}
     </GuestPage>
   );

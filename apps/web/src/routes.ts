@@ -50,8 +50,12 @@
  *   /experiences/<id>                  one experience's page (works logged-out)
  *   /experiences/<id>/book                …the booking sheet
  *   /experiences/<id>/where               …the four formats, explained
+ *   /experiences/<id>/ask                 …ask the host something (the Ask sheet over the event page)
  *   /bookings/<id>                     a booking: held, booked, or past
  *   /bookings/<id>/rate                   …rate the host
+ *   /bookings/<id>/cancel                 …cancel it, the refund shown first (?all=1: every session)
+ *   /bookings/<id>/answers                …change what you told the host
+ *   /bookings/<id>/party                  …change how many are going
  *   /inspire/people                    who near your trip does what you love
  *   /inspire/collections               every collection this household can heart (the prototype's "Rows" phone)
  *   /household/<memberId>                 …one person
@@ -169,6 +173,10 @@ export type HostLane = typeof HOST_LANES[number];
  * `ask` and `bell` are reserved words in the last segment; a topic id is a
  * uuid and can never collide with them.
  */
+/** The sheets over a booking page, each its own address: `/bookings/<id>/cancel`, `/answers`, `/party`. */
+export type BookingSheet = 'cancel' | 'answers' | 'party';
+const BOOKING_SHEETS: readonly string[] = ['cancel', 'answers', 'party'];
+
 export type ChatLayer = { page: 'list' } | { page: 'ask' } | { page: 'bell' } | { page: 'topic'; topicId: string };
 export function chatLayerOf(segment: string | undefined): ChatLayer {
   if (!segment) return { page: 'list' };
@@ -476,8 +484,11 @@ export type Route =
   /** One experience, and the two layers over it: the booking sheet and the formats. */
   /** `ask` is asking the host something before booking (C7); it needs a session like `book` does. */
   | { name: 'experience'; id: string; layer: 'book' | 'where' | 'ask' | null }
-  /** A booking of ours — held, booked or past — and rating the host after. */
-  | { name: 'booking'; id: string; rate: boolean; chat?: ChatLayer }
+  /**
+   * A booking of ours — held, booked or past — and rating the host after. `sheet` is one of the booking page's
+   * sheets (guest side batch C): cancelling it (G19), what you told the host, change how many are going.
+   */
+  | { name: 'booking'; id: string; rate: boolean; chat?: ChatLayer; sheet?: BookingSheet }
   /** Messages (guest handoff G31): every thread with a host — one per booking, and the questions asked before booking. */
   | { name: 'messages' }
   /** Every event near you (guest handoff G1c): Inspire's See all on Events near you; its filters are the query. */
@@ -705,6 +716,7 @@ export function parseRoute(path: string): Route {
     case 'bookings': {
       if (!a) return { name: 'unknown', path };
       if (b === 'rate') return c ? { name: 'unknown', path } : { name: 'booking', id: a, rate: true };
+      if (b && BOOKING_SHEETS.includes(b)) return c ? { name: 'unknown', path } : { name: 'booking', id: a, rate: false, sheet: b as BookingSheet };
       // A hosted date's conversation (C8), and its layers.
       if (b === 'chat') return segments[4] ? { name: 'unknown', path } : { name: 'booking', id: a, rate: false, chat: chatLayerOf(c) };
       return b ? { name: 'unknown', path } : { name: 'booking', id: a, rate: false };
@@ -895,7 +907,7 @@ export function hrefOf(route: Route): string {
     case 'messages': return '/messages';
     case 'events': return '/inspire/events';
     case 'experience': return buildHref(['experiences', route.id, route.layer]);
-    case 'booking': return route.chat ? buildHref(['bookings', route.id, 'chat', chatSegment(route.chat)]) : buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
+    case 'booking': return route.chat ? buildHref(['bookings', route.id, 'chat', chatSegment(route.chat)]) : buildHref(['bookings', route.id, route.rate ? 'rate' : route.sheet ?? null]);
     case 'people': return '/inspire/people';
     case 'collections': return '/inspire/collections';
     case 'tag': return route.vocab === 'facet' ? buildHref(['places-known', route.key]) : buildHref(['tags', route.key]);
@@ -1053,6 +1065,13 @@ export const paths = {
   messages: () => '/messages',
   inspireEvents: () => '/inspire/events',
   bookingRate: (id: string) => buildHref(['bookings', id, 'rate']),
+  /**
+   * The booking page's sheets (guest side batch C). Cancel (G19) is set by `all`: every session of a weekly booking
+   * rather than the next one alone.
+   */
+  bookingCancel: (id: string, opts?: { all?: boolean }) => buildHref(['bookings', id, 'cancel'], { all: opts?.all ? '1' : null }),
+  bookingAnswers: (id: string) => buildHref(['bookings', id, 'answers']),
+  bookingParty: (id: string) => buildHref(['bookings', id, 'party']),
   /** Every collection this household can heart. */
   collections: () => '/inspire/collections',
   /** Who near a trip does what you love (F2). */
@@ -1439,7 +1458,7 @@ export function parentOf(route: Route): string {
     case 'experience': return route.layer ? paths.experience(route.id) : '/inspire';
     case 'messages': return paths.trips();
     case 'events': return paths.inspire();
-    case 'booking': return route.chat ? (route.chat.page === 'list' ? paths.booking(route.id) : paths.bookingChat(route.id)) : route.rate ? paths.booking(route.id) : paths.bookings();
+    case 'booking': return route.chat ? (route.chat.page === 'list' ? paths.booking(route.id) : paths.bookingChat(route.id)) : route.rate || route.sheet ? paths.booking(route.id) : paths.bookings();
     case 'people': return '/inspire';
     case 'collections': return '/inspire';
     case 'tag': return '/inspire/people';
@@ -1510,7 +1529,8 @@ export function titleOf(route: Route): string {
     case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : route.layer === 'ask' ? 'Ask the host' : 'An experience');
     case 'messages': return epic('Messages');
     case 'events': return epic('Events near you');
-    case 'booking': return epic(route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Ask something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.rate ? 'How was it?' : 'Your booking');
+    case 'booking': return epic(route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Ask something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.rate ? 'How was it?'
+      : route.sheet === 'cancel' ? 'Cancel' : route.sheet === 'answers' ? 'What you told the host' : route.sheet === 'party' ? 'Change how many are going' : 'Your booking');
     case 'people': return epic('Who does what you love?');
     case 'collections': return epic('Collections');
     case 'tag': return epic(route.key.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));

@@ -946,6 +946,28 @@ test('a host and an experience have public addresses; a booking is ours', () => 
   assert.deepEqual(roundTrip('/bookings/b1'), { name: 'booking', id: 'b1', rate: false });
   assert.deepEqual(roundTrip('/bookings/b1/rate'), { name: 'booking', id: 'b1', rate: true });
   assert.equal(parseRoute('/hosts').name, 'unknown');
+  // The booking page's sheets have addresses of their own (guest side batch C): the address decides what is drawn.
+  assert.deepEqual(roundTrip('/bookings/b1/cancel'), { name: 'booking', id: 'b1', rate: false, sheet: 'cancel' });
+  assert.deepEqual(roundTrip('/bookings/b1/answers'), { name: 'booking', id: 'b1', rate: false, sheet: 'answers' });
+  assert.deepEqual(roundTrip('/bookings/b1/party'), { name: 'booking', id: 'b1', rate: false, sheet: 'party' });
+  assert.equal(paths.bookingCancel('b1'), '/bookings/b1/cancel');
+  // How Cancel is set is the query: every session of a weekly booking, rather than the next one.
+  assert.equal(paths.bookingCancel('b1', { all: true }), '/bookings/b1/cancel?all=1');
+  assert.equal(paths.bookingAnswers('b1'), '/bookings/b1/answers');
+  assert.equal(paths.bookingParty('b1'), '/bookings/b1/party');
+  assert.equal(parseRoute('/bookings/b1/party/more').name, 'unknown', 'a sheet is the last segment');
+  assert.equal(parseRoute('/bookings/b1/elsewhere').name, 'unknown');
+  for (const sheet of ['cancel', 'answers', 'party']) {
+    assert.equal(parentOf(parseRoute(`/bookings/b1/${sheet}`)), '/bookings/b1', `up from ${sheet} is the booking page`);
+    assert.equal(tabOf(parseRoute(`/bookings/b1/${sheet}`)), 'trips');
+    assert.equal(isImmersive(parseRoute(`/bookings/b1/${sheet}`)), false, 'a sheet over the page keeps the page\'s tab bar');
+    assert.equal(guestMayOpen(parseRoute(`/bookings/b1/${sheet}`)), true, 'a free guest account manages its own booking');
+  }
+  assert.equal(titleOf(parseRoute('/bookings/b1/party')), 'Change how many are going · Epic');
+  // Asking the host is the Ask sheet's address over the event page.
+  assert.deepEqual(roundTrip('/experiences/e1/ask'), { name: 'experience', id: 'e1', layer: 'ask' });
+  assert.equal(paths.experienceAsk('e1'), '/experiences/e1/ask');
+  assert.equal(parentOf(parseRoute('/experiences/e1/ask')), '/experiences/e1');
   assert.equal(parseRoute('/experiences/e1/elsewhere').name, 'unknown');
   // In the app an event and a host light Inspire, where events are found (guest handoff G1); a booking is a layer of Plans.
   assert.equal(tabOf(parseRoute('/hosts/h1')), 'inspire');

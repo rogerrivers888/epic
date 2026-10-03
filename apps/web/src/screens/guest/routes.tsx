@@ -23,9 +23,10 @@ export function GuestEvent({ route, webPage }: { route: Extract<Route, { name: '
   const [lane, setLane] = useState<string | null | undefined>(undefined);
   // Read once and handed on: every read of an event counts a view in the host's Insights (Codex, 3 Oct 2026).
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(null);
-  // A question already asked (?topic=, from Messages), Ask and Where keep the page they were built on, whatever the
-  // lane — so nothing is read here first, and the visit counts once (Codex, 3 Oct 2026).
-  const older = Boolean(query.get('topic')) || route.layer === 'ask' || route.layer === 'where';
+  // A question already asked (?topic=, from Messages) and Where keep the page they were built on, whatever the
+  // lane — so nothing is read here first, and the visit counts once (Codex, 3 Oct 2026). Ask is the event page's own
+  // sheet for an event from the four lanes (guest side batch C), and the older page's composer for an older offer.
+  const older = Boolean(query.get('topic')) || route.layer === 'where';
   useEffect(() => {
     if (older) return;
     setLane(undefined); setData(null);
@@ -36,7 +37,7 @@ export function GuestEvent({ route, webPage }: { route: Extract<Route, { name: '
   // An older offer keeps the page it was built on.
   if (!lane) return <ExperienceScreen route={route} />;
   if (route.layer === 'book') return <Book id={route.id} webPage={webPage} linkToken={l} inviteToken={i} initial={data?.offer ?? null} />;
-  return <EventPage id={route.id} webPage={webPage} linkToken={l} inviteToken={i} initial={data} />;
+  return <EventPage id={route.id} webPage={webPage} linkToken={l} inviteToken={i} initial={data} asking={route.layer === 'ask'} />;
 }
 
 /** An invitation: the guest page for an event from the four lanes, the older page for an older offer. */
