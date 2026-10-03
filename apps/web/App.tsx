@@ -339,7 +339,7 @@ function Routed() {
    * the legal pages and the campaign landing pages. Public and outside the app —
    * answered before the passcode, drawn in its own frame with no app chrome.
    */
-  if (route.name === 'site') return <SiteScreen route={route} />;
+  if (route.name === 'site' || route.name === 'guide') return <SiteScreen route={route} />;
   if (route.name === 'login') return <LoginScreen />;
   // Set your credentials (L4): an invitation or a reset link, before any session.
   if (route.name === 'in') return <InScreen token={route.token} />;

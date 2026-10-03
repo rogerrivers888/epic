@@ -9,5 +9,9 @@
   "host": [
     "Become a host — You're on the hosts list. We'll be in touch before launch.",
     "Count me in — You're on the hosts list. We'll be in touch before launch."
-  ]
+  ],
+  "guide": {
+    "pottery": "Email me when pottery classes start near there. At most one email a week; unsubscribe in one tap.",
+    "fossil-hunting": "Email me when fossil hunting walks start near there. At most one email a week; unsubscribe in one tap."
+  }
 }

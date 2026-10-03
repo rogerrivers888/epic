@@ -22,6 +22,7 @@ import { W5Poster } from './pages/home/W5Poster';
 import { W6Crew } from './pages/home/W6Crew';
 import { HostLanding } from './pages/HostLanding';
 import { LegalPage } from './pages/legal/LegalPage';
+import { GuidePage } from './pages/GuidePage';
 
 const DESIGNS: Record<HomeDesign, { Page: (p: SitePageProps) => React.ReactElement | null; header: HeaderStyle }> = {
   postcards: { Page: W1Postcards, header: { tone: 'cream', left: 'wordmark' } },
@@ -32,7 +33,9 @@ const DESIGNS: Record<HomeDesign, { Page: (p: SitePageProps) => React.ReactEleme
   crew: { Page: W6Crew, header: { tone: 'ink', left: 'wordmark' } },
 };
 
-export function SiteScreen({ route }: { route: Extract<Route, { name: 'site' }> }) {
+type SiteRoute = Extract<Route, { name: 'site' }> | Extract<Route, { name: 'guide' }>;
+
+export function SiteScreen({ route }: { route: SiteRoute }) {
   // While the launch gate is up the website is for signed-in people only (owner,
   // 2 Oct 2026: "The site doesn't go public until I've replaced the placeholder
   // privacy wording"). Somebody signed out goes to /login and comes straight
@@ -74,7 +77,15 @@ function gateFromPage(): boolean | null {
   return v === 'off' ? false : v === 'on' ? true : null;
 }
 
-function SitePage({ route }: { route: Extract<Route, { name: 'site' }> }) {
+function SitePage({ route }: { route: SiteRoute }) {
+  if (route.name === 'guide') {
+    // A subcategory guide: the events header (Events · Host · Log in).
+    return (
+      <SiteLayout locale={route.locale} header={{ tone: 'cream', left: 'wordmark', events: true }}>
+        <GuidePage locale={route.locale} guide={route.guide} />
+      </SiteLayout>
+    );
+  }
   const { locale, page } = route;
   if (page === 'home' || page === 'go') {
     const design = page === 'go' ? route.landing! : HOMEPAGE;

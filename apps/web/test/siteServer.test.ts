@@ -33,6 +33,17 @@ test('a locale that is off, and a page that is not there, are 404s — never a s
   assert.equal(siteAddress(SITE, '/en-gb/host/more')?.status, 404);
 });
 
+test('a subcategory guide has one spelling under /events, and nothing else there is a page yet', async () => {
+  const SITE = await loadSite();
+  assert.deepEqual(siteAddress(SITE, '/en-gb/events/pottery'), { locale: 'en-gb', page: 'events/pottery', guide: 'pottery', landing: null, canonical: '/en-gb/events/pottery' });
+  assert.deepEqual(siteAddress(SITE, '/en-gb/events/fossil-hunting')?.guide, 'fossil-hunting');
+  assert.deepEqual(siteAddress(SITE, '/EN-GB/Events/Pottery'), { redirect: '/en-gb/events/pottery' });
+  assert.deepEqual(siteAddress(SITE, '/en-gb/events/pottery/'), { redirect: '/en-gb/events/pottery' });
+  for (const p of ['/en-gb/events', '/en-gb/events/culture', '/en-gb/events/constructor', '/en-gb/events/pottery/more', '/en-us/events/pottery']) {
+    assert.equal(siteAddress(SITE, p)?.status, 404, p);
+  }
+});
+
 test('an address outside a locale is the app, not the site', async () => {
   const SITE = await loadSite();
   for (const p of ['/', '/login', '/inspire', '/admin', '/in/abc', '/fr/', '/%E0%A4%A']) assert.equal(siteAddress(SITE, p), null, p);

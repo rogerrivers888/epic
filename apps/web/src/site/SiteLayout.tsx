@@ -10,12 +10,16 @@
  * because its wordmark is the way back. On a phone it is always the wordmark and
  * Log in (MB rules); "Become a host" moves into the page.
  *
+ * The events pages (the subcategory guides, 3 Oct 2026) have the header the URLs
+ * brief gives the site: Events · Host · Log in, Events on lime as the page you
+ * are on, Log in in a 1px rule box, and a rule under the row — on a phone too.
+ *
  * The page scrolls here, not in the document: the app shell does not scroll.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { CREAM, HAIRLINE, INK, INK_HOVER, INK_RULE, LIME, LIME_TINT, MOSS, ON_INK_MUTED, fonts } from '../theme';
+import { CREAM, HAIRLINE, INACTIVE, INK, INK_HOVER, INK_RULE, LIME, LIME_TINT, MOSS, ON_INK_MUTED, fonts } from '../theme';
 import { SiteWordmark as Wordmark } from './SiteWordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useRouter } from '../router';
@@ -26,20 +30,20 @@ import { HTML_LANG, LOCALE_LABEL, pick, type Strings } from './i18n';
 import { CookieBanner, openCookieSettings } from './CookieBanner';
 
 export type HeaderTone = 'cream' | 'lime' | 'ink';
-export type HeaderStyle = { tone: HeaderTone; left?: 'wordmark' | 'domain'; float?: boolean; host?: boolean };
+export type HeaderStyle = { tone: HeaderTone; left?: 'wordmark' | 'domain'; float?: boolean; host?: boolean; events?: boolean };
 
 const WORDS: Strings<{
-  becomeHost: string; logIn: string; forHosts: string; countryLanguage: string;
+  becomeHost: string; logIn: string; forHosts: string; countryLanguage: string; events: string; host: string;
   links: Record<'privacy' | 'terms' | 'cookies' | 'cookieSettings' | 'accessibility' | 'contact', string>;
   registered: string;
 }> = {
   'en-gb': {
-    becomeHost: 'Become a host', logIn: 'Log in', forHosts: 'For hosts', countryLanguage: 'Country and language',
+    becomeHost: 'Become a host', logIn: 'Log in', forHosts: 'For hosts', countryLanguage: 'Country and language', events: 'Events', host: 'Host',
     links: { privacy: 'Privacy', terms: 'Terms', cookies: 'Cookies', cookieSettings: 'Cookie settings', accessibility: 'Accessibility', contact: 'Contact' },
     registered: 'Company no. {number} · Registered office: {office}',
   },
   'en-us': {
-    becomeHost: 'Become a host', logIn: 'Log in', forHosts: 'For hosts', countryLanguage: 'Country and language',
+    becomeHost: 'Become a host', logIn: 'Log in', forHosts: 'For hosts', countryLanguage: 'Country and language', events: 'Events', host: 'Host',
     links: { privacy: 'Privacy', terms: 'Terms', cookies: 'Cookies', cookieSettings: 'Cookie settings', accessibility: 'Accessibility', contact: 'Contact' },
     registered: 'Company no. {number} · Registered office: {office}',
   },
@@ -83,7 +87,24 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
   const ink = onInk ? LIME : INK;
   const ground = header.tone === 'cream' ? CREAM : header.tone === 'lime' ? LIME : INK;
 
-  const right = (
+  const right = header.events ? (
+    <View style={[styles.headRight, { gap: phone ? 12 : 28 }]}>
+      {/* The page you are on. There is no events hub yet, so it is a marker, not a link. */}
+      <View {...(Platform.OS === 'web' ? ({ 'aria-current': 'page' } as object) : {})} style={styles.eventsNow}>
+        <Text style={[styles.headLink, phone && { fontSize: 15 }]}>{w.events}</Text>
+      </View>
+      <Pressable accessibilityRole="link" onPress={() => navigate(paths.siteHost(locale))}>
+        {({ hovered }: any) => <Text style={[styles.headLink, phone && { fontSize: 15 }, hovered && { color: MOSS }]}>{w.host}</Text>}
+      </Pressable>
+      <Pressable
+        accessibilityRole="link"
+        onPress={() => navigate(paths.login())}
+        style={({ hovered }: any) => [styles.logInRuled, phone && { paddingHorizontal: 12 }, hovered && { backgroundColor: INACTIVE }]}
+      >
+        <Text style={[styles.headLink, phone && { fontSize: 15 }]}>{w.logIn}</Text>
+      </Pressable>
+    </View>
+  ) : (
     <View style={[styles.headRight, phone && { gap: 0 }]}>
       {!phone && !header.host ? (
         <Pressable accessibilityRole="link" onPress={() => navigate(paths.siteHost(locale))}>
@@ -109,7 +130,7 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
 
   return (
     // Clear of the status bar and the notch when opened from the home screen (insets.ts).
-    <View style={[styles.head, { backgroundColor: ground, height: insetTop(phone ? 64 : 84), paddingTop: insetTop(0), paddingLeft: insetLeft(phone ? 20 : 56), paddingRight: insetRight(phone ? 20 : 56) }]}>
+    <View style={[styles.head, header.events && styles.headRuled, { backgroundColor: ground, height: insetTop(phone ? 64 : 84), paddingTop: insetTop(0), paddingLeft: insetLeft(phone ? 20 : 56), paddingRight: insetRight(phone ? 20 : 56) }]}>
       <Pressable accessibilityRole="link" accessibilityLabel="Epic" onPress={() => navigate(paths.siteHome(locale))} style={styles.headLeft}>
         {header.left === 'domain' && !phone
           ? <Text style={[styles.domain, { color: ink }]}>epic.day</Text>
@@ -235,10 +256,13 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headLeft: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   headRight: { flexDirection: 'row', alignItems: 'center', gap: 28 },
-  headLink: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700' },
+  headLink: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: INK },
   underline: { textDecorationLine: 'underline' },
   logIn: { height: 44, paddingHorizontal: 18, justifyContent: 'center' },
   logInPhone: { paddingHorizontal: 16 },
+  headRuled: { borderBottomWidth: 1, borderBottomColor: HAIRLINE },
+  eventsNow: { backgroundColor: LIME, paddingVertical: 5, paddingHorizontal: 8 },
+  logInRuled: { height: 44, paddingHorizontal: 18, justifyContent: 'center', borderWidth: 1, borderColor: HAIRLINE },
   domain: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700' },
   // "Every rule is 1px #D7D3D3, never ink" (v3 handoff › Tokens).
   hostRule: { width: 1, height: 28, backgroundColor: HAIRLINE },

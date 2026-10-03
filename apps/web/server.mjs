@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { siteGateOn } from './gate.mjs';
 import { loadSite, localeFor as localeOf, siteAddress as addressOf } from './site.mjs';
 import { eventHead, hostHead, leftTheWeb, publicAddress, sitemapOf, withHead } from './events.mjs';
+import { guideHead, guideSitemapEntries } from './guides.mjs';
 
 // The built app; a test points it at a folder of its own.
 const ROOT = resolve(process.env.EPIC_WEB_ROOT || fileURLToPath(new URL('./dist', import.meta.url)));
@@ -293,6 +294,10 @@ function sitemapXml() {
     `    <xhtml:link rel="alternate" hreflang="x-default" href="${APP_URL}/" />`,
     '  </url>',
   ].join('\n')));
+  // The published guides, each dated by its "Last reviewed" (guides.mjs); a draft is never listed.
+  for (const e of guideSitemapEntries(SITE.guides, SITE.liveLocales)) {
+    urls.push(['  <url>', `    <loc>${APP_URL}${e.path}</loc>`, `    <lastmod>${e.lastmod}</lastmod>`, '  </url>'].join('\n'));
+  }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls.join('\n')}\n</urlset>\n`;
 }
 
@@ -381,7 +386,10 @@ const server = http.createServer(guarded(async (req, res) => {
     let html;
     try { html = await shellHtml(); } catch { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('Not found'); return; }
     const status = site.status || 200;
-    const body = status === 200 ? withSiteHead(html, site) : html;
+    const guide = site.guide ? guideHead(SITE.guides[site.guide], { appUrl: APP_URL, locale: site.locale, slug: site.guide }) : null;
+    const body = status !== 200 ? html
+      : guide ? withHead(html, guide, SITE.htmlLang[site.locale]).replace('</head>', `  <meta name="epic-gate" content="${siteClosed() ? 'on' : 'off'}" />\n  </head>`)
+        : withSiteHead(html, site);
     const headers = {
       'content-type': TYPES['.html'], 'content-length': Buffer.byteLength(body), 'cache-control': 'no-cache',
       'x-content-type-options': 'nosniff', 'x-frame-options': 'SAMEORIGIN', 'referrer-policy': 'strict-origin-when-cross-origin',
@@ -389,7 +397,7 @@ const server = http.createServer(guarded(async (req, res) => {
     // A page that is not there, and a campaign landing page, are never indexed;
     // nor is anything while the site is closed. An open page lifts the launch
     // gate's blanket noindex set above.
-    if (status !== 200 || site.landing || siteClosed()) headers['x-robots-tag'] = 'noindex';
+    if (status !== 200 || site.landing || guide?.robots || siteClosed()) headers['x-robots-tag'] = 'noindex';
     else res.removeHeader('x-robots-tag');
     res.writeHead(status, headers);
     res.end(req.method === 'HEAD' ? undefined : body);

@@ -6,12 +6,16 @@
  */
 
 import { promises as fs } from 'node:fs';
+import { loadGuides } from './guides.mjs';
 
 // Locales, pages and each page's title and description come from one file that
 // the app's routes are tested against (src/site/seo.json; test/site.test.ts), so
 // the server and the app cannot describe two different sites.
 export async function loadSite() {
-  return JSON.parse(await fs.readFile(new URL('./src/site/seo.json', import.meta.url), 'utf8'));
+  const site = JSON.parse(await fs.readFile(new URL('./src/site/seo.json', import.meta.url), 'utf8'));
+  // The subcategory guides at /{locale}/events/{slug}, from the file their pages draw (guides.mjs).
+  site.guides = await loadGuides();
+  return site;
 }
 
 /**
@@ -52,6 +56,11 @@ export function siteAddress(SITE, pathname) {
   if (!a) { page = 'home'; canonical = `/${locale}/`; }
   else if (a === 'go' && b && !c && SITE.designs.includes(b)) { page = 'home'; landing = b; canonical = `/${locale}/go/${b}`; }
   else if (!b && SITE.pages.includes(a)) { page = a; canonical = `/${locale}/${a}`; }
+  // A subcategory guide (guides.mjs); every other /events/… waits on its design and is a 404.
+  else if (a === 'events' && b && !c && Object.hasOwn(SITE.guides ?? {}, b)) {
+    if (pathname !== `/${locale}/events/${b}`) return { redirect: `/${locale}/events/${b}` };
+    return { locale, page: `events/${b}`, guide: b, landing: null, canonical: `/${locale}/events/${b}` };
+  }
   else return { locale, status: 404 };
   if (pathname !== canonical) return { redirect: canonical };
   return { locale, page, landing, canonical };

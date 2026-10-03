@@ -538,6 +538,19 @@ test('the public website lives under a live locale; an off locale is a 404', () 
   assert.equal(parentOf(parseRoute('/en-gb/privacy')), '/en-gb/');
 });
 
+test('a subcategory guide is /{locale}/events/{slug}; any other /events address is not a page yet', () => {
+  for (const guide of ['pottery', 'fossil-hunting'] as const) {
+    assert.deepEqual(roundTrip(`/en-gb/events/${guide}`), { name: 'guide', locale: 'en-gb', guide });
+    assert.equal(paths.siteGuide(guide), `/en-gb/events/${guide}`);
+  }
+  for (const path of ['/en-gb/events', '/en-gb/events/culture', '/en-gb/events/water-parks', '/en-gb/events/pottery/x', '/en-us/events/pottery']) {
+    assert.equal(parseRoute(path).name, 'unknown', `${path} is not a page`);
+  }
+  // Public, outside the app: no tab behind it, and up is the homepage.
+  assert.equal(tabOf(parseRoute('/en-gb/events/pottery')), null);
+  assert.equal(parentOf(parseRoute('/en-gb/events/pottery')), '/en-gb/');
+});
+
 test('an address with no page behind it says so rather than pretending', () => {
   for (const path of ['/nowhere', '/settings/money', '/plan/extra', '/prototypes/nothing', '/order']) {
     assert.equal(parseRoute(path).name, 'unknown', `${path} should not resolve to a page`);

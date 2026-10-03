@@ -206,6 +206,8 @@ export async function siteGate(req, res, next) {
   // validation sentence and reveals nothing, and its own handler holds it to a
   // per-caller limit and a honeypot. Nothing beneath `/api/interest` is admitted.
   if (req.method === 'POST' && path === '/api/interest') return next();
+  // "Tell me when" on a subcategory guide (routes/guideAlerts.js), on the waitlist's terms: only the POST, only this path.
+  if (req.method === 'POST' && path === '/api/guide-alerts') return next();
   // A CORS preflight carries no credentials and reveals nothing.
   if (req.method === 'OPTIONS') return next();
   // The gate password: the owner and testers, and the only way to the sign-in door.

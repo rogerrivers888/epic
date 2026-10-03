@@ -85,6 +85,7 @@ export const LIME_WASH = '#E8FACE';  // oklch(0.96 0.06 125): the host page's st
 // The homepage v3 (approved 2 Oct 2026): the email field on ink, chapter 01's
 // line on deep green, and the placeholder in either field.
 export const INK_FIELD = '#2E2B29';
+export const ON_INK_LABEL = '#E6E2DF'; // a checkbox's words on ink (the guides' consent line)
 export const ON_DEEP_GREEN = '#DFE9CF';
 // Placeholder text at 4.5:1 or better on its own field (Codex, 2 Oct 2026): the
 // handoff's #8A8482 measured 3.6:1 on cream and 3.8:1 on the ink field.

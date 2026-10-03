@@ -276,6 +276,8 @@ const PUBLIC = [
   // for cannot sign in yet. Validated, rate-limited per caller and honeypotted in
   // its own handler; it reads and writes nothing of any household's.
   (req) => req.method === 'POST' && req.path === '/api/interest',
+  // "Tell me when" on a subcategory guide (routes/guideAlerts.js): the same terms, the same reason.
+  (req) => req.method === 'POST' && req.path === '/api/guide-alerts',
   (req) => req.path === '/api/join' || req.path.startsWith('/api/join/'),
   /**
    * A trip somebody was sent (trip rebuild, 7 Sep 2026): "anyone with the link

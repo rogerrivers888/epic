@@ -3592,6 +3592,8 @@ export const api = {
    * so the form cannot be used to find out who has already signed up.
    */
   registerInterest: (body: InterestSignup) => post<{ ok: true }>('/api/interest', body),
+  /** "Tell me when" on a subcategory guide (routes/guideAlerts.js): `place` is where it was filed, as Ordnance Survey / ONS name it, or null. */
+  guideAlert: (body: GuideAlertSignup) => post<{ ok: true; place: string | null }>('/api/guide-alerts', body),
 
   /**
    * Email + password (L1). The same tail as the other doors: the token goes into
@@ -6186,6 +6188,22 @@ export type FilingVocabulary = {
 };
 
 /** A "Register your interest" sign-up, as the forms on epic.day send it (POST /api/interest). */
+export type GuideAlertSignup = {
+  email: string;
+  subcategory: string;
+  where: string;
+  within: number;
+  consent: true;
+  consentWording: string;
+  locale: string;
+  pageUrl: string | null;
+  referrer: string | null;
+  utmSource: string | null; utmMedium: string | null; utmCampaign: string | null; utmTerm: string | null; utmContent: string | null;
+  gclid: string | null; fbclid: string | null;
+  /** The honeypot. */
+  website: string;
+};
+
 export type InterestSignup = {
   email: string;
   source: 'home' | 'host';

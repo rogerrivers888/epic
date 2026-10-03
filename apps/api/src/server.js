@@ -39,6 +39,7 @@ import adminRoutes from './routes/admin.js';
 import * as approvalsRepo from './repositories/approvals.js';
 import staffRoutes from './routes/staff.js';
 import interestRoutes from './routes/interest.js';
+import guideAlertRoutes from './routes/guideAlerts.js';
 import waitlistRoutes from './routes/waitlist.js';
 import suiteRoutes from './routes/suite.js';
 import postmarkRoutes from './routes/postmark.js';
@@ -205,6 +206,9 @@ app.use('/api', authGoogleRoutes);
 // through the launch gate on its own rule: it is for the people who cannot sign in
 // yet. Rate-limited per caller inside the router (limits.js › interestLimit).
 app.use('/api', interestRoutes);
+// "Tell me when" on the subcategory guides (routes/guideAlerts.js): public on the
+// same terms as the waitlist — validated, rate-limited per caller, honeypotted.
+app.use('/api', guideAlertRoutes);
 
 // Email + password (routes/authPassword.js): log in, forgot, and the invite/reset
 // link that sets one. Public for the same reason — it is how a session is obtained.

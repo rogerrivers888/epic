@@ -80,3 +80,26 @@ test('epic.day/ opens the app for somebody signed in on this browser, the websit
     assert.equal(notOurs.headers.get('location'), '/en-gb/');
   });
 });
+
+test('a subcategory guide is served with its own head: title, canonical, schema.org, and noindex while it is a draft', async () => {
+  await serve({ SITE_GATE: 'off' }, async (base) => {
+    const r = await page(base, '/en-gb/events/pottery');
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.match(html, /<title>Pottery classes: what to expect and how to start · Epic Events<\/title>/);
+    assert.match(html, /<link rel="canonical" href="[^"]*\/en-gb\/events\/pottery" \/>/);
+    assert.match(html, /"@type":"FAQPage"/);
+    assert.match(html, /"@type":"BreadcrumbList"/);
+    assert.match(html, /"@type":"Article"/);
+    assert.match(html, /<meta name="epic-gate" content="off" \/>/);
+    // Unpublished (guides.json › published): drawn for review, kept out of the index and the sitemap.
+    assert.equal(r.headers.get('x-robots-tag'), 'noindex');
+    assert.match(html, /<meta name="robots" content="noindex" \/>/);
+    assert.doesNotMatch(await (await page(base, '/sitemap.xml')).text(), /events\/pottery/);
+    // Every other spelling is one 301; anything else under /events is a real 404.
+    const other = await page(base, '/en-gb/events/Pottery');
+    assert.equal(other.status, 301);
+    assert.equal(other.headers.get('location'), '/en-gb/events/pottery');
+    assert.equal((await page(base, '/en-gb/events/culture')).status, 404);
+  });
+});

@@ -416,6 +416,21 @@ export const SITE_PAGES = ['host', 'privacy', 'terms', 'cookies', 'accessibility
 export type SitePageName = typeof SITE_PAGES[number];
 export type SitePage = 'home' | 'go' | SitePageName;
 
+/**
+ * The subcategory guides at /{locale}/events/{slug} (Epic Events on the web ›
+ * Subcategory guides, 3 Oct 2026). Category and subcategory slugs share one
+ * namespace under /events; only a subcategory with a designed guide has a page
+ * yet. Their words are in src/site/guides/guides.json.
+ */
+export const GUIDE_SLUGS = ['pottery', 'fossil-hunting'] as const;
+export type GuideSlug = typeof GUIDE_SLUGS[number];
+export const isGuideSlug = (v: string | null | undefined): v is GuideSlug => (GUIDE_SLUGS as readonly string[]).includes(String(v));
+/** Each guide's title as the brief gives it; the server writes the same from guides.json (test/guides.test.ts). */
+export const GUIDE_TITLES: Record<GuideSlug, string> = {
+  pottery: 'Pottery classes: what to expect and how to start · Epic Events',
+  'fossil-hunting': 'Fossil hunting in the UK: where, when and how · Epic Events',
+};
+
 export type PlacesScope = null | { home: true } | { country: string; city: string | null };
 
 export type Route =
@@ -498,6 +513,8 @@ export type Route =
    * and indexable, except a landing page, which is noindex (J10).
    */
   | { name: 'site'; locale: SiteLocale; page: SitePage; landing: HomeDesign | null }
+  /** A subcategory guide, /en-gb/events/pottery: public, indexed once published, in the website's frame. */
+  | { name: 'guide'; locale: SiteLocale; guide: GuideSlug }
   /**
    * Epic Events on the web (3 Oct 2026): a public event at /en-gb/event/{slug}-{code}, a host at
    * /en-gb/hosts/{slug}-{code}, and the short share link /e/{code}. The code is permanent; the slug
@@ -712,6 +729,7 @@ export function parseRoute(path: string): Route {
           ? { name: 'site', locale, page: 'go', landing: b as HomeDesign }
           : { name: 'unknown', path };
       }
+      if (a === 'events' && b && !c) return isGuideSlug(b) ? { name: 'guide', locale, guide: b } : { name: 'unknown', path };
       if ((a === 'event' || a === 'hosts') && b && !c) {
         const m = /^(.+)-([a-z0-9]{6})$/.exec(b);
         if (!m) return { name: 'unknown', path };
@@ -889,6 +907,7 @@ export function hrefOf(route: Route): string {
       return route.page === 'home' ? paths.siteHome(route.locale)
         : route.page === 'go' ? paths.siteLanding(route.landing!, route.locale)
           : buildHref([route.locale, route.page]);
+    case 'guide': return paths.siteGuide(route.guide, route.locale);
     case 'publicEvent': return `/${route.locale}/event/${route.slug}-${route.code}`;
     case 'publicHost': return `/${route.locale}/hosts/${route.slug}-${route.code}`;
     case 'shortEvent': return buildHref(['e', route.code]);
@@ -1067,6 +1086,7 @@ export const paths = {
   siteHost: (locale: SiteLocale = 'en-gb') => `/${locale}/host`,
   sitePage: (page: SitePageName, locale: SiteLocale = 'en-gb') => `/${locale}/${page}`,
   siteLanding: (design: HomeDesign, locale: SiteLocale = 'en-gb') => `/${locale}/go/${design}`,
+  siteGuide: (guide: GuideSlug, locale: SiteLocale = 'en-gb') => `/${locale}/events/${guide}`,
   account: () => '/account',
   welcome: () => '/welcome',
   /**
@@ -1390,6 +1410,7 @@ export function parentOf(route: Route): string {
     // Up from the questions is the card; up from the card or the wizard is the mic; up from the mic is home.
     case 'say': return route.ask ? paths.heard(route.intakeId!) : route.intakeId || route.steps ? '/say' : '/inspire';
     case 'site': return paths.siteHome(route.locale);
+    case 'guide': return paths.siteHome(route.locale);
     case 'login': return '/inspire';
     case 'in': return '/login';
     case 'account': return '/inspire';
@@ -1434,6 +1455,7 @@ export function titleOf(route: Route): string {
     case 'household': return epic(route.voice === 'tell' ? 'Tell Epic about them' : route.voice === 'review' ? 'What we heard' : 'You and yours');
     case 'say': return epic(route.ask ? 'One more thing' : route.intakeId ? 'Here’s what we heard' : route.steps ? 'One at a time' : 'Just say it');
     case 'site': return siteTitleOf(route);
+    case 'guide': return GUIDE_TITLES[route.guide];
     // The page's own title is written by the web server and set again by the page once it has loaded.
     case 'publicEvent': case 'shortEvent': return 'Epic Events';
     case 'publicHost': return 'Epic Hosts';

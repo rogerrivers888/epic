@@ -330,6 +330,22 @@ test('the image library is open; a signed photo is admitted, an unsigned one is 
   });
 });
 
+test('the guides\' Tell me when form is open — only POST /api/guide-alerts, nothing near it', async () => {
+  await withEnv({ SITE_GATE: null, GATE_USER: 'u', GATE_PASSWORD: 'p' }, async () => {
+    const { nexted } = await run(mockReq({ path: '/api/guide-alerts', method: 'POST' }));
+    assert.equal(nexted, true, 'POST /api/guide-alerts reaches the form handler without a credential');
+    for (const req of [
+      mockReq({ path: '/api/guide-alerts', method: 'GET' }),
+      mockReq({ path: '/api/guide-alerts/anything', method: 'POST' }),
+      mockReq({ path: '/api/guide-alertsx', method: 'POST' }),
+    ]) {
+      const { res, nexted: through } = await run(req);
+      assert.equal(through, false, `${req.method} ${req.path} is not exempt`);
+      assert.equal(res.statusCode, 401);
+    }
+  });
+});
+
 test('the waitlist form is open — only POST /api/interest, nothing near it', async () => {
   await withEnv({ SITE_GATE: null, GATE_USER: 'u', GATE_PASSWORD: 'p' }, async () => {
     // "Register your interest" is for the people who cannot sign in yet.
