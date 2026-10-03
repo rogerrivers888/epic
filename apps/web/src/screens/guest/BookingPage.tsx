@@ -284,7 +284,11 @@ export function After({ id }: { id: string }) {
         let out = await confirmWithCard(stripe.current, done.current.tip.clientSecret, card.current);
         // A bank that wants to check it's you: Stripe shows its own step, then the payment is read again.
         if (out.state === 'bank') out = await finishWithBank(stripe.current, done.current.tip.clientSecret);
-        if (out.state !== 'paid') { toast.show(out.state === 'bank' ? 'Approve the tip in your banking app, then send again' : out.message); return; }
+        if (out.state !== 'paid') {
+          // Declined: that payment is spent; the next try asks for a fresh one (Codex, 3 Oct 2026).
+          if (out.state !== 'bank') done.current.tip = null;
+          toast.show(out.state === 'bank' ? 'Approve the tip in your banking app, then send again' : out.message); return;
+        }
       }
       setSent({ tip: amount });
     } catch (e: any) { toast.show(e instanceof ApiError ? e.message : 'That didn’t send.'); } finally { setBusy(false); }

@@ -627,3 +627,23 @@ test('a weekly class offers only the ways of booking its host priced: never a dr
     assert.deepEqual(guest.kindsFor({ ...o, price_mode: 'free' }), ['drop_in', 'book_ahead']);
   } finally { await srv.close(); }
 });
+
+test('a tip whose card failed and then went through on the same payment is paid and credited, once', async () => {
+  settings.forget();
+  const { o } = await anEvent({ firstIn: 1 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    await query(`update offer_sessions set on_date = $2 where offer_id = $1`, [o.id, plusDays(today(), -1)]);
+    const tip = await srv.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 500 });
+    assert.equal(tip.status, 201, JSON.stringify(tip.body));
+    await query(`update booking_tips set state = 'failed' where id = $1`, [tip.body.tip.id]);
+    const pi = intents.get(tip.body.pay.paymentIntent);
+    pays(pi.id);
+    await guest.applyPaymentIntent(pi);
+    await guest.applyPaymentIntent(pi);
+    assert.equal((await query('select state from booking_tips where id = $1', [tip.body.tip.id])).rows[0].state, 'paid');
+    assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'tip' and stripe_ref = $1`, [pi.id])).rows[0].n, 1, 'credited once');
+  } finally { await srv.close(); }
+});

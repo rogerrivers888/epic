@@ -517,7 +517,14 @@ async function applyTipIntent(pi) {
     return null;
   }
   if (pi.status !== 'succeeded') return null;
-  const { rows: [t] } = await query(`update booking_tips set state = 'paid' where id = $1 and stripe_ref = $2 and state = 'pending' returning *`, [tipId, pi.id]);
+  // Stripe saying it succeeded wins over an earlier failure on the same payment (a decline, then the same card
+  // again): the money was taken, so the tip is paid and the host credited — unless another tip on the booking
+  // already is (Codex, 3 Oct 2026).
+  const { rows: [t] } = await query(
+    `update booking_tips set state = 'paid' where id = $1 and stripe_ref = $2 and (state = 'pending' or (state = 'failed'
+        and not exists (select 1 from booking_tips x where x.booking_id = booking_tips.booking_id and x.id <> booking_tips.id and x.state in ('pending', 'paid')))) returning *`,
+    [tipId, pi.id],
+  );
   if (!t) return null;
   await ledger.record({ kind: 'tip', bookingId: t.booking_id, offerId: t.offer_id, hostId: t.host_id, householdId: t.household_id, amountPence: t.amount_pence + t.admin_fee_pence, epicPence: t.admin_fee_pence, hostPence: t.amount_pence, state: 'succeeded', stripeRef: pi.id, mode: 'test', reason: 'tip' });
   const h = await repo.hostById(t.host_id);

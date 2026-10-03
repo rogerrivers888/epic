@@ -79,16 +79,24 @@ export async function finishWithBank(stripe: StripeJs, clientSecret: string): Pr
 }
 
 /**
+ * A wallet sheet made ready before the tap (Codex, 3 Oct 2026): `request` is shown by `payWithWallet` straight from
+ * the tap, and `kind` says whether this browser has Apple Pay, Google Pay or neither. Update its total with
+ * `request.update({ total })` as the booking changes.
+ */
+export function prepareWallet(stripe: StripeJs, label: string, amountPence: number): { request: any; kind: Promise<'apple' | 'google' | null> } {
+  const request = stripe.paymentRequest({ country: 'GB', currency: 'gbp', total: { label, amount: amountPence }, requestPayerName: false, requestPayerEmail: false });
+  const kind = request.canMakePayment().then((c: any) => (c?.applePay ? 'apple' : c?.googlePay ? 'google' : null)).catch(() => null);
+  return { request, kind };
+}
+
+/**
  * Apple Pay or Google Pay: opens the wallet now, on the tap. `start` makes the
  * booking once the wallet hands back a card and returns its client secret; the
  * wallet is told whether it went through. Null when this browser has no wallet.
  */
-export async function payWithWallet(stripe: StripeJs, { label, amountPence, start }: {
-  label: string; amountPence: number; start: () => Promise<string | null>;
-}): Promise<PayOutcome | null> {
-  const pr = stripe.paymentRequest({ country: 'GB', currency: 'gbp', total: { label, amount: amountPence }, requestPayerName: false, requestPayerEmail: false });
-  const can = await pr.canMakePayment();
-  if (!can) return null;
+export function payWithWallet(stripe: StripeJs, pr: any, { start }: { start: () => Promise<string | null> }): Promise<PayOutcome | null> {
+  // Nothing is awaited before show(): it must run inside the tap. The sheet is reused, so last time's listeners go first.
+  try { pr.off?.('paymentmethod'); pr.off?.('cancel'); } catch { /* none to remove */ }
   return new Promise<PayOutcome>((resolve) => {
     pr.on('paymentmethod', async (ev: any) => {
       try {
@@ -100,7 +108,7 @@ export async function payWithWallet(stripe: StripeJs, { label, amountPence, star
       } catch (e: any) { ev.complete('fail'); resolve({ state: 'failed', message: e?.message ?? 'Something went wrong.' }); }
     });
     pr.on('cancel', () => resolve({ state: 'failed', message: 'Cancelled.' }));
-    pr.show();
+    try { pr.show(); } catch (e: any) { resolve({ state: 'failed', message: e?.message ?? 'The wallet didn’t open.' }); }
   });
 }
 

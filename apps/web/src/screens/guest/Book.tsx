@@ -31,7 +31,7 @@ import {
   AMBER, AMBER_DARK, Buttons, Chips, DEEP_GREEN, Facts, Field, Foot, GuestPage, GuestSheet, INK_MUTED, Kick, LIME_TINT, MOSS, MonthPicker, Notice, Para,
   People, PriceLines, Rows, Seg, Waiting, dayWords, firstName, gbp, useToast, type PriceLine,
 } from './kit';
-import { CardBox, confirmWithCard, finishWithBank, loadStripe, payWithWallet, walletKind, type PayOutcome } from './pay';
+import { CardBox, confirmWithCard, finishWithBank, loadStripe, payWithWallet, prepareWallet, walletKind, type PayOutcome } from './pay';
 import { whenWords } from './EventPage';
 
 type Who = { key: string; name: string; adult: boolean; age: number | null; dob: string | null; memberId: string | null; line: string };
@@ -65,6 +65,8 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const [wallet, setWallet] = useState<'apple' | 'google' | null>(null);
   const stripe = useRef<any>(null);
   const card = useRef<any>(null);
+  // The wallet's sheet is built before the tap, so the tap itself can open it (browsers refuse it after a wait).
+  const walletReq = useRef<any>(null);
 
   // the form
   const [mode, setMode] = useState<'drop_in' | 'book_ahead'>('drop_in');
@@ -90,7 +92,13 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     api.experience(id, inviteToken, linkToken).then((r) => setOffer(r.offer)).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
     api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch((e) => setError(e?.message ?? 'That event isn’t taking bookings.'));
     if (signedIn() && !webPage) api.household().then(setHh).catch(() => setHh({ me: null, household: null as any, members: [] } as unknown as HouseholdResponse));
-    loadStripe().then(async (s) => { stripe.current = s; setPayReady(Boolean(s)); const w = await walletKind(s); setWallet(w); if (w) setMethod('wallet'); });
+    loadStripe().then(async (s) => {
+      stripe.current = s; setPayReady(Boolean(s));
+      const prepared = s ? prepareWallet(s, 'Epic', 100) : null;
+      walletReq.current = prepared?.request ?? null;
+      const w = prepared ? await prepared.kind : await walletKind(s);
+      setWallet(w); if (w) setMethod('wallet');
+    });
   }, [id, linkToken, inviteToken, webPage]);
 
   // Who can be ticked: the household (members and subscribers), or just you (the web, and anyone without a household yet).
@@ -175,6 +183,8 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const discount = group && chosen.length >= group.min ? Math.round((gross * group.pct) / 100) : 0;
   if (discount) lines.push({ label: `Group of ${group!.min} or more · ${group!.pct}% off`, value: `−${gbp(discount)}`, color: DEEP_GREEN });
   const total = gross - discount;
+  // The prepared wallet sheet shows the total as it stands.
+  if (walletReq.current && total > 0) { try { walletReq.current.update({ total: { label: offer.title ?? 'Epic', amount: total } }); } catch { /* updated next render */ } }
   lines.push({ label: 'Total', value: gbp(total), bold: true });
 
   // ---- ready to book?
@@ -208,7 +218,9 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const settle = async (bookingId: string, out: PayOutcome, secret: string) => {
     if (out.state === 'paid') { await api.guestPaid(bookingId, out.paymentIntent).catch(() => null); done(bookingId); return; }
     if (out.state === 'bank') { setPending({ bookingId, clientSecret: secret }); setSheet({ kind: 'bank' }); return; }
-    setPending({ bookingId, clientSecret: secret });
+    // A decline ends that booking on the server (its places go back), so Try again makes a fresh one with every
+    // answer still filled in — never a second go at the payment of a booking that's gone (Codex, 3 Oct 2026).
+    setPending(null);
     setSheet({ kind: out.state, message: out.message });
   };
 
@@ -230,9 +242,9 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     try {
       if (free) { await make(); return; }
       if (!stripe.current) { toast.show('Card payments aren’t switched on yet'); return; }
-      if (method === 'wallet' && wallet && !pending) {
+      if (method === 'wallet' && wallet && !pending && walletReq.current) {
         let made: { bookingId: string; secret: string | null } | null = null;
-        const out = await payWithWallet(stripe.current, { label: offer.title ?? 'Epic', amountPence: total, start: async () => { made = await make(); return made?.secret ?? null; } });
+        const out = await payWithWallet(stripe.current, walletReq.current, { start: async () => { made = await make(); return made?.secret ?? null; } });
         if (out && made) await settle((made as { bookingId: string }).bookingId, out, (made as { secret: string }).secret);
         else if (!out) toast.show('Use a card instead');
         return;

@@ -2831,7 +2831,7 @@ export const api = {
     post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number; hold: boolean } | null }>(
       `/api/experiences/${encodeURIComponent(offerId)}/booking`, { ...body, hostLink: hostLinkFor(hostId) ?? undefined }),
   guestPaid: (bookingId: string, paymentIntent: string) => post<{ booking: { id: string; state: string; paymentState: string } }>(`/api/booked/${encodeURIComponent(bookingId)}/payment`, { paymentIntent }),
-  guestWaitlist: (offerId: string, body: { party?: number; sessionId?: string | null } = {}) => post<{ position: number }>(`/api/experiences/${encodeURIComponent(offerId)}/waitlist`, body),
+  guestWaitlist: (offerId: string, body: { party?: number; sessionId?: string | null; linkToken?: string | null; inviteToken?: string | null } = {}) => post<{ position: number }>(`/api/experiences/${encodeURIComponent(offerId)}/waitlist`, body),
   guestBooked: () => request<GuestBookedList>('/api/booked'),
   guestBooking: (id: string) => request<{ booking: GuestBooking }>(`/api/booked/${encodeURIComponent(id)}`),
   guestCancelQuote: (id: string, sessionIds?: string[] | null) => request<{ pence: number | null; cause: string; words: string | null; release: boolean; policy: string | null }>(`/api/booked/${encodeURIComponent(id)}/cancel-quote${qs({ sessions: sessionIds?.length ? sessionIds.join(',') : undefined })}`),
