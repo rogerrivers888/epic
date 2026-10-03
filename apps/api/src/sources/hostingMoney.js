@@ -226,7 +226,7 @@ export async function refreshAccountFacts({ limit = 20, status = stripe.stripeSt
   const release = (rest) => (rest.length ? query(`update hosts set stripe_requirements = stripe_requirements - 'claimedAt' where id = any($1::uuid[])`, [rest.map((h) => h.id)]) : null);
   for (const [i, h] of rows.entries()) {
     try {
-      await applyAccountFacts(h.id, async () => stripe.hostPatchFromAccount(await read(h.stripe_account_id, { householdId: h.household_id })));
+      await applyAccountFacts(h.id, async () => stripe.hostPatchFromAccount(await read(h.stripe_account_id, { householdId: h.household_id })), { accountId: h.stripe_account_id });
       refreshed += 1;
     } catch (err) {
       if (err.code === 'stripe_unreachable') { await release(rows.slice(i)); break; }
@@ -247,7 +247,7 @@ export async function refreshAccountFacts({ limit = 20, status = stripe.stripeSt
         await applyAccountFacts(h.id, {
           stripeRequirements: { currentlyDue: [], eventuallyDue: [], pastDue: [], disabledReason: 'account_closed', detailsSubmitted: false, capabilities: { card_payments: null, transfers: null } },
           stripeChargesEnabled: false, stripePayoutsEnabled: false, payoutsState: 'pending',
-        });
+        }, { accountId: h.stripe_account_id });
         refreshed += 1;
         continue;
       }

@@ -889,7 +889,7 @@ router.post('/host/lanes/offers/:id/sync', async (req, res, next) => {
       if (host.stripe_account_id && host.stripe_account_model === 'v2' && host.payouts_state !== 'ready') {
         // Back from Stripe's form: transfers asked for too, for an account made before it was known to be needed.
         if (host.stripe_link_made_at) await stripe.ensureTransfers(host.stripe_account_id, { householdId: household.id }).catch(() => null);
-        host = await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(await stripe.retrieveAccount(host.stripe_account_id, { householdId: household.id })));
+        host = await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(await stripe.retrieveAccount(host.stripe_account_id, { householdId: household.id })), { accountId: host.stripe_account_id });
       }
       if (host.identity_session_id && host.identity_state !== 'verified') {
         const s = await stripe.retrieveIdentity(host.identity_session_id, { householdId: household.id });
@@ -1154,7 +1154,7 @@ async function readStamp() {
   return `${r.us}-${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`;
 }
 
-export async function applyAccountFacts(hostId, patchOrRead) {
+export async function applyAccountFacts(hostId, patchOrRead, { accountId = null } = {}) {
   // Given a read, Stripe is asked first — never while a database connection is held, since the read's own metering
   // needs one (Codex, 3 Oct 2026) — and the read is stamped with when it began. Under the host row's lock it is then
   // stored only if no read that began later has been stored already, so overlapping deliveries can't put an older
@@ -1165,6 +1165,9 @@ export async function applyAccountFacts(hostId, patchOrRead) {
   return withTransaction(async (c) => {
     const { rows: [was] } = await c.query('select * from hosts where id = $1 for update', [hostId]);
     if (!was) return null;
+    // Facts are about one account: if the host's account has been replaced since this was read, they are dropped
+    // (Codex, 3 Oct 2026).
+    if (accountId && was.stripe_account_id !== accountId) return was;
     const prev = was.stripe_requirements ?? {};
     // A read that began no later than what is stored is stale: dropped. A direct update (an account closed) is not a
     // read but is stamped all the same, so a read already under way can't put the account back (Codex, 3 Oct 2026).
@@ -1197,7 +1200,7 @@ export async function applyStripeEvent(event) {
         // Stripe's events can arrive out of order, so the account as it is now is read back and stored — never the
         // event's own snapshot, which may be older than one already applied. Unreadable: the event fails and Stripe
         // retries it (Codex, 3 Oct 2026).
-        await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(await stripe.retrieveAccount(obj.id, { householdId: host.household_id })));
+        await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(await stripe.retrieveAccount(obj.id, { householdId: host.household_id })), { accountId: obj.id });
         // Stripe asking for ID from a host whose check passed is never sent to the host (L7 point 4, owner, 3 Oct
         // 2026): the requirements just stored raise it in the back office for a person (hostingAdmin › host, Safety).
       }
@@ -1205,7 +1208,7 @@ export async function applyStripeEvent(event) {
       // The host's account was disconnected from Epic or closed: nothing more can be charged to it or paid from it (L15).
       const host = await repo.hostByStripeAccount(event.account);
       if (host) {
-        await applyAccountFacts(host.id, { stripeRequirements: { ...(host.stripe_requirements ?? {}), disabledReason: 'account_closed' }, stripeChargesEnabled: false, stripePayoutsEnabled: false, payoutsState: 'pending' });
+        await applyAccountFacts(host.id, { stripeRequirements: { ...(host.stripe_requirements ?? {}), disabledReason: 'account_closed' }, stripeChargesEnabled: false, stripePayoutsEnabled: false, payoutsState: 'pending' }, { accountId: event.account });
       }
     } else if ((event.type === 'payout.paid' || event.type === 'payout.failed') && obj.id && typeof event.account === 'string') {
       // A released payout reaching the host's bank, or bouncing: the host's own account's event (Connect endpoint).
