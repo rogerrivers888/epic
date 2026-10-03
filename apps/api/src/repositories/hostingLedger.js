@@ -201,7 +201,8 @@ export async function holdPayout(id, reason) {
 /** A released payout's outcome: 'paid' with Stripe's Payout id (made on the host's own account), or 'failed'. */
 export async function finishPayout(id, { state, stripePayout = null, mode = 'test' }) {
   const { rows: [row] } = await query(
-    `update host_payouts set state = $2, stripe_payout = coalesce($3, stripe_payout), mode = $4, updated_at = now()
+    `update host_payouts set state = $2, stripe_payout = coalesce($3, stripe_payout), mode = $4, updated_at = now(),
+            attempt = attempt + case when $2 = 'failed' then 1 else 0 end
       where id = $1 and state = 'released' returning *`,
     [id, state, stripePayout, mode],
   );
@@ -216,13 +217,17 @@ export async function finishPayout(id, { state, stripePayout = null, mode = 'tes
  */
 export async function markPayoutOutcome({ stripePayout, accountId, paid, failure = null }) {
   if (paid) return null;
-  const { rows: [row] } = await query(
-    `update host_payouts p set state = 'failed', hold_reason = $3, updated_at = now()
-       from hosts h
-      where p.stripe_payout = $1 and h.id = p.host_id and h.stripe_account_id = $2 and p.state = 'paid' returning p.*`,
-    [stripePayout, accountId, failure ? `payout_failed:${String(failure).slice(0, 40)}` : 'payout_failed'],
-  );
-  return row ?? null;
+  return withTransaction(async (c) => {
+    const { rows: [row] } = await c.query(
+      `update host_payouts p set state = 'failed', hold_reason = $3, attempt = attempt + 1, updated_at = now()
+         from hosts h
+        where p.stripe_payout = $1 and h.id = p.host_id and h.stripe_account_id = $2 and p.state = 'paid' returning p.*`,
+      [stripePayout, accountId, failure ? `payout_failed:${String(failure).slice(0, 40)}` : 'payout_failed'],
+    );
+    // The ledger says so too, so no report or reconciliation goes on counting it as paid.
+    if (row) await c.query(`update hosting_payments set state = 'failed', reason = $2, updated_at = now() where stripe_ref = $1 and kind = 'payout'`, [stripePayout, row.hold_reason]);
+    return row ?? null;
+  });
 }
 
 /** A chargeback opened or closed on a booking's payment. Open, the session's payout waits (L3). */

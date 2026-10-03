@@ -234,7 +234,9 @@ test('the owner releases a held payout over a complaint, never over missing tax 
   const row = async (x) => (await query('select id, state, released_by from host_payouts where session_id = $1', [x.sessions[0].id])).rows[0];
   assert.equal(transfers.filter((t) => [a, b].some((x) => x.host.id === t.hostId)).length, 0, 'not due, and a complaint is open');
   // The owner's Release (hostingAdmin): scheduled now, released_by owner — before the 72 hours and over the complaint.
-  for (const x of [a, b]) await query(`update host_payouts set state = 'scheduled', release_at = now(), released_by = 'owner', hold_reason = null where id = $1`, [(await row(x)).id]);
+  // A second in the past: the job asks "due by now?" with JavaScript's clock, in milliseconds, and Postgres's now() is in
+  // microseconds — set in the same millisecond, the row could be a few microseconds in the job's future and not due.
+  for (const x of [a, b]) await query(`update host_payouts set state = 'scheduled', release_at = now() - interval '1 second', released_by = 'owner', hold_reason = null where id = $1`, [(await row(x)).id]);
   await money.releasePayouts({ payout: transfer, status });
   assert.deepEqual([(await row(a)).state, (await row(a)).released_by], ['paid', 'owner']);
   assert.equal((await row(b)).state, 'held', 'no tax details, no transfer, whoever says so');
@@ -381,4 +383,30 @@ test('L1: a booking charged the old way, on Epic’s balance, is never paid out 
   await query(`update experience_bookings set charge_model = null where id = $1`, [old.booking.id]);
   await money.schedulePayouts();
   assert.equal((await query('select count(*)::int as n from host_payouts where session_id = $1', [old.sessions[0].id])).rows[0].n, 0, 'no payout row: those rows wait to be voided');
+});
+
+test('Codex: a payout that failed for certain is retried as a new Payout; one Stripe bounced is failed on the ledger too', async () => {
+  settings.forget();
+  const status = () => ({ ready: true, mode: 'test' });
+  const row = async (x) => (await query('select * from host_payouts where session_id = $1', [x.sessions[0].id])).rows[0];
+  const a = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  const keys = [];
+  // Stripe refuses it outright: failed, for a person to retry.
+  await money.releasePayouts({ payout: async (p) => { if (p.hostId !== a.host.id) return { id: 'po_other' }; keys.push(p.idempotencyKey); throw Object.assign(new Error('no'), { code: 'stripe_refused' }); }, status });
+  assert.deepEqual([(await row(a)).state, (await row(a)).attempt], ['failed', 1]);
+  // The owner's Retry (hostingAdmin) puts it back; the retry is a new attempt with a new key.
+  await query(`update host_payouts set state = 'scheduled', hold_reason = null where id = $1`, [(await row(a)).id]);
+  await money.releasePayouts({ payout: async (p) => { if (p.hostId !== a.host.id) return { id: 'po_other' }; keys.push(p.idempotencyKey); return { id: 'po_second' }; }, status });
+  const id = (await row(a)).id;
+  assert.deepEqual(keys, [`payout-${id}`, `payout-${id}-a1`], 'never Stripe replaying the Payout that failed');
+  assert.equal((await row(a)).stripe_payout, 'po_second');
+
+  // Then the host's bank bounces it: the payout and its ledger line both say failed, and the next try is new again.
+  const out = await ledger.markPayoutOutcome({ stripePayout: 'po_second', accountId: a.host.stripe_account_id, paid: false, failure: 'account_closed' });
+  assert.equal(out.state, 'failed');
+  assert.equal((await query(`select state from hosting_payments where stripe_ref = 'po_second' and kind = 'payout'`)).rows[0].state, 'failed', 'no report counts it as paid');
+  assert.equal((await row(a)).attempt, 2);
+  // Another host's account can't touch it.
+  assert.equal(await ledger.markPayoutOutcome({ stripePayout: 'po_second', accountId: 'acct_someone_else', paid: false }), null);
 });

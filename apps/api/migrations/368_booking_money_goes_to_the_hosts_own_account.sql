@@ -53,7 +53,10 @@ alter table hosting_payments
 
 -- A released payout is a Payout on the host's account now, not a transfer from Epic's.
 alter table host_payouts
-  add column if not exists stripe_payout text;
+  add column if not exists stripe_payout text,
+  -- Which try this is. A definite failure (Stripe refused it, or the bank bounced it) moves it on, so a retry is a
+  -- new Payout under a new idempotency key; a crash or a lost reply keeps it, so a retry is the same Payout.
+  add column if not exists attempt       integer not null default 0;
 
 -- Voiding the old model (owner, 3 Oct 2026: "void them rather than convert … keep the rows, don't delete").
 -- These columns only make room for it. Nothing here voids a row: that is a back-office action the owner runs

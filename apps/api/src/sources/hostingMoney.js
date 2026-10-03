@@ -35,6 +35,14 @@ const HELD_WORDS = {
   no_end: 'This session has no end time, so its payout waits for a person to check it.',
 };
 
+/**
+ * The idempotency key for a payout's Payout. The same while an attempt is in
+ * doubt (a crash, a lost reply: Stripe answers with the Payout it already
+ * made); a new one after a definite failure, so a retry is a new Payout and
+ * never Stripe replaying the one that failed (Codex, 3 Oct 2026).
+ */
+export const payoutKey = (p) => (Number(p.attempt ?? 0) > 0 ? `payout-${p.id}-a${p.attempt}` : `payout-${p.id}`);
+
 /** Make payout rows for sessions that have ended. Returns how many were made. */
 export async function schedulePayouts({ now = new Date() } = {}) {
   const s = await settings.current();
@@ -94,7 +102,7 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
     if (!claimed) continue; // another run has it
     const amount = claimed.amount_pence + claimed.tips_pence;
     try {
-      const po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: `payout-${p.id}` });
+      const po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: payoutKey(claimed) });
       await ledger.finishPayout(p.id, { state: 'paid', stripePayout: po.id, mode: 'test' });
       await ledger.record({ kind: 'payout', hostId: p.host_id, offerId: p.offer_id, sessionId: p.session_id, householdId: p.household_id, payoutId: p.id, amountPence: amount, hostPence: amount, state: 'succeeded', stripeRef: po.id, mode: 'test', reason: d.by });
       await notifications.notify({
