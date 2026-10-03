@@ -79,7 +79,9 @@ export function eventStatus(o, host, sessions, today) {
   // not finished — the offer itself carries no called_off_at then (Roger, 3 Oct 2026).
   const offAfter = sessions.filter((s) => s.state === 'called_off' && (!last || ymd(s.on_date) > last));
   if (o.lane !== 'onrequest' && !live.some((s) => s.state === 'scheduled' && ymd(s.ends_on ?? s.on_date) >= today) && offAfter.length) {
-    const on = ymd(offAfter[offAfter.length - 1].on_date);
+    // From when it was called off, not the date it would have run (Codex, 3 Oct 2026).
+    const at = offAfter.map((s) => s.called_off_at).filter(Boolean).sort().pop();
+    const on = ymd(at ?? offAfter[offAfter.length - 1].on_date);
     return { status: daysBetween(on, today) > CALLED_OFF_DAYS ? 'expired' : 'called_off', on, ended: 'called_off' };
   }
   const ahead = live.some((s) => s.state === 'scheduled' && ymd(s.ends_on ?? s.on_date) >= today);
@@ -100,7 +102,7 @@ function priceOf(o) {
 async function sessionsOf(ids) {
   if (!ids.length) return new Map();
   const { rows } = await query(
-    `select offer_id, on_date, ends_on, starts_at, ends_at, state from offer_sessions where offer_id = any($1::uuid[]) order by on_date, starts_at nulls first`,
+    `select offer_id, on_date, ends_on, starts_at, ends_at, state, called_off_at from offer_sessions where offer_id = any($1::uuid[]) order by on_date, starts_at nulls first`,
     [ids],
   );
   const by = new Map();
