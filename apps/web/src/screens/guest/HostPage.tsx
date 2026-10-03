@@ -7,7 +7,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Linking } from 'react-native';
-import { api, type HostProfile } from '../../api';
+import { api, type Experience, type HostProfile } from '../../api';
 import { paths } from '../../routes';
 import { useRouter } from '../../router';
 import { signedIn } from '../../session';
@@ -18,6 +18,13 @@ import {
 import { mediaUrl } from '../../components/hosting';
 
 const sinceWords = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+/** A card's price: a weekly class priced by kind shows its lower price as from, never Free (Codex, 3 Oct 2026). */
+function cardPrice(o: Experience): string {
+  if (o.price?.each) return gbp(o.price.each);
+  const kinds = [o.dropInPence, o.bookAheadPence].filter((n): n is number => typeof n === 'number' && n > 0);
+  return kinds.length ? `from ${gbp(Math.min(...kinds))}` : 'Free';
+}
 
 export function HostPage({ id, webPage }: { id: string; webPage: boolean }) {
   const { navigate, back } = useRouter();
@@ -53,7 +60,9 @@ export function HostPage({ id, webPage }: { id: string; webPage: boolean }) {
   if (h.introVideo) blocks.push(<Buttons key="video" items={[{ label: `Watch ${first}’s intro`, icon: 'play', tone: 'ink', onPress: () => { const u = mediaUrl(h.introVideo); if (u) void Linking.openURL(u); } }]} />);
   blocks.push(
     <HostRow key="host" face={h.photo ? mediaUrl(h.photo) : null} name={h.name} line={[h.location, h.replyWords].filter(Boolean).join(' · ')} />,
-    <Tags key="trust" items={[{ label: 'Verified', bg: INACTIVE, fg: INK }, ...(h.checked ? [{ label: 'Checked', bg: LIME, fg: INK }] : [])]} />,
+    // No badge while the checks are still running, as the profile always said (Codex, 3 Oct 2026).
+    h.checks === 'running' ? <Para key="trust" color={INK_MUTED}>ID checks running</Para>
+      : <Tags key="trust" items={[{ label: 'Verified', bg: INACTIVE, fg: INK }, ...(h.checked ? [{ label: 'Checked', bg: LIME, fg: INK }] : [])]} />,
     <Facts key="facts" items={[
       { label: 'Rating', value: h.rating != null && total ? `${h.rating.toFixed(1)} · ${total} review${total === 1 ? '' : 's'}` : 'No reviews yet' },
       { label: 'Hosting since', value: sinceWords(h.since) },
@@ -62,7 +71,7 @@ export function HostPage({ id, webPage }: { id: string; webPage: boolean }) {
   if (h.introText) blocks.push(<Kick key="about-k" top={4}>About</Kick>, <Para key="about">{h.introText}</Para>);
   if (d.offers.length) {
     blocks.push(<Kick key="ev-k" top={4}>Events</Kick>, <Cards key="ev" items={d.offers.map((o) => ({
-      key: o.id, photo: o.photos[0] ? mediaUrl(o.photos[0]) : null, title: o.title ?? 'An event', price: o.price?.each ? gbp(o.price.each) : 'Free',
+      key: o.id, photo: o.photos[0] ? mediaUrl(o.photos[0]) : null, title: o.title ?? 'An event', price: cardPrice(o),
       line: o.startsOn ? dayWords(o.startsOn) : LANE_TAG[o.lane ?? 'oneoff'].label, lane: LANE_TAG[o.lane ?? 'oneoff'].label, left: o.standing?.full ? 'Full' : null,
       onPress: () => navigate(paths.experience(o.id)),
     }))} />);

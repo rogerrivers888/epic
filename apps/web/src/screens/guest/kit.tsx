@@ -418,7 +418,7 @@ export function PriceLines({ items }: { items: PriceLine[] }) {
   );
 }
 
-export type Btn = { label: string; onPress: () => void; tone?: 'ink' | 'grey' | 'red' | 'redText'; icon?: React.ComponentProps<typeof Icon>['name']; key?: string };
+export type Btn = { label: string; onPress: () => void; tone?: 'ink' | 'grey' | 'red' | 'redText'; icon?: React.ComponentProps<typeof Icon>['name']; key?: string; disabled?: boolean };
 /**
  * Buttons (README): secondary is a warm-grey fill, 56 tall, as wide as its label —
  * never a hairline box, never full width unless paired on a row. An ink one is primary.
@@ -430,8 +430,8 @@ export function Buttons({ items, row }: { items: Btn[]; row?: boolean }) {
         const bg = b.tone === 'ink' ? INK : b.tone === 'red' ? GUEST_RED : INACTIVE;
         const fg = b.tone === 'ink' || b.tone === 'red' ? CREAM : b.tone === 'redText' ? GUEST_RED : INK;
         return (
-          <Press key={b.key ?? b.label} onPress={b.onPress} accessibilityRole="button"
-                 style={[{ height: 56, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: bg }, row ? { flex: 1 } : null]}>
+          <Press key={b.key ?? b.label} onPress={b.disabled ? () => {} : b.onPress} accessibilityRole="button" accessibilityState={{ disabled: !!b.disabled }}
+                 style={[{ height: 56, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: bg }, row ? { flex: 1 } : null, b.disabled ? { opacity: 0.4 } : null]}>
             {b.icon ? <Icon name={b.icon} size={17} color={fg} /> : null}
             <Text style={[tx(14.5, '700', fg), nowrap]}>{b.label}</Text>
           </Press>

@@ -49,7 +49,8 @@ export function BookingPage({ id }: { id: string }) {
   const [b, setB] = useState<Booking | null>(null);
   const [opt, setOpt] = useState<GuestOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cancelling, setCancelling] = useState<null | { whole: boolean; quote: { pence: number | null; words: string | null; policy: string | null } | null }>(null);
+  // quote: null while it is worked out, 'failed' when it couldn't be — Cancel waits for a real one (Codex, 3 Oct 2026).
+  const [cancelling, setCancelling] = useState<null | { whole: boolean; quote: { pence: number | null; words: string | null; policy: string | null } | null | 'failed' }>(null);
   const [editing, setEditing] = useState(false);
   const load = useCallback(() => api.guestBooking(id).then((r) => { setB(r.booking); return r.booking; }).catch((e) => { setError(e?.message ?? 'That booking didn’t load.'); return null; }), [id]);
   useEffect(() => { void load().then((bk) => { if (bk) api.guestOptions(bk.event.id).then(setOpt).catch(() => setOpt(null)); }); }, [load]);
@@ -156,7 +157,7 @@ export function BookingPage({ id }: { id: string }) {
         // "Change how many are going" waits for a way to change a booking in place: opening Book here would make a second one (Codex, 3 Oct 2026).
         { title: 'Cancel', weight: '700' as const, valueColor: GUEST_RED, onPress: async () => {
           setCancelling({ whole: lane !== 'weekly', quote: null });
-          const q = await api.guestCancelQuote(b.id, lane === 'weekly' && next ? [next.id] : null).catch(() => null);
+          const q = await api.guestCancelQuote(b.id, lane === 'weekly' && next ? [next.id] : null).catch(() => 'failed' as const);
           setCancelling({ whole: lane !== 'weekly', quote: q });
         } },
       ]} />,
@@ -165,11 +166,11 @@ export function BookingPage({ id }: { id: string }) {
 
   const quoteFor = async (whole: boolean) => {
     setCancelling({ whole, quote: null });
-    const q = await api.guestCancelQuote(b.id, whole || !next ? null : [next.id]).catch(() => null);
+    const q = await api.guestCancelQuote(b.id, whole || !next ? null : [next.id]).catch(() => 'failed' as const);
     setCancelling({ whole, quote: q });
   };
   const confirmCancel = async () => {
-    if (!cancelling) return;
+    if (!cancelling || cancelling.quote == null || cancelling.quote === 'failed') return;
     try {
       const r = await api.guestCancel(b.id, cancelling.whole || !next ? null : [next.id]);
       setCancelling(null); toast.show(r.refundPence ? `Cancelled · ${gbp(r.refundPence)} back to your card` : 'Cancelled'); void load();
@@ -183,10 +184,10 @@ export function BookingPage({ id }: { id: string }) {
           { label: `All ${live.length} sessions`, on: cancelling.whole, onPress: () => { void quoteFor(true); } },
         ]} />
       ) : null}
-      <Notice bg={LIME} weight="800">{cancelling.quote == null ? 'Working out your refund…' : cancelling.quote.pence == null ? 'Epic will look at this one and come back to you' : `You’ll get ${gbp(cancelling.quote.pence)} back${cancelling.quote.policy ? ` · ${POLICY[cancelling.quote.policy] ?? cancelling.quote.policy} policy` : ''}`}</Notice>
+      <Notice bg={LIME} weight="800">{cancelling.quote == null ? 'Working out your refund…' : cancelling.quote === 'failed' ? 'Your refund couldn’t be worked out just now. Try again in a moment.' : cancelling.quote.pence == null ? 'Epic will look at this one and come back to you' : `You’ll get ${gbp(cancelling.quote.pence)} back${cancelling.quote.policy ? ` · ${POLICY[cancelling.quote.policy] ?? cancelling.quote.policy} policy` : ''}`}</Notice>
       <Buttons row items={[
         { label: 'Keep it', onPress: () => setCancelling(null) },
-        { label: lane === 'weekly' && next && !cancelling.whole && live.length > 1 ? `Cancel ${dayWords(next.date)}` : live.length > 1 ? `Cancel all ${live.length}` : 'Cancel', tone: 'red', onPress: confirmCancel },
+        { label: lane === 'weekly' && next && !cancelling.whole && live.length > 1 ? `Cancel ${dayWords(next.date)}` : live.length > 1 ? `Cancel all ${live.length}` : 'Cancel', tone: 'red', onPress: confirmCancel, disabled: cancelling.quote == null || cancelling.quote === 'failed' },
       ]} />
     </GuestSheet>
   ) : editing ? (
@@ -206,11 +207,17 @@ function EditAnswers({ booking, onClose, onSaved }: { booking: Booking; onClose:
   const [diet, setDiet] = useState<Set<string>>(new Set(Array.isArray(booking.answers.dietary) ? booking.answers.dietary : []));
   const [note, setNote] = useState<string>(typeof booking.answers.note === 'string' ? booking.answers.note : '');
   const DIET = ['Vegetarian', 'Vegan', 'Gluten free', 'Nut allergy', 'Dairy free', 'Halal'];
+  const [failed, setFailed] = useState<string | null>(null);
   return (
     <GuestSheet title={`What you told ${firstName(booking.event.host.name)}`} onClose={onClose}>
       <Chips items={DIET.map((d) => ({ label: d, on: diet.has(d), onPress: () => setDiet((s) => { const n = new Set(s); if (n.has(d)) n.delete(d); else n.add(d); return n; }) }))} />
       <Field value={note} onChange={setNote} placeholder="Anything else" height={72} maxLength={500} />
-      <Buttons items={[{ label: 'Save', tone: 'ink', onPress: async () => { await api.guestAnswers(booking.id, { ...booking.answers, dietary: [...diet], note: note.trim() || undefined }).catch(() => null); onSaved(); } }]} />
+      {failed ? <Para color={GUEST_RED}>{failed}</Para> : null}
+      <Buttons items={[{ label: 'Save', tone: 'ink', onPress: async () => {
+        // Saved only when it was: a failure stays here and says so (Codex, 3 Oct 2026).
+        try { await api.guestAnswers(booking.id, { ...booking.answers, dietary: [...diet], note: note.trim() || undefined }); onSaved(); }
+        catch (e: any) { setFailed(e instanceof ApiError ? e.message : 'That didn’t save. Try again.'); }
+      } }]} />
     </GuestSheet>
   );
 }
