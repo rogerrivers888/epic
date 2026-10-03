@@ -87,6 +87,8 @@ async function call(method, path, params, { householdId = null, purpose, idempot
   }
   if (!res.ok) {
     await providerCalls.recordFailure({ householdId, provider: PROVIDER, purpose, ms: Date.now() - started, fault: `http_${res.status}_${j?.error?.code ?? ''}`.slice(0, 40) });
+    // Too many requests, or Stripe's own trouble: worth trying again with the same key, not a refusal (Codex, 2 Oct 2026).
+    if (res.status === 429 || res.status >= 500) throw Object.assign(new Error('Epic couldn’t reach Stripe just now. Try again in a moment.'), { status: 503, code: 'stripe_unreachable', detail: j?.error?.code ?? null });
     throw Object.assign(new Error('Stripe said no to that. Try again, or come back to it later.'), { status: 502, code: 'stripe_refused', detail: j?.error?.code ?? null });
   }
   await providerCalls.recordMetered({ householdId, provider: PROVIDER, purpose, units: { 'stripe-requests': 1 }, costUsd: 0, ok: true, ms: Date.now() - started });

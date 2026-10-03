@@ -347,6 +347,8 @@ async function book({ offerId, body, household, account, invite = null }) {
           JSON.stringify(price.lines), price.grossPence, price.discountPence, price.valuePence, fee.ratePct, fee.reason, fee.feePence, fee.hostPence],
       );
       for (const id of when.sessionIds) await c.query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, id]);
+      // A one-session booking names its session too, so each weekly session is its own rated event on the fee ladder (Codex, 2 Oct 2026).
+      if (when.sessionIds.length === 1) await c.query('update experience_bookings set session_id = $2 where id = $1', [b.id, when.sessionIds[0]]);
       for (const k of party.children) {
         await c.query('insert into booking_children (booking_id, name, age, date_of_birth, needs, emergency_contact) values ($1, $2, $3, $4, $5::jsonb, $6)',
           [b.id, k.name, k.dob ? null : childAge(k), k.dob, JSON.stringify(k.needs), k.emergencyContact]);
@@ -376,13 +378,27 @@ async function book({ offerId, body, household, account, invite = null }) {
       await query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'payment_setup_failed' where id = $1 and state = 'pending'`, [b.id]);
       await query(`update booking_sessions set state = 'cancelled' where booking_id = $1`, [b.id]);
       if (invite) await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where id = $1 and booking_id = $2`, [invite.id, b.id]);
-      // A waiting-list place this booking took is theirs again while its offer lasts (Codex, 2 Oct 2026).
-      await query(`update offer_waitlist set state = 'offered' where offer_id = $1 and household_id = $2 and state = 'taken' and offer_expires_at > now()`, [o.id, b.household_id]);
+      // The waiting-list place this booking took is theirs again while its offer lasts — that one, not another (Codex, 2 Oct 2026).
+      await restoreWaitlist(b.id);
       throw err;
     }
     await query('update experience_bookings set stripe_payment_intent = $2 where id = $1 and stripe_payment_intent is null', [b.id, pi.id]);
     await ledger.record({ kind: asked ? 'hold' : 'charge', bookingId: b.id, offerId: o.id, hostId: host.id, householdId: b.household_id, amountPence: b.value_pence, epicPence: b.fee_pence, hostPence: b.host_pence, bookingValuePence: b.value_pence, ratePct: b.fee_rate_pct, state: 'pending', stripeRef: pi.id, mode: 'test', reason: b.fee_reason });
     return { booking: { id: b.id, state: 'pending_payment' }, pay: { clientSecret: pi.client_secret ?? null, paymentIntent: pi.id, amountPence: b.value_pence, hold: asked } };
+}
+
+/**
+ * Give back the waiting-list offer a booking used, and only that one: the row for one of the booking's own
+ * sessions, or the whole-event row (Codex, 2 Oct 2026). Only while the offer still runs.
+ */
+async function restoreWaitlist(bookingId) {
+  await query(
+    `update offer_waitlist w set state = 'offered'
+       from experience_bookings b
+      where b.id = $1 and w.offer_id = b.offer_id and w.household_id = b.household_id and w.state = 'taken' and w.offer_expires_at > now()
+        and (w.session_id is null or w.session_id in (select session_id from booking_sessions where booking_id = b.id))`,
+    [bookingId],
+  );
 }
 
 /** A booking is on: the guest and the host are told. */
@@ -452,8 +468,8 @@ export async function applyPaymentIntent(pi) {
     await query(`update hosting_payments set state = 'failed', updated_at = now() where stripe_ref = $1`, [pi.id]).catch(() => null);
     // An invitation answered with a card that then failed is open again, so they can answer once more (Codex, 2 Oct 2026).
     await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where booking_id = $1`, [b.id]);
-    // …and so is a waiting-list place it took, while the offer lasts.
-    await query(`update offer_waitlist set state = 'offered' where offer_id = $1 and household_id = $2 and state = 'taken' and offer_expires_at > now()`, [b.offer_id, b.household_id]);
+    // …and so is the waiting-list place it took, while the offer lasts.
+    await restoreWaitlist(b.id);
   }
   return b.id;
 }
@@ -1051,11 +1067,7 @@ export async function dropUnpaid({ now = new Date() } = {}) {
     await query(`update booking_sessions set state = 'cancelled' where booking_id = any($1::uuid[])`, [ids]);
     // The invitation is open again, and a waiting-list offer still running is theirs again (Codex, 2 Oct 2026).
     await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where booking_id = any($1::uuid[])`, [ids]);
-    await query(
-      `update offer_waitlist w set state = 'offered' from experience_bookings b
-        where b.id = any($1::uuid[]) and w.offer_id = b.offer_id and w.household_id = b.household_id and w.state = 'taken' and w.offer_expires_at > now()`,
-      [ids],
-    );
+    for (const id of ids) await restoreWaitlist(id);
   }
   return rows.length;
 }
