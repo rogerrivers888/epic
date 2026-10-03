@@ -277,7 +277,7 @@ router.get('/host/desk', async (_req, res, next) => {
 });
 
 async function introUsed(hostId) {
-  const { rows: [r] } = await query(`select count(*)::int as n from experience_bookings where host_id = $1 and intro_ordinal is not null`, [hostId]);
+  const { rows: [r] } = await query(`select count(*)::int as n from experience_bookings where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and coalesce(cancel_cause, '') not in ('unpaid', 'payment_setup_failed', 'payment_failed')))`, [hostId]);
   return r?.n ?? 0;
 }
 

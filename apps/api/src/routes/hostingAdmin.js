@@ -232,7 +232,7 @@ router.get('/hosts', requires('view_hosting'), async (req, res, next) => {
       if (req.query.flag === 'rating' && !(h.rating != null && h.rating < 4)) continue;
       const rating = await hostRating(h.id);
       const progress = ladderProgress(s.public_commission, { ratedEvents: rating.ratedEvents, avg: rating.avg });
-      const { rows: [{ n: used }] } = await query('select count(*)::int as n from experience_bookings where host_id = $1 and intro_ordinal is not null', [h.id]);
+      const { rows: [{ n: used }] } = await query(`select count(*)::int as n from experience_bookings where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and coalesce(cancel_cause, '') not in ('unpaid', 'payment_setup_failed', 'payment_failed')))`, [h.id]);
       const intro = introState(s.intro_zero, { hostStartedAt: h.created_at, bookingsSoFar: used });
       out.push({
         id: h.id, name: h.name, town: h.location_label ?? null,
@@ -262,7 +262,7 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
     const { rows: [nextPayout] } = await query(`select amount_pence + tips_pence as pence, release_at, state, hold_reason from host_payouts where host_id = $1 and state in ('scheduled', 'held') order by release_at limit 1`, [h.id]);
     const { rows: events } = await query(`select id, title, lane, state, visibility, starts_on from host_offers where host_id = $1 and lane is not null order by updated_at desc limit 100`, [h.id]);
     const { rows: [late] } = await query(`select count(*)::int as n from offer_sessions x join host_offers o on o.id = x.offer_id where o.host_id = $1 and x.late and x.created_at > now() - interval '90 days'`, [h.id]);
-    const { rows: [{ n: introUsedN }] } = await query('select count(*)::int as n from experience_bookings where host_id = $1 and intro_ordinal is not null', [h.id]);
+    const { rows: [{ n: introUsedN }] } = await query(`select count(*)::int as n from experience_bookings where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and coalesce(cancel_cause, '') not in ('unpaid', 'payment_setup_failed', 'payment_failed')))`, [h.id]);
     const { rows: [open] } = await query(`select count(*)::int as n from hosting_complaints where host_id = $1 and state = 'open'`, [h.id]);
     const { rows: [outstanding] } = await query(
       `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed'))::int as bookings,

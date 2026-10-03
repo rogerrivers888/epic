@@ -187,7 +187,8 @@ const timeOf = (mins) => `${String(Math.floor(((mins % 1440) + 1440) % 1440 / 60
 export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = null, scope = 'this', by = null, now = new Date(), dryRun = false }) {
   if (!['this', 'after'].includes(scope)) throw refuse(400, 'bad_scope', 'This session only, or this and all after it.');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(toDate ?? '')) || Number.isNaN(Date.parse(`${toDate}T12:00:00Z`)) || ymd(new Date(`${toDate}T12:00:00Z`)) !== toDate) throw refuse(400, 'bad_date', 'Pick a date.');
-  if (toTime != null && minutesOf(toTime) == null) throw refuse(400, 'bad_time', 'Pick a time.');
+  // A whole HH:MM inside the day, or nothing (Codex, 2 Oct 2026).
+  if (toTime != null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(toTime))) throw refuse(400, 'bad_time', 'Pick a time.');
   const s = await settings.current();
   const out = await withTransaction(async (c) => {
     const offer = await lockEvent(c, offerId);
