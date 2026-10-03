@@ -212,7 +212,12 @@ router.get('/hosts', requires('view_hosting'), async (req, res, next) => {
               (select count(*) from host_offers o where o.host_id = h.id and o.state <> 'draft')::int as events,
               (select array_agg(distinct o.lane) from host_offers o where o.host_id = h.id and o.lane is not null and o.state <> 'draft') as kinds,
               (select round(avg(r.stars)::numeric, 2)::float from host_reviews r where r.host_id = h.id and r.side = 'guest' and not coalesce(r.hidden, false) and r.publish_on <= current_date) as rating,
-              (select count(*) from host_offers o where o.host_id = h.id and o.state = 'approved')::int as waiting_checked
+              (select count(*) from host_offers o where o.host_id = h.id and o.state = 'approved')::int as waiting_checked,
+              -- Rated events and intro use in the one query, not one each per host (Codex, 2 Oct 2026).
+              (select count(distinct (r.offer_id, coalesce(b.session_id::text, b.occurrence, ''))) from host_reviews r left join experience_bookings b on b.id = r.booking_id
+                where r.host_id = h.id and r.side = 'guest' and r.publish_on <= current_date and not coalesce(r.hidden, false))::int as rated_events,
+              (select round(avg(r.stars)::numeric, 2)::float from host_reviews r where r.host_id = h.id and r.side = 'guest' and r.publish_on <= current_date and not coalesce(r.hidden, false)) as rated_avg,
+              (select count(*) from experience_bookings b where b.host_id = h.id and (b.intro_ordinal is not null or (b.fee_reason = 'intro' and coalesce(b.cancel_cause, '') not in ('unpaid', 'payment_setup_failed', 'payment_failed'))))::int as intro_used
          from hosts h order by h.created_at desc limit 1000`,
     );
     const kind = kindOf(req.query.kind);
@@ -230,10 +235,8 @@ router.get('/hosts', requires('view_hosting'), async (req, res, next) => {
       if (req.query.flag === 'checked' && !checkedNeeded) continue;
       if (req.query.flag === 'tax' && !taxMissing) continue;
       if (req.query.flag === 'rating' && !(h.rating != null && h.rating < 4)) continue;
-      const rating = await hostRating(h.id);
-      const progress = ladderProgress(s.public_commission, { ratedEvents: rating.ratedEvents, avg: rating.avg });
-      const { rows: [{ n: used }] } = await query(`select count(*)::int as n from experience_bookings where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and coalesce(cancel_cause, '') not in ('unpaid', 'payment_setup_failed', 'payment_failed')))`, [h.id]);
-      const intro = introState(s.intro_zero, { hostStartedAt: h.created_at, bookingsSoFar: used });
+      const progress = ladderProgress(s.public_commission, { ratedEvents: h.rated_events, avg: h.rated_avg });
+      const intro = introState(s.intro_zero, { hostStartedAt: h.created_at, bookingsSoFar: h.intro_used });
       out.push({
         id: h.id, name: h.name, town: h.location_label ?? null,
         hosting: h.public_events ? 'Public' : h.events ? 'Private only' : null, kinds: h.kinds ?? [],

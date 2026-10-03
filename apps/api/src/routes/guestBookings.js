@@ -695,7 +695,7 @@ router.get('/booked/:id', async (req, res, next) => {
     const { rows: kids } = await query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1 order by created_at', [b.id]);
     const { rows: refunds } = await query(`select amount_pence, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
     const live = b.sessionsList.filter((x) => x.held === 'booked' && x.state === 'scheduled');
-    const firstAhead = live.map((x) => startOf(x, o)).filter((t) => t > now).sort((x, y) => x - y)[0] ?? null;
+    const firstAhead = live.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     const lastEnd = b.sessionsList.length ? new Date(Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime()))) : null;
     const settlement = o.price_mode === 'by_numbers' && o.total_pence && o.min_count
       ? (() => { const n = numbersSettlement({ totalPence: o.total_pence, minCount: o.min_count, heads: live[0]?.booked ?? o.min_count }); return { paidEach: n.paidEach, nowEach: n.finalEach, dueBackPence: n.backEach * b.heads, settled: Boolean(b.settled_at) }; })()
@@ -809,7 +809,8 @@ router.patch('/booked/:id/answers', async (req, res, next) => {
     const b = await ownBooking(req.params.id, household.id);
     const o = await repo.offerById(b.offer_id);
     const { rows: held } = await query(`select s.* from booking_sessions bs join offer_sessions s on s.id = bs.session_id where bs.booking_id = $1 and bs.state = 'booked' and s.state = 'scheduled'`, [b.id]);
-    const first = held.map((x) => startOf(x, o)).filter((t) => t > new Date()).sort((x, y) => x - y)[0] ?? null;
+    // Until 24 hours before the booking's first session, whether or not later ones are still to come (Codex, 2 Oct 2026).
+    const first = held.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     if (!answersEditable(first) || b.state === 'cancelled') throw refuse(409, 'too_late', 'Answers can be changed until 24 hours before.');
     const answers = cleanAnswers(req.body?.answers, o.guest_questions);
     await query('update experience_bookings set answers = $2::jsonb, answers_changed_at = now() where id = $1', [b.id, JSON.stringify(answers)]);

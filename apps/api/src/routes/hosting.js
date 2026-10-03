@@ -156,7 +156,7 @@ function publicOffer(o, bookings = [], { revealed = false, host = null } = {}) {
     facts: o.facts ?? [], endsAt: o.ends_at?.slice(0, 5) ?? null, repeatEvery: o.repeat_every ?? 'weekly', endDate: ymd(o.end_date), themesDiffer: o.themes_differ !== false,
     noticeDays: o.notice_days, subDetail: o.sub_detail ?? {},
     venue: o.venue, venueArea: o.venue_area, venueLabel: revealed || o.venue === 'out_about' || (o.lane && o.address_hidden === false) ? o.venue_label : null,
-    venueLat: revealed || o.venue === 'out_about' ? o.venue_lat : null, venueLng: revealed || o.venue === 'out_about' ? o.venue_lng : null,
+    venueLat: revealed || o.venue === 'out_about' || (o.lane && o.address_hidden === false) ? o.venue_lat : null, venueLng: revealed || o.venue === 'out_about' || (o.lane && o.address_hidden === false) ? o.venue_lng : null,
     venueCountry: o.venue_country, venueNotes: o.venue_notes, travelRadiusMin: o.travel_radius_min, travelChargePence: o.travel_charge_pence, onlinePlatform: o.online_platform,
     durationMin: o.duration_min, minCount: o.min_count, expectedCount: o.expected_count, maxCount: o.max_count, partyMax: o.party_max, ageLimit: o.age_limit,
     priceMode: o.price_mode, pricePence: o.price_pence, totalPence: o.total_pence, per: o.per, refundRule: o.refund_rule,

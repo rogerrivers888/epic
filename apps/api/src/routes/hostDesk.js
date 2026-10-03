@@ -843,28 +843,35 @@ router.get('/host/desk/reviews', async (_req, res, next) => {
       [host.id],
     );
     const { rows: [tipSum] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from booking_tips where host_id = $1 and state = 'paid'`, [host.id]);
-    const count = rows.length;
-    const avg = count ? Math.round((rows.reduce((n, r) => n + r.stars, 0) / count) * 10) / 10 : null;
-    const stars = [5, 4, 3, 2, 1].map((n) => ({ stars: n, count: rows.filter((r) => r.stars === n).length }));
+    // The summary from every review, not only the latest the list shows (Codex, 2 Oct 2026).
+    const SHOWN = `r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date and not r.hidden`;
+    const { rows: [agg] } = await query(`select count(*)::int as n, round(avg(r.stars)::numeric, 1)::float as avg from host_reviews r where ${SHOWN}`, [host.id]);
+    const { rows: byStars } = await query(`select r.stars, count(*)::int as n from host_reviews r where ${SHOWN} group by r.stars`, [host.id]);
+    const count = agg.n;
+    const avg = agg.avg;
+    const stars = [5, 4, 3, 2, 1].map((n) => ({ stars: n, count: byStars.find((x) => x.stars === n)?.n ?? 0 }));
     const months = lastMonths(localDay(new Date()).slice(0, 7), 6);
-    const over = months.map((m) => {
-      const inM = rows.filter((r) => ymd(r.publish_on).slice(0, 7) <= m);
-      const arrived = rows.filter((r) => ymd(r.publish_on).slice(0, 7) === m).length;
-      return { month: m, avg: inM.length ? Math.round((inM.reduce((n, r) => n + r.stars, 0) / inM.length) * 10) / 10 : null, count: arrived };
-    });
+    const { rows: monthly } = await query(
+      `select m.month,
+              (select round(avg(r.stars)::numeric, 1)::float from host_reviews r where ${SHOWN} and to_char(r.publish_on, 'YYYY-MM') <= m.month) as avg,
+              (select count(*)::int from host_reviews r where ${SHOWN} and to_char(r.publish_on, 'YYYY-MM') = m.month) as count
+         from unnest($2::text[]) as m(month)`,
+      [host.id, months],
+    );
+    const over = months.map((m) => { const x = monthly.find((y) => y.month === m); return { month: m, avg: x?.avg ?? null, count: x?.count ?? 0 }; });
+    const { rows: chipRows } = await query(`select c as label, count(*)::int as n from host_reviews r, jsonb_array_elements_text(r.chips) c where ${SHOWN} group by c order by n desc limit 12`, [host.id]);
     const firstAvg = over.find((o) => o.avg != null)?.avg ?? null;
     const lastAvg = over.at(-1).avg;
-    const chips = new Map();
-    for (const r of rows) for (const c of r.chips ?? []) chips.set(c, (chips.get(c) ?? 0) + 1);
+
     res.json({
       avg, count, tips: { count: tipSum.n, pence: tipSum.pence }, stars,
       overTime: { months: over, ratingLine: firstAvg != null && lastAvg != null && lastAvg !== firstAvg ? `${lastAvg > firstAvg ? 'Up' : 'Down'} ${Math.abs(Math.round((lastAvg - firstAvg) * 10) / 10)} since ${monthName(over.find((o) => o.avg != null).month)}` : null },
-      mentions: [...chips.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([label, n]) => ({ label, count: n })),
+      mentions: chipRows.map((c) => ({ label: c.label, count: c.n })),
       reviews: [
         ...rows.map((r) => ({ id: r.id, kind: 'review', who: r.who, stars: r.stars, tipPence: r.tip_pence ?? null, title: r.title, on: ymd(r.on_date ?? r.publish_on), text: r.text, reply: r.reply ?? null, reported: Boolean(r.reported_at), byProxy: r.by_proxy })),
         ...loneTips.map((t) => ({ id: t.id, kind: 'tip', who: t.who, stars: null, tipPence: t.amount_pence, title: t.title, on: ymd(t.created_at), text: null, reply: null, reported: false, byProxy: false })),
       ].sort((a, b) => String(b.on).localeCompare(String(a.on))),
-      needsReply: rows.filter((r) => !r.reply && r.text).length,
+      needsReply: (await query(`select count(*)::int as n from host_reviews r where ${SHOWN} and r.reply is null and r.text is not null`, [host.id])).rows[0].n,
     });
   } catch (err) { next(err); }
 });
