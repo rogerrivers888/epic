@@ -38,7 +38,7 @@ import { logChange } from '../repositories/hostingSettings.js';
 import { currentAccount } from '../context.js';
 import { householdOnPublicPath } from '../auth.js';
 import { currentHousehold } from './household.js';
-import { owe, shareOf, movedSinceBooking, chargeBasis } from '../sources/bookingMoney.js';
+import { owe, shareOf, movedSinceBooking, chargeBasis, refreshChargeDue } from '../sources/bookingMoney.js';
 import { feeFor, priceBooking, tipFee, numbersSettlement } from '../domain/money.js';
 import { mainAction, placesLeft, sessionsForBooking, KINDS_BY_LANE, checkParty, childAge, cancelQuote, answersEditable, tipOpen, guestChip } from '../domain/booking.js';
 import { localInstant, localDay, plusDays, slotsFor, bookableDay, dow, perPersonAt, refundWords, hostingConfig } from '../domain/lanes.js';
@@ -756,6 +756,20 @@ router.post('/booked/:id/pay-now', async (req, res, next) => {
     const host = await repo.hostById(b.host_id);
     if (!hostCanBeCharged(host)) throw refuse(409, 'host_not_ready', 'This host can’t take payments just now.');
     const { amountPence, feePence } = laterAmounts(b);
+    // One payment at a time (Codex, 3 Oct 2026): one still open — the later charge waiting on the bank, or an earlier
+    // press — is handed back rather than a second made beside it.
+    if (b.stripe_payment_intent) {
+      const open = await stripe.retrievePaymentIntent(b.stripe_payment_intent, { householdId: household.id });
+      if (open.status === 'succeeded') { await applyPaymentIntent(open); throw refuse(409, 'nothing_to_pay', 'That’s paid already.'); }
+      if (open.status === 'processing') throw refuse(409, 'processing', 'Your bank is still processing it.');
+      if (['requires_payment_method', 'requires_action', 'requires_confirmation'].includes(open.status)) {
+        return res.json({ booking: { id: b.id }, pay: { clientSecret: open.client_secret ?? null, paymentIntent: open.id, amountPence: open.amount } });
+      }
+    }
+    // Claimed, so two presses at once make one PaymentIntent between them.
+    const { rowCount: claimed } = await query(`update experience_bookings set later_charge_claimed_at = now() where id = $1 and payment_state = 'charge_failed'
+      and (later_charge_claimed_at is null or later_charge_claimed_at < now() - interval '1 minute')`, [b.id]);
+    if (!claimed) throw refuse(409, 'try_again', 'Opening the payment already — give it a moment.');
     const { rows: [n] } = await query('select count(*)::int as n from hosting_payments where booking_id = $1 and kind = $2', [b.id, 'charge']);
     const pi = await stripe.paymentIntent({ amountPence, destination: host.stripe_account_id, applicationFeePence: feePence, hostName: host.name, bookingId: b.id, offerId: b.offer_id, householdId: b.household_id, email: account?.email ?? null, idempotencyKey: `booking-later-pay-${b.id}-${n.n}` });
     await query('update experience_bookings set stripe_payment_intent = $2 where id = $1', [b.id, pi.id]);
@@ -1268,6 +1282,8 @@ export async function cancelBooking({ bookingId, household, account, sessionIds 
     });
     // A freed place goes to the waiting list straight away.
     void offerFreedPlaces().catch(() => null);
+    // A booking far ahead with a session cancelled is charged on its remaining sessions' date (L4).
+    await refreshChargeDue({ bookingId }).catch(() => null);
     return out;
 }
 

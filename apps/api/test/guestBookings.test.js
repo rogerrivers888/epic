@@ -1062,6 +1062,9 @@ test('L4: a later charge the card refuses keeps the place, asks the guest, opens
     // The guest pays from the booking: a new payment, in the browser, the same destination charge.
     const pay = await srv.send('POST', `/api/booked/${id}/pay-now`, {});
     assert.equal(pay.status, 200, JSON.stringify(pay.body));
+    // A second press (another tab) gets the same payment back, never a second one beside it.
+    const again = await srv.send('POST', `/api/booked/${id}/pay-now`, {});
+    assert.equal(again.body.pay.paymentIntent, pay.body.pay.paymentIntent);
     pays(pay.body.pay.paymentIntent);
     const done = await srv.send('POST', `/api/booked/${id}/payment`, {});
     assert.deepEqual([done.body.state, done.body.paymentState], ['confirmed', 'charged']);
@@ -1147,5 +1150,21 @@ test('L4: two parts cancelled separately come off the same whole; a part cancell
     await guest.applyPaymentIntent(pi);
     const { rows: [line] } = await query(`select amount_pence, cause from hosting_payments where booking_id = $1 and kind = 'refund'`, [b.id]);
     assert.deepEqual([line.amount_pence, line.cause], [2000, 'guest_cancelled']);
+  } finally { await srv.close(); }
+});
+
+test('L4: the charge date follows the sessions — the earliest cancelled, it moves to the next', async () => {
+  settings.forget();
+  const { o, sessions } = await anEvent({ lane: 'weekly', price: 1000, priceMode: 'same_each', sessions: 3, firstIn: 100 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'book_ahead', sessionIds: sessions.map((x) => x.id) }, party: { adults: 1 } });
+    Object.assign(setups.get(r.body.pay.setupIntent), { status: 'succeeded', payment_method: 'pm_saved_6' });
+    await srv.send('POST', `/api/booked/${r.body.booking.id}/payment`, {});
+    const due = async () => new Date((await query('select charge_due_at from experience_bookings where id = $1', [r.body.booking.id])).rows[0].charge_due_at).getTime();
+    const first = await due();
+    assert.equal((await srv.send('POST', `/api/booked/${r.body.booking.id}/cancel`, { sessionIds: [sessions[0].id] })).status, 200);
+    assert.equal(Math.round((await due() - first) / 86_400_000), 7, 'a week later, with the next session');
   } finally { await srv.close(); }
 });

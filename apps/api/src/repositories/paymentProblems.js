@@ -53,7 +53,7 @@ const run = (client) => (client ? (t, p) => client.query(t, p) : query);
  * that was won and then reversed, say. Never throws.
  */
 export async function record({ kind, dedupeKey, amountPence = null, currency = 'gbp', txCount = 1, bookingId = null, householdId = null, hostId = null,
-  offerId = null, membershipId = null, stripeRef = null, stage = null, detail = {}, at = null, reopen = false, mode = 'test' }, client = null) {
+  offerId = null, membershipId = null, stripeRef = null, stage = null, detail = {}, at = null, reopen = false, mode = currentMode() }, client = null) {
   if (!KINDS.includes(kind) || !dedupeKey) return null;
   try {
     const { rows: [r] } = await run(client)(

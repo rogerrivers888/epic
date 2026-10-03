@@ -213,6 +213,7 @@ export async function cancelSessions({ offerId, hostId, sessionIds = null, reaso
     return { cancelled: ids.length, refunds: refunds.length, late, told };
   });
   await tell(out.told);
+  await refreshChargeDue({ offerId }).catch(() => null);
   return { cancelled: out.cancelled, refunds: out.refunds, late: out.late };
 }
 
@@ -312,6 +313,7 @@ export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = 
     return { moved, late: moved.some((m) => m.late), guests: bookings.length, told };
   });
   await tell(out.told);
+  await refreshChargeDue({ offerId }).catch(() => null);
   return { moved: out.moved, late: out.late, guests: out.guests };
 }
 
@@ -521,6 +523,33 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
 }
 
 /**
+ * When a booking far ahead is charged follows its sessions (Codex, 3 Oct 2026): 80 days before the earliest one still
+ * booked and to come, or its decides-by if earlier — recomputed whenever sessions are cancelled or moved, and before
+ * each run of the later charges, so a session cancelled never charges too early and one moved earlier never leaves the
+ * booking uncharged until after the event. Due already: due now.
+ */
+export async function refreshChargeDue({ offerId = null, bookingId = null } = {}) {
+  const { rows } = await query(
+    `select b.id, o.time_zone, s.on_date, s.starts_at, s.decides_at
+       from experience_bookings b join host_offers o on o.id = b.offer_id
+       join booking_sessions bs on bs.booking_id = b.id and bs.state = 'booked'
+       join offer_sessions s on s.id = bs.session_id and s.state = 'scheduled'
+      where b.payment_state = 'card_saved' and b.state <> 'cancelled'
+        and ($1::uuid is null or b.offer_id = $1) and ($2::uuid is null or b.id = $2)`, [offerId, bookingId]);
+  const by = new Map();
+  for (const r of rows) {
+    const start = sessionStart(r, { time_zone: r.time_zone });
+    if (start <= new Date()) continue;
+    const eighty = new Date(start.getTime() - 80 * 86_400_000);
+    const due = r.decides_at && new Date(r.decides_at) < eighty ? new Date(r.decides_at) : eighty;
+    const was = by.get(r.id);
+    if (!was || due < was) by.set(r.id, due);
+  }
+  for (const [id, due] of by) await query('update experience_bookings set charge_due_at = $2 where id = $1 and payment_state = $3 and charge_due_at is distinct from $2', [id, due, 'card_saved']);
+  return by.size;
+}
+
+/**
  * The later charges (register L4): every booking far ahead whose day has come is charged, off-session, on the card
  * saved for it — the same destination charge as any other (L1, L2), keyed on the booking so a retry after a crash is
  * the same PaymentIntent. Claimed first, so two runs never ask twice at once.
@@ -532,6 +561,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
 export async function chargeLaterDue({ now = new Date(), status = stripe.stripeStatus, charge = stripe.laterCharge, limit = 25 } = {}) {
   const out = { charged: 0, failed: 0, waiting: 0 };
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
+  await refreshChargeDue();
   const { rows } = await query(
     `update experience_bookings b set later_charge_claimed_at = now()
       where b.id in (select id from experience_bookings
@@ -568,7 +598,9 @@ export async function chargeLaterDue({ now = new Date(), status = stripe.stripeS
     } else if (pi.status === 'processing') {
       out.waiting += 1;
     } else {
-      // Stripe made it but it needs the guest (their bank's own check): the same as a refusal — they pay in the browser.
+      // Stripe made it but it needs the guest (their bank's own check): the same as a refusal — they pay in the browser,
+      // on this same PaymentIntent (pay-now hands its secret back). Its ledger row says it did not go through.
+      await query(`update hosting_payments set state = 'failed', updated_at = now() where stripe_ref = $1 and state = 'pending'`, [pi.id]);
       await laterChargeRefused(b, { amountPence, code: pi.last_payment_error?.code ?? pi.status });
       out.failed += 1;
     }
@@ -579,7 +611,7 @@ export async function chargeLaterDue({ now = new Date(), status = stripe.stripeS
 /** The later charge refused: the place kept, the guest asked to pay, the problem open for a person. */
 async function laterChargeRefused(b, { amountPence, code }) {
   const { rowCount } = await query(
-    `update experience_bookings set payment_state = 'charge_failed', later_charge_failed_at = now() where id = $1 and payment_state = 'card_saved'`, [b.id]);
+    `update experience_bookings set payment_state = 'charge_failed', later_charge_failed_at = now(), later_charge_claimed_at = null where id = $1 and payment_state = 'card_saved'`, [b.id]);
   if (!rowCount) return;
   await problems.record({ kind: 'later_charge_failed', dedupeKey: `later_charge_failed:${b.id}`, amountPence, bookingId: b.id, householdId: b.household_id, hostId: b.host_id, offerId: b.offer_id, detail: { code, dueAt: b.charge_due_at } });
   await logChange({ subjectKind: 'booking', subjectId: b.id, field: 'later_charge', after: { failed: true, code }, byLabel: 'stripe' });
