@@ -94,7 +94,7 @@ export function PublicEventPage({ code, locale }: { code: string; locale: SiteLo
     navigate(signedIn() ? to : `${paths.login()}?next=${encodeURIComponent(to)}`);
   };
   const price = eventPrice({ price: e.price!, who: { ageMin: e.who?.ageMin ?? null, ageMax: e.who?.ageMax ?? null, dropOff: e.who?.dropOff ?? false } } as never);
-  const open = e.status === 'live';
+  const open = e.status === 'live' && e.bookable !== false;
   return (
     <Frame locale={locale}>
       {e.photos?.[0] ? <View style={{ marginHorizontal: -20 }}><PhotoHead uri={pic(e.photos[0])} webPage /></View> : null}

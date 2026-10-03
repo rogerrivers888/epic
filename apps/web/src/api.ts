@@ -6302,7 +6302,7 @@ export type PublicReviews = { total: number; rating: number | null; items: { sta
 /** A public event page (Epic Events on the web, 3 Oct 2026): the host as "Hannah R.", the town and never the address. */
 export type PublicEvent = {
   code: string; path: string; status: 'live' | 'finished' | 'called_off' | 'expired' | 'gone'; ended?: 'finished' | 'called_off' | 'host' | null; on: string | null; mood: string; subcategory: string | null;
-  offerId?: string; title?: string | null; summary?: string | null; description?: string | null; lane?: GuestLane; kind?: string | null; category?: string | null;
+  offerId?: string; bookable?: boolean; title?: string | null; summary?: string | null; description?: string | null; lane?: GuestLane; kind?: string | null; category?: string | null;
   photos?: string[]; where?: { area: string | null; online: boolean };
   when?: { sessions: { date: string; endsOn: string | null; time: string | null; endsAt: string | null }[]; first: string | null; last: string | null; startsAt: string | null; endsAt: string | null; timeZone: string };
   price?: EventNear['price']; who?: { ageMin: number | null; ageMax: number | null; dropOff: boolean; checked: boolean }; refundWords?: string | null;

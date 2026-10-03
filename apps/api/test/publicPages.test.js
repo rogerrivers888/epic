@@ -98,6 +98,10 @@ test('not on the web at all: private, link-only, drafts and events in review; an
       assert.equal((await srv.get(`/api/public/events/${o.public_code}`)).status, 404, `${visibility} ${state}`);
     }
     assert.equal((await srv.get(`/api/public/media/${photo}`)).status, 404, 'a photo only on unlisted events is not served');
+    // A private upload (identity evidence) pointed at by a live public event is never served.
+    const secret = await aPhoto(household.id, true);
+    await anEvent(h, { photo: secret });
+    assert.equal((await srv.get(`/api/public/media/${secret}`)).status, 404, 'never a private photo');
     assert.equal((await srv.get('/api/public/events/NOT A CODE')).status, 404);
   } finally { await srv.close(); }
 });

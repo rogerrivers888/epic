@@ -144,7 +144,8 @@ router.get('/events/:code', async (req, res, next) => {
     const mood = moodOf(o.what_category, `${o.what_label ?? ''} ${o.title ?? ''}`);
     // Every status gets the whole page: a page that has left the index stays readable (Roger, 3 Oct 2026).
     const base = { code: o.public_code, path: eventPath(o), status: st.status, ended: st.ended ?? null, on: st.on ?? null, mood, subcategory: o.what_label ?? null };
-    const ahead = sessions.filter((s) => s.state !== 'cancelled' && ymd(s.ends_on ?? s.on_date) >= today).slice(0, 12);
+    // Every session still to come (a course runs to 20), and the count, so the page never says 12 of 20 (Codex, 3 Oct 2026).
+    const ahead = sessions.filter((s) => s.state !== 'cancelled' && ymd(s.ends_on ?? s.on_date) >= today).slice(0, 40);
     const [reviews, moreFromHost, similar] = await Promise.all([
       reviewsOf(h.id),
       liveCards('o.host_id = $1 and o.id <> $2', [h.id, o.id], today),
@@ -154,6 +155,8 @@ router.get('/events/:code', async (req, res, next) => {
     res.json({
       ...base,
       offerId: o.id, title: o.title, summary: o.summary ?? null, description: o.description ?? null,
+      // Live and taking bookings — a host may pause a listing for a while; its page stays, its Book does not (Codex, 3 Oct 2026).
+      bookable: st.status === 'live' && o.state === 'live',
       lane: o.lane, kind: KIND_WORDS[o.lane] ?? null, category: o.what_category ?? null,
       photos: (o.photo_ids ?? []).slice(0, 8).map(media),
       // The town and the area only — the exact place is for those who book (brief §5).
@@ -260,7 +263,8 @@ router.get('/media/:id', async (req, res, next) => {
     }
     if (!allowed) return res.status(404).end();
     const m = await repo.mediaById(id);
-    if (!m || m.kind !== 'photo' || !String(m.mime ?? '').startsWith('image/')) return res.status(404).end();
+    // Never a row the household marked private (identity evidence, a document), whatever an offer points at (Codex, 3 Oct 2026).
+    if (!m || m.is_private || m.kind !== 'photo' || !String(m.mime ?? '').startsWith('image/')) return res.status(404).end();
     res.setHeader('content-type', m.mime);
     // A day, not a year: a photo leaves the web when its page does.
     res.setHeader('cache-control', 'public, max-age=86400');
