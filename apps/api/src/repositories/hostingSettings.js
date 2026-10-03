@@ -62,12 +62,21 @@ export function forget() { cache = null; useSettingsOverlay(null); }
  * `why` is required, `approvalId` names the approval it came from when it did.
  * Returns `{ row }` or `{ error, status }`.
  */
-export async function change(key, { value, isOn }, { by = null, why, approvalId = null } = {}) {
+export async function change(key, { value, isOn }, { by = null, why, approvalId = null, ifLatest = null } = {}) {
   const reason = typeof why === 'string' ? why.trim().slice(0, 500) : '';
   if (!reason) return { status: 400, error: 'Say why this is changing.' };
   const out = await withTransaction(async (c) => {
     const { rows: [row] } = await c.query('select * from hosting_settings where key = $1 for update', [key]);
     if (!row) return { status: 404, error: 'There is no such setting.' };
+    // An undo names the change it undoes, and is refused under the setting's own lock if anything came after it:
+    // the check and the write are one step, so nothing can land between them (Codex, 3 Oct 2026).
+    if (ifLatest) {
+      const { rows: [later] } = await c.query(
+        `select 1 from hosting_changes x where x.subject_kind = 'setting' and x.subject_id = $1 and x.id <> $2
+            and x.at > (select at from hosting_changes where id = $2) limit 1`, [key, ifLatest],
+      );
+      if (later) return { status: 409, error: 'It has been changed since. Undo the latest change first.' };
+    }
     const ok = checkSetting(row, { value, isOn });
     if (!ok.ok) return { status: 400, error: ok.message };
     const next = {

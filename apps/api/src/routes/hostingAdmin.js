@@ -366,17 +366,12 @@ router.post('/changes/:id/undo', requireOwnerSignedIn('undo a setting change'), 
   try {
     const { rows: [c] } = await query(`select * from hosting_changes where id::text = $1`, [String(req.params.id)]);
     if (!c || c.subject_kind !== 'setting') return res.status(404).json({ error: 'not_found', message: 'There is no setting change to undo.' });
-    const { rows: [later] } = await query(
-      // Compared in the database: a timestamp through JavaScript loses its microseconds and would find the change itself.
-      `select 1 from hosting_changes x where x.subject_kind = 'setting' and x.subject_id = $1 and x.id <> $2
-          and x.at > (select at from hosting_changes where id = $2) limit 1`, [c.subject_id, c.id],
-    );
-    if (later) return res.status(409).json({ error: 'changed_since', message: 'It has been changed since. Undo the latest change first.' });
     const before = c.before ?? {};
+    // Still the latest word on it, checked under the setting's lock in the same step as the write.
     const out = await settingsRepo.change(c.subject_id, { value: before.value, isOn: before.is_on }, {
-      by: currentAccount()?.id ?? null, why: `Undo: ${String(c.why ?? '').slice(0, 480)}`,
+      by: currentAccount()?.id ?? null, why: `Undo: ${String(c.why ?? '').slice(0, 480)}`, ifLatest: c.id,
     });
-    if (out.error) return res.status(out.status).json({ error: 'not_undone', message: out.error });
+    if (out.error) return res.status(out.status).json({ error: out.status === 409 ? 'changed_since' : 'not_undone', message: out.error });
     const { rows: [undone] } = await query(
       `select id from hosting_changes where subject_kind = 'setting' and subject_id = $1 order by at desc limit 1`, [c.subject_id],
     );

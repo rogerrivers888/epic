@@ -291,8 +291,12 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
       if (onChanged) body.isOn = isOn;
       await api.hostingAdminPut(`/settings/${encodeURIComponent(setting.key)}`, body);
       // The change it just made, for its Undo: the newest on this setting.
-      const log = await api.hostingAdmin<{ changes: { id: string }[] }>('/changes', { kind: 'setting', subject: setting.key, limit: 1 }).catch(() => null);
-      setUndoId(log?.changes?.[0]?.id ?? null);
+      // Its own change, for the Undo: the newest on this setting only if it carries this reason and this new value —
+      // never somebody else's change that landed a moment later (Codex, 3 Oct 2026).
+      const log = await api.hostingAdmin<{ changes: { id: string; why: string | null; after: unknown }[] }>('/changes', { kind: 'setting', subject: setting.key, limit: 1 }).catch(() => null);
+      const mine = log?.changes?.[0];
+      const sameAfter = mine && JSON.stringify((mine.after as { value?: unknown } | null)?.value) === JSON.stringify(valueChanged && parsed.ok ? parsed.value : setting.value);
+      setUndoId(mine && mine.why === why.trim() && sameAfter ? mine.id : null);
       setConfirming(false);
       setSaid({ tone: 'accent', words: 'Applied', detail: 'Logged in Changes. A fee change applies to bookings made after it.' });
       onSaved();
