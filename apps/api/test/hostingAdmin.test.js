@@ -360,11 +360,14 @@ test('L7 point 4: Stripe asking a verified host for ID is raised in the back off
   try {
     const page = (await staff.get(`/api/admin/hosting/hosts/${h.id}`)).body;
     assert.deepEqual(page.trust.verified.stripeAsksAgain, ['individual.verification.document']);
+    const listed = (await staff.get('/api/admin/hosting/safety')).body.idAskedAgain.find((r) => r.hostId === h.id);
+    assert.deepEqual([listed.host, listed.asks, listed.stripeAccount], ['Asked Again', ['individual.verification.document'], 'acct_asked'], 'listed in Safety, so a person can act on it');
     const before = (await staff.get('/api/admin/hosting/health')).body;
     assert.ok(before.idAskedAgain >= 1);
     // Stripe stops asking (its next account.updated is stored): the item goes by itself.
     await query(`update hosts set stripe_requirements = $2::jsonb where id = $1`, [h.id, JSON.stringify({ currentlyDue: [], eventuallyDue: [], pastDue: [] })]);
     assert.deepEqual((await staff.get(`/api/admin/hosting/hosts/${h.id}`)).body.trust.verified.stripeAsksAgain, []);
     assert.equal((await staff.get('/api/admin/hosting/health')).body.idAskedAgain, before.idAskedAgain - 1);
+    assert.equal((await staff.get('/api/admin/hosting/safety')).body.idAskedAgain.some((r) => r.hostId === h.id), false);
   } finally { await staff.close(); }
 });

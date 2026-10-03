@@ -724,6 +724,14 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
     );
     // Reported from a host's profile or an event page (guest handoff G25: "Report this host", going to Safety).
     const reports = await repo.openReports();
+    // Verified hosts Stripe is asking for ID again (L7 point 4): who, and what Stripe lists — for a person to take up in
+    // Stripe, never sent to the host. A row goes by itself when Stripe stops asking.
+    const { rows: askedAgain } = await query(
+      `select id, name, identity_verified_at, stripe_account_id, stripe_requirements, updated_at from hosts
+        where identity_state = 'verified' and stripe_requirements is not null
+          and stripe_requirements::text ~ '(verification\\.(additional_)?document|proof_of_liveness|\\.identity_verification\\.)'
+        order by updated_at`,
+    );
     const { rows: incidents } = await query(
       `select i.*, h.name as host, o.title from session_incidents i left join hosts h on h.id = i.host_id left join host_offers o on o.id = i.offer_id order by i.created_at desc limit 200`,
     );
@@ -733,6 +741,7 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
       ratingsReason: th ? null : t ? 'The rating thresholds are set without an average to measure against' : 'Rating escalation thresholds are not set yet',
       complaints: complaints.filter((k) => k.kind !== 'host_no_show').map((k) => ({ id: k.id, kind: k.kind, host: k.host, event: k.title, household: k.household, booking: k.booking_id ? k.booking_id.slice(0, 8) : null, reason: k.reason, amountPence: k.amount_pence, state: k.state, at: k.created_at, autoPayLimit: s.claim_auto_pay_limit ?? null })),
       noShows: complaints.filter((k) => k.kind === 'host_no_show').map((k) => ({ id: k.id, host: k.host, event: k.title, household: k.household, state: k.state, at: k.created_at })),
+      idAskedAgain: askedAgain.map((h) => ({ hostId: h.id, host: h.name, asks: storedIdAsks(h.stripe_requirements), verifiedOn: ymd(h.identity_verified_at), stripeAccount: h.stripe_account_id, since: h.updated_at })),
       incidentsCapped: incidents.length === 200,
       reports: reports.map((r) => ({ id: r.id, hostId: r.host_id, host: r.host_name, event: r.title ?? null, reason: r.reason, at: r.created_at })),
       incidents: incidents.map((i) => ({ id: i.id, host: i.host, event: i.title, children: i.children ?? [], reporter: i.reporter, body: i.body, at: i.created_at })),

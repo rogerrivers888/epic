@@ -28,6 +28,8 @@ type Safety = {
   noShows: { id: string; host: string | null; event: string | null; household: string | null; at: string }[];
   incidents: { id: string; host: string | null; event: string | null; children: string[]; reporter: 'host' | 'guest' | 'staff'; body: string; at: string }[];
   reports?: { id: string; hostId: string; host: string; event: string | null; reason: string; at: string }[];
+  /** Verified hosts Stripe is asking for ID again (L7): taken up in Stripe by a person, never sent to the host. */
+  idAskedAgain?: { hostId: string; host: string; asks: string[]; verifiedOn: string | null; stripeAccount: string | null; since: string }[];
 };
 type Checked = Safety['checked'][number];
 type Rating = NonNullable<Safety['ratings']>[number] & { cantSpeak?: boolean };
@@ -35,6 +37,7 @@ type Complaint = Safety['complaints'][number];
 type NoShow = Safety['noShows'][number];
 type Incident = Safety['incidents'][number];
 type Report = NonNullable<Safety['reports']>[number];
+type AskedAgain = NonNullable<Safety['idAskedAgain']>[number];
 
 const CHECKED_WORDS: Record<string, string> = { none: 'Missing', submitted: 'Submitted', passed: 'Passed', failed: 'Failed' };
 const KIND_OF_CLAIM: Record<string, string> = { complaint: 'Complaint', guarantee_claim: 'Guarantee claim' };
@@ -51,6 +54,7 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
   const ns = useSortParam('nsort');
   const ic = useSortParam('isort');
   const rp = useSortParam('rpsort');
+  const ia = useSortParam('iasort');
   const [reportError, setReportError] = useState<string | null>(null);
 
   /** The complaint being closed, and why — Resolve and Decline both ask for a line. */
@@ -71,7 +75,16 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
 
   const reports = useSorted(data?.reports, rp.sort, rp.desc, (r, k) => (k === 'host' ? r.host : k === 'event' ? r.event : k === 'reason' ? r.reason : k === 'at' ? r.at : null));
 
+  const askedAgain = useSorted(data?.idAskedAgain, ia.sort, ia.desc, (r, k) => (k === 'host' ? r.host : k === 'verified' ? r.verifiedOn : k === 'since' ? r.since : null));
+
   if (!data) return <Loading error={error} reload={reload} />;
+  const askedCols: Col<AskedAgain>[] = [
+    { key: 'host', label: 'Host', sort: 'host', width: 180, tip: tip('Host', 'A host whose ID check passed.'), cell: (r) => <Word>{r.host}</Word> },
+    { key: 'asks', label: 'What Stripe asks for', grow: true, tip: tip('What Stripe asks for', 'From Stripe’s requirements on their account. The host is not asked; take it up in Stripe.'), cell: (r) => <Word>{r.asks.join(', ')}</Word> },
+    { key: 'verified', label: 'ID checked', sort: 'verified', width: 110, tip: tip('ID checked', 'The day Stripe confirmed their ID.'), cell: (r) => (r.verifiedOn ? <Word>{when(r.verifiedOn)}</Word> : <Blank />) },
+    { key: 'account', label: 'Stripe account', width: 200, tip: tip('Stripe account', 'To find them in Stripe.'), cell: (r) => (r.stripeAccount ? <Word>{r.stripeAccount}</Word> : <Blank />) },
+    { key: 'since', label: 'Seen', sort: 'since', width: 110, tip: tip('Seen', 'When Stripe’s requirements last changed.'), cell: (r) => <Word>{when(r.since)}</Word> },
+  ];
 
   const close = async () => {
     if (!closing) return;
@@ -179,6 +192,7 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
               tip={data.ratings == null ? tip('Caught by rating', data.ratingsReason ?? 'The rating rule is not set yet.') : tip('Caught by rating', 'Hosts the rating rule has caught.')} />
         <Stat label="No-shows" value={data.noShows.length.toLocaleString()} tip={tip('No-shows', 'Open reports. Refunded in full automatically.')} />
         <Stat label="Host reports" value={(data.reports?.length ?? 0).toLocaleString()} tip={tip('Host reports', 'Open reports sent from a host’s profile or an event page.')} />
+        <Stat label="ID asked again" value={(data.idAskedAgain?.length ?? 0).toLocaleString()} tip={tip('ID asked again', 'Verified hosts Stripe is asking for ID again. Never sent to the host.')} />
       </Band>
 
       <View>
@@ -205,6 +219,11 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
             {failed ? <Text style={[type.small, { color: red() }]}>{failed}</Text> : null}
           </View>
         ) : null}
+      </View>
+
+      <View>
+        <TableHead tip={tip('ID asked again', 'Verified hosts Stripe is asking for ID again. Take it up in Stripe; the row goes when Stripe stops asking.')}>ID asked again</TableHead>
+        <Ladder columns={askedCols} rows={askedAgain} keyOf={(r) => r.hostId} sort={ia.sort} desc={ia.desc} onSort={ia.onSort} empty={<Blank />} />
       </View>
 
       <View>
