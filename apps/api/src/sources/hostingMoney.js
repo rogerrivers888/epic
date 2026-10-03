@@ -18,6 +18,7 @@
  *                A row it could not read is "not checked", never a match.
  */
 
+import { query } from '../db.js';
 import * as ledger from '../repositories/hostingLedger.js';
 import * as settings from '../repositories/hostingSettings.js';
 import * as notifications from '../repositories/notifications.js';
@@ -32,6 +33,7 @@ const HELD_WORDS = {
   not_set: 'Payouts are waiting on a setting Epic has not set yet.',
   dispute: 'A guest’s bank is looking at a payment for this session. The payout waits until it decides.',
   not_manual: 'Epic is checking your Stripe payout settings. The payout waits until that is done.',
+  dispute_lost: 'A guest’s bank took back a payment for this session. Epic will be in touch about this payout.',
   no_end: 'This session has no end time, so its payout waits for a person to check it.',
 };
 
@@ -76,6 +78,8 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
     }, s);
     // The owner released it by hand (hostingAdmin, Release): that overrides the clock and a complaint's hold, never a
     // missing Stripe account or tax details — no payout can be made without those.
+    // A lost chargeback holds it for the owner too: only his Release, after looking at it, pays it (Codex, 3 Oct 2026).
+    if (p.dispute_lost && p.released_by !== 'owner' && decided.state !== 'held') { decided.state = 'held'; decided.reason = 'dispute_lost'; }
     const ownerSaid = p.released_by === 'owner' && (decided.state === 'wait' || (decided.state === 'held' && ['complaint', 'not_set', 'no_end'].includes(decided.reason)));
     let d = ownerSaid ? { state: 'release', by: 'owner' }
       : p.state === 'released' && decided.state !== 'held' ? { state: 'release', by: p.released_by ?? 'time' } : decided;
@@ -109,9 +113,14 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
       const po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: payoutKey(claimed) });
       // Stripe's payout.failed can land before this write: then the row is failed already, and it is neither
       // recorded as paid nor announced (Codex, 3 Oct 2026).
-      const done = await ledger.finishPayout(p.id, { state: 'paid', stripePayout: po.id, mode: 'test' });
+      const done = await ledger.payoutPaid(p.id, {
+        stripePayout: po.id, mode: 'test',
+        ledgerLine: { kind: 'payout', hostId: p.host_id, offerId: p.offer_id, sessionId: p.session_id, householdId: p.household_id, payoutId: p.id, amountPence: amount, hostPence: amount, reason: d.by },
+      });
       if (!done) { out.failed += 1; continue; }
-      await ledger.record({ kind: 'payout', hostId: p.host_id, offerId: p.offer_id, sessionId: p.session_id, householdId: p.household_id, payoutId: p.id, amountPence: amount, hostPence: amount, state: 'succeeded', stripeRef: po.id, mode: 'test', reason: d.by });
+      // Told only while it still stands: a bounce reported in the meantime is not announced as on its way.
+      const { rows: [still] } = await query('select state from host_payouts where id = $1', [p.id]);
+      if (still?.state !== 'paid') { out.failed += 1; continue; }
       await notifications.notify({
         householdId: p.household_id, kind: 'payout_sent', title: `£${(amount / 100).toFixed(2)} is on its way`,
         link: '/host/offers', dedupeKey: `payout_sent:${p.id}`,

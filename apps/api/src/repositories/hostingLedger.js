@@ -96,7 +96,9 @@ export async function paidBookingsOfSession(sessionId, client = null) {
       where bs.session_id = $1 and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded')
         -- Only money that reached the host's own balance (L1). A booking charged the old way, on Epic's balance,
         -- is never paid out from the host's: those rows wait to be voided (owner, 3 Oct 2026).
-        and b.charge_model = 'destination'`,
+        and b.charge_model = 'destination'
+        -- A chargeback the host lost took that money back: it is not the host's to be paid (Codex, 3 Oct 2026).
+        and b.dispute_state is distinct from 'lost'`,
     [sessionId],
   );
   return rows;
@@ -148,6 +150,8 @@ export async function payoutsDue({ now = new Date(), limit = 100 } = {}) {
             exists (select 1 from hosting_complaints k where k.session_id = p.session_id and k.state = 'open') as complaint_open,
             exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                      where bs.session_id = p.session_id and b.dispute_state = 'open') as dispute_open,
+            exists (select 1 from jsonb_array_elements(p.lines) l join experience_bookings b on b.id = (l->>'bookingId')::uuid
+                     where b.dispute_state = 'lost') as dispute_lost,
             exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                      where bs.session_id = p.session_id and bs.state = 'booked' and b.confirmed_happened = 'yes') as guest_confirmed,
             exists (select 1 from booking_sessions bs join host_reviews r on r.booking_id = bs.booking_id
@@ -196,6 +200,24 @@ export async function holdPayout(id, reason) {
     [id, reason],
   );
   return row ?? null;
+}
+
+/**
+ * A released payout paid: the row and its ledger line in one transaction, so a
+ * payout.failed from Stripe either lands before (and this finds nothing
+ * released, and records nothing) or after (and finds both to fail). Returns
+ * the payout row, or null when it was no longer released (Codex, 3 Oct 2026).
+ */
+export async function payoutPaid(id, { stripePayout, ledgerLine, mode = 'test' }) {
+  return withTransaction(async (c) => {
+    const { rows: [row] } = await c.query(
+      `update host_payouts set state = 'paid', stripe_payout = $2, mode = $3, updated_at = now() where id = $1 and state = 'released' returning *`,
+      [id, stripePayout, mode],
+    );
+    if (!row) return null;
+    await record({ ...ledgerLine, stripeRef: stripePayout, state: 'succeeded', mode }, c);
+    return row;
+  });
 }
 
 /** A released payout's outcome: 'paid' with Stripe's Payout id (made on the host's own account), or 'failed'. */

@@ -453,3 +453,42 @@ test('Codex: money not yet cleared is checked for first, and a refusal Stripe wo
   assert.deepEqual(asked, [`payout-${p.id}`, `payout-${p.id}-a1`]);
   assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'paid');
 });
+
+test('Codex: a chargeback the host lost is never paid out — left out when the payout is made, held if it was in one', async () => {
+  settings.forget();
+  const status = () => ({ ready: true, mode: 'test' });
+  const made = [];
+  const payout = async (x) => { made.push(x); return { id: `po_lost_${made.length}` }; };
+  // Lost before the session's payout was made: that booking's share is not in it.
+  const a = await aPaidSession({ endedHoursAgo: 100 });
+  await query(`update experience_bookings set dispute_state = 'lost' where id = $1`, [a.booking.id]);
+  await money.schedulePayouts();
+  assert.equal((await query('select count(*)::int as n from host_payouts where session_id = $1', [a.sessions[0].id])).rows[0].n, 0, 'nothing payable');
+  // Lost after: the payout carrying it is held for the owner, and goes only on his Release.
+  const b = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  await query(`update experience_bookings set dispute_state = 'lost' where id = $1`, [b.booking.id]);
+  await money.releasePayouts({ payout, balance: async () => ({ availablePence: 999999 }), status });
+  const row = async () => (await query('select * from host_payouts where session_id = $1', [b.sessions[0].id])).rows[0];
+  assert.deepEqual([(await row()).state, (await row()).hold_reason], ['held', 'dispute_lost']);
+  assert.equal(made.filter((x) => x.hostId === b.host.id).length, 0);
+  await query(`update host_payouts set released_by = 'owner' where id = $1`, [(await row()).id]);
+  await money.releasePayouts({ payout, balance: async () => ({ availablePence: 999999 }), status });
+  assert.equal((await row()).state, 'paid', 'the owner, having looked, can still pay it');
+});
+
+test('Codex: a bounce reported between the Payout and its ledger line leaves no paid line and no "on its way"', async () => {
+  settings.forget();
+  const status = () => ({ ready: true, mode: 'test' });
+  const a = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  const { rows: [p] } = await query('select * from host_payouts where session_id = $1', [a.sessions[0].id]);
+  // Paid, then the bank bounces it straight away: the webhook finds the row and its ledger line together.
+  await money.releasePayouts({ payout: async (x) => ({ id: x.hostId === a.host.id ? 'po_bounce' : 'po_other' }), balance: async () => ({ availablePence: 999999 }), status });
+  await ledger.markPayoutOutcome({ stripePayout: 'po_bounce', accountId: a.host.stripe_account_id, paid: false, failure: 'account_closed' });
+  assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'failed');
+  assert.equal((await query(`select state from hosting_payments where stripe_ref = 'po_bounce' and kind = 'payout'`)).rows[0].state, 'failed', 'the line written with it, failed with it');
+  // And payoutPaid on a row no longer released writes nothing.
+  assert.equal(await ledger.payoutPaid(p.id, { stripePayout: 'po_late', ledgerLine: { kind: 'payout', hostId: a.host.id, amountPence: 1 } }), null);
+  assert.equal((await query(`select count(*)::int as n from hosting_payments where stripe_ref = 'po_late'`)).rows[0].n, 0);
+});
