@@ -5,7 +5,7 @@
  * are invisible on screen until they are wrong:
  *
  *   · **the stock/flow/rate rule** — a period change must scale revenue and must
- *     not scale a count of live subscriptions;
+ *     not scale a count of live members;
  *   · **the numbers model reconciles** — the mock estate is one business, so the
  *     four streams sum to the total, the cost classes sum to the cost, and the
  *     margin is the difference;
@@ -17,7 +17,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_PERIOD, PERIODS, monthBuckets, resolvePeriod } from '../src/domain/reportingPeriods.js';
-import { FIXTURE_SUBSCRIBERS, fixtureHousehold, fixtureSupplier, fixtures, scaleFixtures } from '../src/domain/reportingFixtures.js';
+import { FIXTURE_MEMBERS, FIXTURE_PAID, fixtureHousehold, fixtureSupplier, fixtures, scaleFixtures } from '../src/domain/reportingFixtures.js';
 import { annualPence } from '../src/repositories/pricing.js';
 import { PURPOSE_CLASSES, backOfficeActorExpression, classExpression, classOf } from '../src/domain/costClass.js';
 import { change } from '../src/repositories/suite.js';
@@ -81,7 +81,7 @@ test('a flow scales with the period and a stock never does', () => {
 
   // Revenue is a flow: twelve months is worth more than one.
   assert.ok(of(year, 'revenue').value > of(month, 'revenue').value * 10);
-  // New subscribers is a flow too.
+  // New members is a flow too.
   assert.ok(of(year, 'signups').value > of(month, 'signups').value);
 
   // Active households is a stock — a count at a moment. Scaling it by 11.4 is
@@ -100,7 +100,7 @@ test('a rate is never scaled, however long the window', () => {
   assert.equal(year.overview.subscriptions.churnPct, month.overview.subscriptions.churnPct);
 });
 
-test('the book of subscriptions balances at every window, and never goes negative', () => {
+test('the book of members balances at every window, and never goes negative', () => {
   for (const p of PERIODS) {
     const m = scaleFixtures(fixtures(), resolvePeriod(p.key, AT));
     const s = m.overview.subscriptions;
@@ -113,7 +113,7 @@ test('the book of subscriptions balances at every window, and never goes negativ
      * And it is a book of real counts.
      *
      * Deriving the opening as `live − new + lost` from a scaled monthly flow
-     * gave **−253 subscriptions** over a twelve-month window (20 Sep 2026). The
+     * gave **−253 members** over a twelve-month window (20 Sep 2026). The
      * two ends are stocks read at their own moments, and only `lost` is
      * derived, which is the only arrangement that cannot go negative.
      */
@@ -167,7 +167,7 @@ test('gross bookings is the sum of what was booked, and is never revenue', () =>
   assert.ok(f.money.grossBookings > f.money.total.revenue * 4);
 });
 
-test('per subscriber is the monthly rate, and in kept from out of in', () => {
+test('per member is the monthly rate, and in kept from out of in', () => {
   const p = fixtures().money.perSubscriber;
   assert.equal(Math.round((p.subscription + p.hotel + p.hosting + p.activity) * 100) / 100, p.total);
   assert.equal(Math.round((p.total - p.out) * 100) / 100, p.kept);
@@ -393,12 +393,12 @@ test('a swept session does not turn a household’s call into research', () => {
   assert.match(sql, /true\)$/);
 });
 
-test('a household keeps the price it was sold at when the price goes up', async () => {
+test('an account on a priced plan is not a member until Stripe bills it', async () => {
   /**
-   * The Subscriptions panel says "changing a price writes a new price row;
-   * existing subscriptions keep the row they were sold on", and MRR used to
-   * value every account at the plan's *current* price — so the promise was
-   * false the moment the price changed (Codex, 20 Sep 2026).
+   * "Count memberships, not accounts" (Roger, 3 Oct 2026). An account put on
+   * the Household plan, with a plan-history row priced at £8.99, used to be
+   * £8.99 of MRR; it is not a membership anybody bought, and with no Stripe
+   * record it is worth nothing a month — before or after the price moves.
    *
    * Exercised against a real account rather than asserted about the SQL,
    * because the fault was in what the query returned and not in what it said.
@@ -438,7 +438,8 @@ test('a household keeps the price it was sold at when the price goes up', async 
        values ($1, 'household', $2, 899) returning id`,
       [a.id, a.status]);
     mine.history = row.id;
-    assert.equal((await readStanding()).mrrPence, 899, 'sold at £8.99');
+    assert.equal((await readStanding()).mrrPence, 0, 'a plan an administrator picked is not revenue');
+    assert.equal((await readStanding()).averagePaidPence, null, 'an average of nobody is not a price');
     // A member of that household with an account of their own is not a second subscription (Roger, 3 Oct 2026).
     {
       const { rows: [hh] } = await query('select household_id from accounts where id = $1', [a.id]);
@@ -447,7 +448,7 @@ test('a household keeps the price it was sold at when the price goes up', async 
         `insert into accounts (household_id, member_id, email, name, status, plan) values ($1, $2, 'member-at@test.local', 'A member', 'invited', 'household') returning id`,
         [hh.household_id, m.id]);
       try {
-        assert.equal((await readStanding()).mrrPence, 899, 'still one £8.99 household, not two');
+        assert.equal((await readStanding()).mrrPence, 0, 'a member\u2019s own login adds nothing either');
       } finally {
         await query('delete from accounts where id = $1', [ma.id]);
         await query('delete from members where id = $1', [m.id]);
@@ -459,7 +460,7 @@ test('a household keeps the price it was sold at when the price goes up', async 
     // The price on the tier moved…
     assert.equal((await readTiers()).find((t) => t.key === 'household').webPence, 1199);
     // …and what this household is worth did not.
-    assert.equal((await readStanding()).mrrPence, 899, 'grandfathered');
+    assert.equal((await readStanding()).mrrPence, 0, 'still not billed');
   } finally {
     // Put the rows back exactly: delete what this test inserted, then re-open
     // the row it closed, rather than inserting a third one.
@@ -523,12 +524,15 @@ test('a money measure on Overview is withheld rather than dropped', () => {
 test('what a household pays is withheld from an accounts-only reader', () => {
   const cut = withhold(scaleFixtures(fixtures(), resolvePeriod('this-month', AT)), holding('view_reporting'));
   assert.equal(cut.customers.payingMrr, null);
+  assert.equal(cut.customers.averagePence, null);
   for (const h of cut.customers.households) {
     assert.equal(h.monthPence, 0, `${h.name} still carries a price`);
     assert.equal(h.costUsd, undefined);
   }
   // Who they are and what they do is not money and stays.
-  assert.equal(cut.customers.households.length, 12);
+  assert.equal(cut.customers.households.length, 14);
+  // Membership counts are not money either.
+  assert.equal(cut.customers.members, fixtures().customers.members);
   assert.ok(cut.customers.households.every((h) => h.name && typeof h.places === 'number'));
 });
 
@@ -640,13 +644,15 @@ test('annual is derived from the monthly price, never stored beside it', () => {
 
 test('the mock tiers add up to the same estate the rest of the model counts', () => {
   const f = fixtures().subscriptions;
-  // Solo 321 + Household 258 = 579, the paying estate. Household's 258 is the
-  // 211 paying monthly plus the 47 on annual.
-  assert.equal(f.tiers.reduce((n, t) => n + t.subscribers, 0), FIXTURE_SUBSCRIBERS);
-  assert.equal(f.standing.onAnnualOf, FIXTURE_SUBSCRIBERS);
+  // Solo 321 + Household 258 = 579 members. Household's 258 is the 211
+  // monthly plus the 47 on annual; nine on each tier are trialling.
+  assert.equal(f.tiers.reduce((n, t) => n + t.members, 0), FIXTURE_MEMBERS);
+  assert.equal(f.tiers.reduce((n, t) => n + t.paid, 0), FIXTURE_PAID);
+  assert.equal(f.standing.onAnnualOf, FIXTURE_PAID);
+  assert.equal(fixtures().customers.members, FIXTURE_MEMBERS);
   // Pro is not launched, and says so rather than showing a nought as a failure.
   const pro = f.tiers.find((t) => t.key === 'pro');
-  assert.equal(pro.subscribers, 0);
+  assert.equal(pro.members, 0);
   assert.equal(pro.note, 'not launched');
 });
 
@@ -661,7 +667,7 @@ test('a price is stated once and every derived figure comes off it', () => {
   const t = fixtures().subscriptions.tiers.find((x) => x.key === 'household');
   assert.equal(t.annualWebPence, annualPence(t.webPence, t.discountPct));
   assert.equal(t.annualIosPence, annualPence(t.iosPence, t.discountPct));
-  assert.equal(t.revenueAtThisPricePence, t.subscribers * t.webPence);
+  assert.equal(t.revenueAtThisPricePence, t.paid * t.webPence);
 });
 
 test('the benefits matrix has a cell for every tier and is published', () => {
@@ -829,7 +835,7 @@ test('a fault reason is a token, not a paragraph', () => {
   assert.equal(healthOf(m).fault.length, 40);
 });
 
-test('a family of six is one subscription, not six', async () => {
+test('a family of six is one household, never six members', async () => {
   /**
    * Household is up to six **logins**, and a member who claims their profile
    * gets an account of their own on the same plan (`createAccountOnHousehold`).
@@ -858,17 +864,16 @@ test('a family of six is one subscription, not six', async () => {
   );
   assert.deepEqual(doubled, [], 'a household has one account of its own');
 
-  // And every figure the suite counts subscriptions with must agree with that
-  // number rather than with the login count.
+  // And every figure the suite counts members with must agree with that
+  // number rather than with the login count — and, with no membership billed,
+  // there are none at all (Roger, 3 Oct 2026: "Count memberships, not accounts").
   const tiers = await readTiers();
   const standing = await readStanding();
-  const counted = tiers.reduce((n, t) => n + t.subscribers, 0);
+  const counted = tiers.reduce((n, t) => n + t.members, 0);
   assert.ok(counted <= r.leads, `tiers counted ${counted} of at most ${r.leads} households`);
-  assert.equal(
-    standing.mrrPence,
-    tiers.reduce((n, t) => n + t.subscribers * (t.webPence ?? 0), 0),
-    'MRR is the tiers times their prices, and the tiers are households',
-  );
+  assert.equal(counted, 0, 'nothing is billed, so no tier has a member');
+  assert.equal(standing.mrrPence, 0);
+  assert.equal(standing.billed, false);
 });
 
 test('a health rate is over the calls that were watched, never over the rows', async () => {

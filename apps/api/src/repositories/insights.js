@@ -8,15 +8,17 @@
  *  - **A gap is labelled, never drawn as a zero.** PV's revenue screen says in
  *    as many words that subscription revenue is absent because Stripe is not
  *    connected, rather than showing £0 and letting somebody read it as "nobody
- *    is paying". Epic has no payment provider at all, so every figure here is
- *    *contracted* revenue — what the plans people are on are priced at — and the
- *    screens say so. Cash collected is not knowable from this database.
+ *    is paying". Revenue here is **paid memberships only** (Roger, 3 Oct 2026:
+ *    "Count memberships, not accounts"), read from `memberships.js`; no
+ *    membership is billed yet, so it is nought and the screens say "Not billed
+ *    yet". Cash collected is not knowable from this database.
  *  - **Cost is real.** `provider_calls` is Epic's own ledger of its own
  *    spending, written on every outbound call, so cost per household is measured
  *    rather than apportioned.
  */
 
 import { query } from '../db.js';
+import { classifyHouseholds, membershipMonths, readMemberships, summarise } from './memberships.js';
 
 // ---------------------------------------------------------------------------
 // what is earned
@@ -25,73 +27,50 @@ import { query } from '../db.js';
 /**
  * Monthly recurring revenue, by plan, as it stands today.
  *
- * Suspended accounts are excluded: they cannot use Epic, so counting them as
- * revenue would flatter every figure derived from this one. `unpriced` is the
- * count of active households on a plan with no price — trials and friends —
- * because "how many people use this for free" is a business number too.
+ * Members, not accounts (Roger, 3 Oct 2026): `households` is member households
+ * on the plan (paid or trialling in Stripe), `mrr_pence` is what the paid ones
+ * are billed, and `unpriced` is the complimentary households on it — the
+ * Founding household and anybody given `owner` or `friend` by hand — because
+ * "how many people use this for free" is a business number too. Nothing is
+ * billed yet, so every plan's members and MRR are nought.
  */
 export async function mrrByPlan() {
-  const { rows } = await query(
-    `select p.key, p.label, p.price_pence,
-            count(a.id) filter (where a.status <> 'suspended')::int                              as households,
-            coalesce(sum(p.price_pence) filter (where a.status <> 'suspended'), 0)::int          as mrr_pence,
-            count(a.id) filter (where a.status <> 'suspended' and p.price_pence is null)::int    as unpriced
-       from plans p
-       -- Customers only: a staff account carries a plan but no household
-       -- (migration 318), and counting it here would inflate a plan's households.
-       left join accounts a on a.plan = p.key and a.household_id is not null
-      group by p.key, p.label, p.price_pence, p.position
-      order by p.position`,
-  );
-  return rows;
+  const [{ rows }, classified] = await Promise.all([
+    query('select key, label, price_pence from plans order by position, key'),
+    classifyHouseholds(),
+  ]);
+  const { byPlan } = summarise(classified);
+  return rows.map((p) => {
+    const on = byPlan[p.key] ?? { paid: 0, trialling: 0, mrrPence: 0 };
+    return {
+      key: p.key,
+      label: p.label,
+      price_pence: p.price_pence,
+      households: on.paid + on.trialling,
+      paid: on.paid,
+      trialling: on.trialling,
+      mrr_pence: on.mrrPence,
+      unpriced: classified.filter((h) => h.cls === 'complimentary' && h.planKey === p.key).length,
+    };
+  });
 }
 
 /**
- * Contracted revenue month by month, from the plan history.
+ * Membership revenue month by month.
  *
- * A month is priced by what each account was on during it, so changing a price
- * today does not rewrite what last quarter earned. Accounts that predate the
- * history table are carried by their current plan, which is the only thing that
- * can be known about them and is marked `estimated` on the screen.
+ * What paid memberships were billed in each month, and how many members were
+ * running — never what the plans accounts were on were priced at (Roger, 3 Oct
+ * 2026). Nought while nothing is billed; the months still come back, so a chart
+ * of nothing is a chart rather than an empty screen that looks broken.
  */
 export async function revenueByMonth({ months = 12 } = {}) {
   const { rows } = await query(
-    `with span as (
-       select generate_series(date_trunc('month', now()) - (($1 - 1) || ' months')::interval,
-                              date_trunc('month', now()), '1 month') as month
-     ),
-     -- What each account was on at the end of each month: the latest history
-     -- row up to that point, falling back to the account as it stands.
-     state as (
-       select s.month, a.id as account_id,
-              coalesce(
-                (select h.plan from account_plan_history h
-                  where h.account_id = a.id and h.from_at < s.month + interval '1 month'
-                  order by h.from_at desc limit 1),
-                a.plan) as plan,
-              coalesce(
-                (select h.status from account_plan_history h
-                  where h.account_id = a.id and h.from_at < s.month + interval '1 month'
-                  order by h.from_at desc limit 1),
-                a.status) as status,
-              (a.created_at < s.month + interval '1 month') as existed
-         -- Left-joined, not cross-joined: with nobody on the books the months
-         -- still come back as zeros, and a chart of nothing is a chart rather
-         -- than an empty screen that looks broken.
-         -- Customers only: staff accounts have no household (migration 318).
-         from span s left join accounts a on a.household_id is not null
-     )
-     select to_char(st.month, 'YYYY-MM') as month,
-            count(*) filter (where st.existed and st.status <> 'suspended')::int as households,
-            coalesce(sum(p.price_pence) filter (where st.existed and st.status <> 'suspended'), 0)::int as revenue_pence,
-            count(*) filter (where st.existed and st.status <> 'suspended' and p.price_pence is not null)::int as paying
-       from state st
-       left join plans p on p.key = st.plan
-      group by st.month
-      order by st.month`,
+    `select to_char(generate_series(date_trunc('month', now()) - (($1 - 1) || ' months')::interval,
+                                    date_trunc('month', now()), '1 month'), 'YYYY-MM') as month`,
     [months],
   );
-  return rows;
+  const by = await membershipMonths(rows.map((r) => r.month));
+  return by.map((m) => ({ month: m.month, households: m.members, revenue_pence: m.pence, paying: m.paid }));
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +133,7 @@ export async function costByHousehold({ days = 30 } = {}) {
  * not collected, and the tile that shows it says which.
  */
 export async function estateTotals() {
-  const { rows } = await query(
+  const [{ rows }, m] = await Promise.all([query(
     `select
        (select count(*)::int from households)                                                 as households,
        -- Customers only: staff accounts have no household (migration 318), so
@@ -174,8 +153,20 @@ export async function estateTotals() {
          where created_at >= date_trunc('month', now()))                                      as cost_month_usd,
        (select coalesce(sum(estimated_cost_usd), 0)::float from provider_calls)               as cost_ever_usd,
        (select count(*)::int from provider_calls where created_at >= date_trunc('month', now())) as calls_month`,
-  );
-  return rows[0];
+  ), readMemberships()]);
+  // Members, not accounts (Roger, 3 Oct 2026): the membership counts beside the
+  // account ones, from the classification every report shares.
+  return {
+    ...rows[0],
+    members: m.members,
+    trialling: m.trialling,
+    complimentary: m.complimentary,
+    invited_households: m.invited,
+    people_covered: m.peopleCovered,
+    // Counts only: MRR is money and travels in the financials block, never in
+    // the totals every back-office reader gets.
+    billed: m.billed,
+  };
 }
 
 /**

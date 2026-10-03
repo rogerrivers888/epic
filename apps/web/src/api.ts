@@ -5257,6 +5257,9 @@ export type EstateTotals = {
   households: number; accounts: number; active_accounts: number; invited: number; suspended: number;
   joined_this_month: number; people: number; places: number; trips: number; visits: number; ratings: number;
   live_devices: number; cost_month_usd: number; cost_ever_usd: number; calls_month: number;
+  /** Members, not accounts (Roger, 3 Oct 2026). */
+  members?: number; trialling?: number; complimentary?: number; invited_households?: number;
+  people_covered?: number; billed?: boolean;
 };
 export type DailyRow = { day: string; households: number; seconds: number; views: number; places: number; trips: number; visits: number };
 export type ScreenRow = { screen: string; views: number; households?: number; seconds: number };
@@ -5265,11 +5268,15 @@ export type FeedRow = { kind: string; at: string; title: string; detail: string;
 export type SubscriptionPlan = { key: string; label: string; note: string | null; price_pence: number | null; call_bound: number | null; active: boolean; people?: number };
 export type MoneyBlock = {
   mrrPence: number;
-  byPlan: { key: string; label: string; price_pence: number | null; households: number; mrr_pence: number; unpriced: number }[];
+  /** Members on each plan (paid + trialling), and the complimentary households on it. */
+  byPlan: { key: string; label: string; price_pence: number | null; households: number; paid?: number; trialling?: number; mrr_pence: number; unpriced: number }[];
   revenue: { month: string; households: number; revenue_pence: number; paying: number }[];
   cost: { month: string; calls: number; cost_usd: number }[];
   costMonthUsd: number;
   basis: string;
+  members?: number;
+  billed?: boolean;
+  billedNote?: string | null;
 };
 /** The ownership tag: keep for good, keep the identifier only, keep nothing. */
 export type Keep = 'own' | 'id' | 'none';
@@ -5412,7 +5419,8 @@ export type Engagement = {
   leaders: { accountId: string; email: string | null; name: string | null; seconds: number; views: number; daysActive: number; lastActive: string | null }[];
 };
 export type RevenueReport = {
-  basis: string; missing: string[]; mrrPence: number; arrPence: number; paying: number; free: number; arpuPence: number;
+  basis: string; missing: string[]; mrrPence: number; arrPence: number; paying: number; free: number; arpuPence: number | null;
+  billed?: boolean; billedNote?: string | null; members?: number; trialling?: number; invited?: number; peopleCovered?: number;
   byPlan: MoneyBlock['byPlan']; revenue: MoneyBlock['revenue']; cost: MoneyBlock['cost']; plans: SubscriptionPlan[]; totals: EstateTotals;
 };
 export type UsageReport = {

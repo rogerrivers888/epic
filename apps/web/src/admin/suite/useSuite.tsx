@@ -146,7 +146,7 @@ export function useHouseholdRecord(id: string | null, period: PeriodKey, source:
  * `provider_calls` recorded, which is dollars. Converting would mean inventing
  * an exchange rate, so the screens say which unit each figure is in.
  *
- * `perSub` is the per-subscriber context: given, every money figure the screen
+ * `perSub` is the per-member context: given, every money figure the screen
  * draws divides by it, once, here.
  */
 export function useFormatters(suite: Suite | null, perSub: number | null) {

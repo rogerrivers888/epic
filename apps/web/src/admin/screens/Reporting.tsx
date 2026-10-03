@@ -149,22 +149,29 @@ function RevenueTab() {
     <View style={{ gap: spacing.md }}>
       {/* Said before any figure, because everything below is read wrongly without it. */}
       <Banner tone="warn">
-        <Text style={{ fontWeight: '700' }}>Contracted, not collected. </Text>
-        Epic holds no payment provider — no card, no Stripe, no payout. Every figure here is what the plans people are
-        on are priced at. Cash received, failed payments and refunds are not knowable from this database and are not
-        shown as zero.
+        <Text style={{ fontWeight: '700' }}>Members, not accounts. </Text>
+        Revenue is paid memberships only; trialling members count as members and complimentary households are £0.
+        {data.billed === false ? ' No membership is billed yet, so MRR is £0.' : ''} Cash received, failed payments and
+        refunds are not knowable from this database and are not shown as zero.
       </Banner>
 
       <TileRow>
-        <Tile label="MRR" value={pounds(data.mrrPence)} tone="accent" sub={`${plural(data.paying, 'paying household')}`} />
+        <Tile
+          label="MRR"
+          value={pounds(data.mrrPence)}
+          tone="accent"
+          sub={data.billed === false
+            ? `${data.billedNote ?? 'Not billed yet'} · ${plural(data.members ?? 0, 'member')}`
+            : `${plural(data.paying, 'paid member')}${data.trialling ? ` · ${data.trialling} trialling` : ''}`}
+        />
         <Tile label="ARR" value={pounds(data.arrPence)} sub="MRR × 12" />
-        <Tile label="ARPU" value={pounds(data.arpuPence)} sub="per paying household" />
-        <Tile label="On a free plan" value={count(data.free)} sub="trials and friends" />
+        <Tile label="ARPU" value={data.arpuPence == null ? '—' : pounds(data.arpuPence)} sub={data.arpuPence == null ? (data.billedNote ?? 'No paid members yet') : 'per paid member'} />
+        <Tile label="Complimentary" value={count(data.free)} sub="Founding and free plans, at £0" />
         <Tile label="Provider cost" value={money(data.totals.cost_month_usd)} tone="warn" sub="this month, measured" />
       </TileRow>
 
-      <Panel title="Contracted revenue by month" sub="Priced by what each household was on during that month, so changing a price today does not rewrite last quarter.">
-        <Columns points={data.revenue.map((r) => ({ label: monthLabel(r.month), value: r.revenue_pence, hint: plural(r.households, 'household') }))} format={pounds} />
+      <Panel title="Membership revenue by month" sub="What paid memberships were billed each month.">
+        <Columns points={data.revenue.map((r) => ({ label: monthLabel(r.month), value: r.revenue_pence, hint: plural(r.households, 'member') }))} format={pounds} />
       </Panel>
 
       <Panel title="Provider cost by month" sub="Its own chart, not a second line on the one above: pounds and dollars do not share an axis.">
@@ -177,7 +184,7 @@ function RevenueTab() {
           columns={[
             { key: 'plan', head: 'Membership', width: 3, cell: (p: any) => <Text style={type.small}>{p.label}</Text>, sort: (p: any) => p.label },
             { key: 'price', head: 'Price', width: 2, cell: (p: any) => <Text style={type.small}>{p.price_pence == null ? 'free' : `${pounds(p.price_pence)}/mo`}</Text>, sort: (p: any) => p.price_pence ?? 0 },
-            { key: 'households', head: 'Households', width: 2, align: 'right', cell: (p: any) => <Text style={type.small}>{count(p.households)}</Text>, sort: (p: any) => p.households },
+            { key: 'households', head: 'Members', width: 2, align: 'right', cell: (p: any) => <Text style={type.small}>{count(p.households)}</Text>, sort: (p: any) => p.households },
             { key: 'mrr', head: 'MRR', width: 2, align: 'right', cell: (p: any) => <Text style={type.small}>{pounds(p.mrr_pence)}</Text>, sort: (p: any) => p.mrr_pence },
           ] as Column<any>[]}
         />

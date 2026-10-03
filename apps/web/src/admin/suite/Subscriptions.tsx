@@ -1,11 +1,12 @@
 /**
- * Subscriptions — **an editing screen, not a report** (handoff §3).
+ * Members — **an editing screen, not a report** (handoff §3). The screen key and
+ * address stay `subscriptions`; only the words changed (Roger, 3 Oct 2026).
  *
  * It is where tiers, prices and published benefits are set, which makes it the
  * one screen in the suite whose figures somebody types rather than reads. Three
  * things follow from that, and all three are in the code rather than in a note.
  *
- *  · **Changing a price writes a new price row.** Existing subscriptions keep
+ *  · **Changing a price writes a new price row.** Existing memberships keep
  *    the row they were sold on, so last quarter's revenue cannot be rewritten
  *    by today's decision (`plan_prices`, insert-only, migration 200). The panel
  *    says so on its face, and it is true.
@@ -84,16 +85,16 @@ export function Subscriptions({ canSeeMoney, canManage }: { canSeeMoney: boolean
   if (!canSeeMoney) {
     return (
       <SuitePage>
-        <SuiteHead title="Subscriptions" right={controls} />
+        <SuiteHead title="Members" right={controls} />
         <Trouble says="The price list is not yours to see. Ask an administrator for view_financials." />
       </SuitePage>
     );
   }
   if (error) {
-    return <SuitePage><SuiteHead title="Subscriptions" right={controls} /><Trouble says={error} onRetry={load} /></SuitePage>;
+    return <SuitePage><SuiteHead title="Members" right={controls} /><Trouble says={error} onRetry={load} /></SuitePage>;
   }
   if (!model) {
-    return <SuitePage><SuiteHead title="Subscriptions" right={controls} /><Waiting says="Reading the price list…" /></SuitePage>;
+    return <SuitePage><SuiteHead title="Members" right={controls} /><Waiting says="Reading the price list…" /></SuitePage>;
   }
 
   const tier = model.tiers.find((t) => t.key === tierKey) ?? model.tiers[0];
@@ -113,7 +114,7 @@ export function Subscriptions({ canSeeMoney, canManage }: { canSeeMoney: boolean
 
   return (
     <SuitePage>
-      <SuiteHead title="Subscriptions" kicker={suiteKicker(source, period)} right={controls} />
+      <SuiteHead title="Members" kicker={suiteKicker(source, period)} right={controls} />
 
       <TileGrid min={230}>
         {model.tiers.map((t) => (
@@ -154,12 +155,15 @@ export function Subscriptions({ canSeeMoney, canManage }: { canSeeMoney: boolean
             label: 'MRR',
             value: fmt.revenue.money(model.standing.mrrPence, { pence: true }),
             delta: fmt.revenue.delta(model.standing.mrrDelta) ?? undefined,
-            sub: 'a month, at the price each tier is on',
+            // Paid members only; trialling and complimentary are £0 (Roger, 3 Oct 2026).
+            sub: model.standing.billed === false
+              ? `a month · ${model.standing.billedNote ?? 'Not billed yet'}`
+              : 'a month, from paid members',
           },
           {
             label: 'Average price paid',
             value: fmt.revenue.money(model.standing.averagePaidPence, { pence: true }),
-            gap: 'Nobody is on a priced tier yet',
+            gap: model.standing.billed === false ? (model.standing.billedNote ?? 'Not billed yet') : 'No paid members yet',
             delta: fmt.revenue.delta(model.standing.averagePaidDelta) ?? undefined,
             sub: 'a month',
           },
@@ -184,7 +188,7 @@ export function Subscriptions({ canSeeMoney, canManage }: { canSeeMoney: boolean
  *
  * Two prices on one tile because they are the same product sold two ways, and
  * the difference between them is not a discount — it is Apple's cut. Pro has no
- * subscribers, and the tile says "none yet" rather than showing a nought that
+ * members, and the tile says "none yet" rather than showing a nought that
  * reads as a failure.
  */
 function TierTile({ tier, annual, selected, onPress }: {
@@ -199,11 +203,11 @@ function TierTile({ tier, annual, selected, onPress }: {
    * What the tile says under the price.
    *
    * A tier nobody is on says so on its face — "none yet · not launched" — as
-   * well as in the Subscribers footer. The handoff writes Pro's tile that way
-   * because a price with no subscribers and no note reads as a product that is
+   * well as in the Members footer. The handoff writes Pro's tile that way
+   * because a price with no members and no note reads as a product that is
    * failing rather than one that has not opened.
    */
-  const sub = tier.subscribers === 0 && tier.note
+  const sub = tier.members === 0 && tier.note
     ? `none yet · ${tier.note}`
     : annual
       ? `a year on the website · ${tier.discountPct}% off · ${whole(tier.annualIosPence) ?? '—'} in the App Store`
@@ -218,8 +222,8 @@ function TierTile({ tier, annual, selected, onPress }: {
       series={tier.series ?? null}
       selected={selected}
       onPress={onPress}
-      footLabel="Subscribers"
-      foot={tier.subscribers ? tier.subscribers.toLocaleString() : 'none yet'}
+      footLabel="Members"
+      foot={tier.members ? tier.members.toLocaleString() : 'none yet'}
     />
   );
 }
@@ -278,7 +282,7 @@ function PricePanel({ tier, canManage, mock, onDraft, onSaved }: {
       annualWebPence: annualPence(webPence, discPct),
       annualIosPence: annualPence(iosPence, discPct),
       iosUpliftPct: webPence ? Math.round((iosPence / webPence - 1) * 100) : null,
-      revenueAtThisPricePence: tier.subscribers * webPence,
+      revenueAtThisPricePence: (tier.paid ?? tier.members) * webPence,
     });
     // `onDraft` is a fresh closure on every render of the parent; depending on
     // it would report a draft on every keystroke of any field on the screen.
@@ -317,7 +321,7 @@ function PricePanel({ tier, canManage, mock, onDraft, onSaved }: {
   return (
     <SuitePanel
       title={`Price · ${tier.label}`}
-      note="Changing a price writes a new price row. Existing subscriptions keep the row they were sold on."
+      note="Changing a price writes a new price row. Existing memberships keep the row they were sold on."
       grow={1.1}
     >
       <KvField label="Monthly on the website, £" value={web} onChange={setWeb} prefix="£" />
@@ -337,10 +341,17 @@ function PricePanel({ tier, canManage, mock, onDraft, onSaved }: {
         label="Revenue at this price"
         // Whole pounds: what the tier is worth a month at this price, which is a
         // figure at the scale of thousands rather than a price to the penny.
-        value={tier.subscribers ? `£${Math.round((tier.subscribers * webPence) / 100).toLocaleString()} a month` : null}
-        gap="Nobody is on this tier yet"
+        // Paid members only: a trialling member pays nothing yet.
+        value={(tier.paid ?? tier.members) ? `£${Math.round(((tier.paid ?? tier.members) * webPence) / 100).toLocaleString()} a month` : null}
+        gap="No paid member on this tier yet"
       />
-      <Kv label="Subscribers" value={tier.subscribers ? tier.subscribers.toLocaleString() : 'none yet'} strong />
+      <Kv
+        label="Members"
+        value={tier.members
+          ? `${tier.members.toLocaleString()}${tier.trialling ? ` · ${tier.trialling.toLocaleString()} trialling` : ''}`
+          : 'none yet'}
+        strong
+      />
 
       {mock ? (
         <Kv label="Mock data is on" value="Nothing to save" gap="Turn mock data off to change a price" last />
@@ -372,7 +383,7 @@ function ChannelPanel({ model }: { model: Model }) {
         <Kv
           key={r.key}
           label={r.label}
-          value={r.subscribers == null ? null : `${r.subscribers.toLocaleString()} · ${money(r.pence) ?? '—'}`}
+          value={r.members == null ? null : `${r.members.toLocaleString()} · ${money(r.pence) ?? '—'}`}
           gap={r.key === 'android' ? 'Not launched' : 'No payment provider'}
         />
       ))}

@@ -87,8 +87,8 @@ export function Overview({ onOpenPerson }: { onOpenPerson?: (id: string) => void
             <Tile
               label="Joined this month"
               value={count(data.totals.joined_this_month)}
-              sub={`${data.totals.invited} invited, not in yet`}
-              tone={data.totals.invited > 0 ? 'warn' : 'plain'}
+              sub={`${data.totals.invited_households ?? data.totals.invited} invited, not signed in`}
+              tone={(data.totals.invited_households ?? data.totals.invited) > 0 ? 'warn' : 'plain'}
             />
             {/* Epic has no App Store listing — it is an installable web app — so
                 this is the honest version of that figure rather than a borrowed one. */}
@@ -101,8 +101,16 @@ export function Overview({ onOpenPerson }: { onOpenPerson?: (id: string) => void
 
           {data.money ? (
             <TileRow>
-              <Tile label="Contracted MRR" value={pounds(data.money.mrrPence)} sub="what today's plans are priced at" tone="accent" />
-              <Tile label="Contracted ARR" value={pounds(data.money.mrrPence * 12)} sub="MRR × 12, nothing collected" />
+              {/* Paid members only (Roger, 3 Oct 2026: "Count memberships, not accounts"). */}
+              <Tile
+                label="MRR"
+                value={pounds(data.money.mrrPence)}
+                sub={data.money.billed === false
+                  ? `${data.money.billedNote ?? 'Not billed yet'} · ${plural(data.money.members ?? 0, 'member')}`
+                  : `paid members · ${plural(data.money.members ?? 0, 'member')}`}
+                tone="accent"
+              />
+              <Tile label="ARR" value={pounds(data.money.mrrPence * 12)} sub="MRR × 12, nothing collected" />
               <Tile label="Provider cost" value={money(data.money.costMonthUsd)} sub="this month, measured from provider_calls" tone={data.money.costMonthUsd > 0 ? 'warn' : 'plain'} />
               <Tile label="Cost, all time" value={money(data.totals.cost_ever_usd)} sub={`${count(data.totals.calls_month)} calls this month`} />
             </TileRow>
@@ -163,11 +171,13 @@ export function Overview({ onOpenPerson }: { onOpenPerson?: (id: string) => void
 
           {data.money ? (
             <Panel
-              title="Contracted revenue"
-              sub="What the plans people were on were priced at, month by month. Nothing here has been collected — Epic holds no payment provider."
+              title="Membership revenue"
+              sub={data.money.billed === false
+                ? 'What paid memberships were billed, month by month. No membership is billed yet.'
+                : 'What paid memberships were billed, month by month.'}
             >
               <Columns
-                points={data.money.revenue.map((r) => ({ label: monthLabel(r.month), value: r.revenue_pence, hint: plural(r.households, 'household') }))}
+                points={data.money.revenue.map((r) => ({ label: monthLabel(r.month), value: r.revenue_pence, hint: plural(r.households, 'member') }))}
                 format={pounds}
               />
             </Panel>

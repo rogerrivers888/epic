@@ -135,7 +135,9 @@ type Fmt = ReturnType<typeof useFormatters>;
 // ---------------------------------------------------------------------------
 
 /**
- * The book of subscriptions, how they arrived, and where from.
+ * The book of members, how they arrived, and where from. A member is a
+ * household with a paid or trialling membership, never an account (Roger,
+ * 3 Oct 2026).
  *
  * The book is the one panel a reader checks the arithmetic of, so it is set out
  * as a book: opening, plus new, minus gone, equals live now.
@@ -144,11 +146,13 @@ function Signups({ suite, fmt }: { suite: NonNullable<Parameters<typeof MetricDr
   const s = suite.overview.subscriptions;
   return (
     <>
-      <SuitePanel title="The book of subscriptions">
+      <SuitePanel title="The book of members">
         <Kv label="Live at the start of the period" value={fmt.plain.count(s.opening)} />
         <Kv label="New this period" value={s.added == null ? null : `+${fmt.plain.count(s.added)}`} lime />
-        <Kv label="Unsubscribed" value={s.lost == null ? null : `−${fmt.plain.count(s.lost)}`} />
+        <Kv label="Membership ended" value={s.lost == null ? null : `−${fmt.plain.count(s.lost)}`} />
         <Kv label="Live now" value={fmt.plain.count(s.live)} strong />
+        {s.trialling != null ? <Kv label="Of whom trialling" value={fmt.plain.count(s.trialling)} /> : null}
+        {s.complimentary != null ? <Kv label="Complimentary · not members" value={fmt.plain.count(s.complimentary)} /> : null}
         <Kv
           label={s.wasChurnPct == null ? 'Churn a month' : `Churn a month · was ${s.wasChurnPct}%`}
           value={s.churnPct == null ? null : `${s.churnPct}%`}
@@ -184,7 +188,7 @@ function Revenue({ suite, fmt }: { suite: any; fmt: Fmt }) {
         <Bars rows={r.byStream} gap={r.byStreamGap} format={(v) => fmt.revenue.money(typeof v === 'number' ? v : null)} />
       </SuitePanel>
 
-      <SuitePanel title="MRR by membership">
+      <SuitePanel title="MRR by membership" note={r.billed === false ? (r.billedNote ?? 'Not billed yet') : undefined}>
         {r.mrrByPlan.map((p: any) => <Kv key={p.label} label={p.label} value={fmt.revenue.money(p.value)} />)}
         <Kv label="MRR" value={fmt.revenue.money(r.mrr)} strong last />
       </SuitePanel>

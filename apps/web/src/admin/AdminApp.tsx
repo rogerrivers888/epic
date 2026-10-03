@@ -115,7 +115,7 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
    * selling and at what price, who are the customers, and what do households
    * actually do in the product.
    *
-   * Two of them are editing screens rather than reports — Subscriptions sets
+   * Two of them are editing screens rather than reports — Members sets
    * prices and published benefits, and a supplier's record corrects a rate —
    * so they need their own capabilities rather than `view_reporting`.
    *
@@ -126,7 +126,9 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
    */
   { key: 'reporting', label: 'Overview', icon: 'plan', needs: 'view_reporting', sub: 'Is the business growing', group: 'Reporting' },
   { key: 'money', label: 'Money', icon: 'money', needs: 'view_reporting', sub: 'Where it comes from, and what margin survives', group: 'Reporting' },
-  { key: 'subscriptions', label: 'Subscriptions', icon: 'wallet', needs: 'view_financials', sub: 'What we sell, at what price, and what it says you get', group: 'Reporting' },
+  // Called Members, and keyed `subscriptions` so /admin/subscriptions still
+  // resolves (Roger, 3 Oct 2026: "Count memberships, not accounts").
+  { key: 'subscriptions', label: 'Members', icon: 'wallet', needs: 'view_financials', sub: 'Who is a member, what we sell, at what price', group: 'Reporting' },
   /**
    * Customers is `view_accounts` and stays that way: it reads
    * `/api/admin/suite/customers`, which is gated on accounts rather than on

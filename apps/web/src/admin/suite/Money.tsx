@@ -2,8 +2,8 @@
  * Money — where it comes from, and what margin survives.
  *
  * Four streams rather than one revenue figure, because the streams behave
- * nothing like each other: subscriptions carry the whole cost of search,
- * planning and routing — that is what a subscription buys — so their margin is
+ * nothing like each other: memberships carry the whole cost of search,
+ * planning and routing — that is what a membership buys — so their margin is
  * a third, and everything else is over ninety per cent. One blended figure
  * would hide the only thing on this screen worth knowing.
  *
@@ -13,7 +13,7 @@
  *    the commission only. Gross bookings appear as a memo figure in the
  *    standing row and never share an axis with revenue.
  *  · **Refunds are a visible contra**, never netted into a stream silently.
- *  · **Per subscriber is a formatting context**, applied once at the top and
+ *  · **Per member is a formatting context**, applied once at the top and
  *    passed down, so it converts every money value on the screen — tiles,
  *    panels, standing row and table — rather than the ones somebody remembered.
  */
@@ -44,17 +44,18 @@ export function Money({ canSeeMoney }: { canSeeMoney: boolean }) {
 
   const { suite, error, reading, reload } = useSuite(period, source);
 
-  // Per subscriber divides by the number of paying subscriptions there actually
-  // are, which is a stock and therefore the same figure whatever the window.
-  const perSub = per === 'subscriber' ? (suite?.money.subscribers || null) : null;
+  // Per member divides by the paid members there actually are — members, not
+  // accounts (Roger, 3 Oct 2026) — which is a stock and therefore the same
+  // figure whatever the window. The address keeps `per=subscriber`.
+  const perSub = per === 'subscriber' ? (suite?.money.members || null) : null;
   const fmt = useFormatters(suite, perSub);
 
   const controls = (
     <SuiteControls period={period} setPeriod={setPeriod} source={source} setSource={setSource}>
       <Seg
-        label="Total or per subscriber"
+        label="Total or per member"
         value={per}
-        options={[{ value: 'total', label: 'Total' }, { value: 'subscriber', label: 'Per subscriber' }]}
+        options={[{ value: 'total', label: 'Total' }, { value: 'subscriber', label: 'Per member' }]}
         onChange={setPer}
       />
       <Seg
@@ -100,7 +101,7 @@ export function Money({ canSeeMoney }: { canSeeMoney: boolean }) {
   }
 
   const bandTitle = per === 'subscriber'
-    ? `${current?.label ?? 'Money'} · per subscriber a month`
+    ? `${current?.label ?? 'Money'} · per member a month`
     : (current?.label ?? 'Money');
 
   return (
@@ -117,7 +118,7 @@ export function Money({ canSeeMoney }: { canSeeMoney: boolean }) {
               gap={s.gap}
               delta={fmt.revenue.delta(s.growth)}
               deltaDown={(s.growth ?? 0) < 0}
-              sub={s.estimated ? 'contracted · estimated from the plan' : 'on the window before'}
+              sub={s.billed === false ? (s.billedNote ?? 'Not billed yet') : s.estimated ? 'contracted · estimated from the plan' : 'on the window before'}
               series={s.series}
               selected={s.key === stream}
               onPress={() => setStream(s.key as StreamKey)}
@@ -214,7 +215,7 @@ function MarginBand({ suite, fmt, stream, onStream, per }: {
     <View style={styles.marginBand}>
       <View style={styles.marginLeft}>
         <Text style={styles.marginKicker}>
-          {per === 'subscriber' ? 'PROFIT MARGIN · PER SUBSCRIBER' : 'PROFIT MARGIN · ALL STREAMS'}
+          {per === 'subscriber' ? 'PROFIT MARGIN · PER MEMBER' : 'PROFIT MARGIN · ALL STREAMS'}
         </Text>
         {t.marginPct == null
           ? <Gap says={suite.money.totalGap} />
@@ -329,14 +330,14 @@ function StreamTable({ suite, fmt, stream, onStream, per }: {
       // and does not.
       cell: (r) => <Cell strong={!r.detail} gap={r.gap}>{r.applies === false ? '—' : fmt.revenue.money(r.revenue)}</Cell>,
     },
-    // A number, so Per subscriber converts it and the period restates it — the
+    // A number, so Per member converts it and the period restates it — the
     // stock/flow rule's second consequence, which a pre-formatted "£17.77"
     // quietly broke.
     { key: 'avg', label: 'Avg unit', width: 80, cell: (r) => <Cell muted gap={r.gap}>{r.applies === false ? '—' : fmt.plain.money(r.avgUnit)}</Cell> },
     {
       key: 'churn', label: 'Churn', width: 64,
       /**
-       * Only subscriptions can churn.
+       * Only memberships can churn.
        *
        * A hotel booking is not cancelled every month — there is no such figure
        * for the other three streams, so they read as a dash. Printing "No
@@ -395,7 +396,7 @@ function StreamTable({ suite, fmt, stream, onStream, per }: {
 
   return (
     <View style={{ gap: spacing.sm }}>
-      {per === 'subscriber' ? <Text style={styles.tableNote}>EVERY MONEY COLUMN IS PER SUBSCRIBER A MONTH</Text> : null}
+      {per === 'subscriber' ? <Text style={styles.tableNote}>EVERY MONEY COLUMN IS PER MEMBER A MONTH</Text> : null}
       <SuiteTable
         columns={columns}
         rows={rows}
@@ -520,12 +521,12 @@ function Breakdown({ suite, fmt, stream }: { suite: Suite; fmt: Fmt; stream: str
         </SuitePanel>
       ) : null}
 
-      {/* What a subscriber is worth and what one costs to get. The numbers
+      {/* What a member is worth and what one costs to get. The numbers
           model names LTV £284 at 3.8% churn, CAC £41 and a 3.8-month payback,
           and nothing was drawing them — which on a screen about margin is the
           one thing a reader would go looking for. */}
       {stream === 'subscriptions' ? (
-        <SuitePanel title="What a subscriber is worth">
+        <SuitePanel title="What a member is worth">
           {suite.money.unitEconomics ? (
             <>
               <Kv label="Lifetime value" value={fmt.revenue.money(suite.money.unitEconomics.ltv)} strong lime />

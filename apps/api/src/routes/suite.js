@@ -10,7 +10,7 @@
  * disagree about the same figure.
  *
  * Two sections are **editing screens, not reports**, and they have their own
- * endpoints because they write: Subscriptions sets tiers, prices and published
+ * endpoints because they write: Members sets tiers, prices and published
  * benefits, and the supplier record corrects and confirms a rate. Both write
  * through the insert-only tables (`plan_prices`, `counterparty_rates`), so a
  * price change closes a row and opens another and last quarter stays true.
@@ -143,6 +143,7 @@ export function withhold(model, req) {
       ...model.customers,
       households: model.customers.households.map((h) => ({ ...h, monthPence: 0, costUsd: undefined })),
       payingMrr: null,
+      averagePence: null,
     },
     /**
      * The drill's own twelve months, too.
@@ -193,6 +194,7 @@ router.get('/customers', requires('view_accounts'), async (req, res, next) => {
           ...c,
           households: c.households.map((h) => ({ ...h, monthPence: 0, costUsd: undefined })),
           payingMrr: null,
+          averagePence: null,
         }),
       },
       gaps: model.gaps ?? {},
@@ -230,7 +232,7 @@ router.get('/household/:id', requires('view_accounts'), async (req, res, next) =
 });
 
 // ---------------------------------------------------------------------------
-// Subscriptions — the editing screen
+// Members — the editing screen
 // ---------------------------------------------------------------------------
 
 /**

@@ -1,12 +1,12 @@
 /**
  * What Epic sells, at what price, and what it says you get.
  *
- * The Subscriptions screen is an **editing screen, not a report** (handoff §3),
+ * The Members screen is an **editing screen, not a report** (handoff §3),
  * so this is a read-and-write repository rather than a reader. Two disciplines
  * make it safe to edit:
  *
  *  · **A price is inserted, never updated.** Changing a price closes the row in
- *    force and writes a new one, so a subscription keeps the row it was sold on
+ *    force and writes a new one, so a membership keeps the row it was sold on
  *    and last quarter's revenue cannot be rewritten by today's decision. It is
  *    the handoff's eighth non-negotiable and the reason `plan_prices` exists at
  *    all beside `plans.price_pence`.
@@ -20,6 +20,7 @@
  */
 
 import { query, withTransaction } from '../db.js';
+import { MEMBERSHIP_BILLING, NOT_BILLED, readMemberships } from './memberships.js';
 
 /** The three tiers the screen is about, in the order it draws them. */
 export const TIERS = ['solo', 'household', 'pro'];
@@ -34,26 +35,20 @@ export const annualPence = (monthlyPence, discountPct) =>
 /**
  * The tiers, their current price in each channel, and how many are on them.
  *
- * Subscribers are counted from `accounts`, so a tier nobody is on reads as
- * "none yet" rather than as a price with an invisible denominator.
+ * "Members" on a tier are member households on it — a paid or trialling
+ * membership in Stripe — and never accounts on the plan (Roger, 3 Oct 2026:
+ * "Count memberships, not accounts"). Nothing is billed yet, so every tier
+ * reads "none yet" rather than counting the plan an administrator picked.
  */
 export async function readTiers() {
   const { rows: plans } = await query(
-    `select p.key, p.label, p.note, p.price_pence, p.active, p.position,
-            -- Subscriptions, not logins. Household is up to six logins, and a
-            -- member who claims their profile gets an account of their own on
-            -- the same plan, so counting accounts made a family of six read as
-            -- six subscriptions and the tier's revenue as six times what it is
-            -- (Codex, 20 Sep 2026). member_id is null is the household's own.
-            (select count(*)::int from accounts a
-               join households h on h.id = a.household_id
-              where a.plan = p.key and a.status <> 'suspended'
-                and a.member_id is null and h.origin <> 'guest_invite') as subscribers
+    `select p.key, p.label, p.note, p.price_pence, p.active, p.position
        from plans p
       where p.key = any($1::text[])
       order by p.position, p.key`,
     [TIERS],
   );
+  const { byPlan } = await readMemberships();
 
   const { rows: prices } = await query(
     `select plan_key, channel, amount_pence, annual_discount_pct, effective_from, created_by, note
@@ -71,6 +66,7 @@ export async function readTiers() {
   );
 
   return plans.map((p) => {
+    const on = byPlan[p.key] ?? { paid: 0, trialling: 0, mrrPence: 0 };
     const of = (channel) => prices.find((r) => r.plan_key === p.key && r.channel === channel) ?? null;
     const web = of('web');
     const ios = of('ios');
@@ -80,7 +76,10 @@ export async function readTiers() {
       label: p.label,
       note: p.note,
       active: p.active,
-      subscribers: int(p.subscribers),
+      // Paid and trialling together; trialling is said beside it.
+      members: on.paid + on.trialling,
+      paid: on.paid,
+      trialling: on.trialling,
       webPence: web ? int(web.amount_pence) : null,
       iosPence: ios ? int(ios.amount_pence) : null,
       androidPence: null,
@@ -96,8 +95,8 @@ export async function readTiers() {
       iosUpliftPct: web && ios && int(web.amount_pence)
         ? Math.round((int(ios.amount_pence) / int(web.amount_pence) - 1) * 100)
         : null,
-      /** Subscribers × the website monthly price — a what-if, and labelled as one. */
-      revenueAtThisPricePence: web ? int(p.subscribers) * int(web.amount_pence) : null,
+      /** Paid members × the website monthly price — a what-if, and labelled as one. */
+      revenueAtThisPricePence: web ? on.paid * int(web.amount_pence) : null,
       priceSetAt: web?.effective_from ?? null,
       history: history
         .filter((r) => r.plan_key === p.key)
@@ -227,31 +226,22 @@ export async function publishBenefits() {
 }
 
 /**
- * Where subscriptions were bought, and what the channel kept.
+ * Where memberships were bought, and what the channel kept.
  *
- * Epic holds no payment provider, so this cannot be measured yet: there is no
- * record of which channel a subscription came through and no fee to read. The
- * shape is returned with nulls and the screen says which — a zero here would
- * read as "nobody bought through Apple", which is a different and wrong fact.
+ * Epic bills no membership yet, so this cannot be measured: there is no record
+ * of which channel a membership came through and no fee to read. The website
+ * row counts member households (nought until Stripe bills one); the store rows
+ * are null and the screen says which — a zero there would read as "nobody
+ * bought through Apple", which is a different and wrong fact.
  */
 export async function readChannels() {
-  const { rows: [counts] } = await query(
-    `select count(*)::int as subscribers,
-            coalesce(sum(p.price_pence), 0)::int as pence
-       from accounts a
-       join households h on h.id = a.household_id
-       join plans p on p.key = a.plan
-      where a.status <> 'suspended' and a.member_id is null
-        and p.price_pence is not null and h.origin <> 'guest_invite'`,
-  );
+  const m = await readMemberships();
   return {
-    // Everything Epic has is a plan somebody was put on by hand, which is the
-    // website channel by default and the only one there is.
     rows: [
       // Assigned to the website by default; nothing is billed for a membership yet, so it never claims Stripe (Roger, 3 Oct 2026).
-      { key: 'web', label: 'Our website · not billed yet', subscribers: int(counts.subscribers), pence: int(counts.pence), feePence: null },
-      { key: 'ios', label: 'Apple App Store', subscribers: null, pence: null, feePence: null },
-      { key: 'android', label: 'Google Play', subscribers: null, pence: null, feePence: null },
+      { key: 'web', label: MEMBERSHIP_BILLING ? 'Our website' : 'Our website · not billed yet', members: m.members, pence: m.mrrPence, feePence: null },
+      { key: 'ios', label: 'Apple App Store', members: null, pence: null, feePence: null },
+      { key: 'android', label: 'Google Play', members: null, pence: null, feePence: null },
     ],
     blendedFeePct: null,
     netPence: null,
@@ -261,49 +251,31 @@ export async function readChannels() {
 }
 
 /**
- * The three figures at the foot of the Subscriptions screen.
+ * The three figures at the foot of the Members screen.
+ *
+ * MRR and the average price come from **paid members only** (Roger, 3 Oct
+ * 2026): a trialling member is counted as a member and left out until it
+ * converts, and a complimentary household is £0. With no paid member the
+ * average is null, never nought, and `billedNote` says why.
  *
  * MRR is a rate and never scales with the period picker. "On annual" cannot be
- * answered at all: `plan_prices` holds the annual discount, but `accounts` has
- * no interval, so who is actually paying yearly is not written down anywhere.
- * Named rather than guessed.
+ * answered at all: no membership records an interval yet. Named rather than
+ * guessed.
  */
 export async function readStanding() {
-  const tiers = await readTiers();
-  const paying = tiers.reduce((n, t) => n + t.subscribers, 0);
-  /**
-   * What each account is actually on, not the tier's current price times the
-   * number of them.
-   *
-   * `subscribers × webPence` valued every grandfathered account at whatever the
-   * price was raised to this morning — while the panel above it promised the
-   * opposite (Codex, 20 Sep 2026). The history row's own price is what each one
-   * is worth; the tier's cache is the fallback where there is no history, which
-   * is what `estimated` reports elsewhere.
-   */
-  const { rows: [sum] } = await query(
-    `select coalesce(sum(coalesce(
-              (select ph.price_pence from account_plan_history ph
-                where ph.account_id = a.id and ph.price_pence is not null
-                order by ph.from_at desc limit 1),
-              p.price_pence
-            )), 0)::int as pence
-       from accounts a
-       join households h on h.id = a.household_id
-       join plans p on p.key = a.plan
-      -- A household member's own account is not a second subscription: the same filter as the tier and channel
-      -- counts, or MRR doubled a single £8.99 household (Roger, 3 Oct 2026).
-      where a.status <> 'suspended' and a.member_id is null and h.origin <> 'guest_invite' and p.key = any($1::text[])`,
-    [TIERS],
-  );
-  const mrrPence = int(sum.pence);
+  const m = await readMemberships();
   return {
-    mrrPence,
+    mrrPence: m.mrrPence,
     mrrDelta: null,
-    averagePaidPence: paying ? Math.round(mrrPence / paying) : null,
+    averagePaidPence: m.averagePence,
     averagePaidDelta: null,
     onAnnual: null,
-    onAnnualOf: paying,
-    onAnnualGap: 'No subscription interval is recorded',
+    onAnnualOf: m.paid,
+    onAnnualGap: 'No membership interval is recorded',
+    members: m.members,
+    trialling: m.trialling,
+    complimentary: m.complimentary,
+    billed: m.billed,
+    billedNote: m.billed ? null : NOT_BILLED,
   };
 }

@@ -45,19 +45,26 @@ import { monthBuckets } from './reportingPeriods.js';
 /** A month is the unit every flow below is quoted in. */
 const MONTH_DAYS = 30.4;
 
-export const FIXTURE_SUBSCRIBERS = 579;
+/**
+ * Member households in the mock estate: a paid or trialling membership, the
+ * same rule the real reader counts by (Roger, 3 Oct 2026: "Count memberships,
+ * not accounts"). 561 paid and 18 trialling; only the paid feed MRR.
+ */
+export const FIXTURE_MEMBERS = 579;
+export const FIXTURE_PAID = 561;
+export const FIXTURE_TRIALLING = 18;
 
 /**
- * Live subscriptions at the end of each month, Oct 25 → Sep 26.
+ * Live members at the end of each month, Oct 25 → Sep 26.
  *
  * A **stock**, and the reason it has to exist: "live at the start of the period"
  * was derived as `live − new + lost` from the stated monthly flows, and over a
- * twelve-month window that came out at **−253 subscriptions** (20 Sep 2026).
+ * twelve-month window that came out at **−253 members** (20 Sep 2026).
  * You cannot have had minus two hundred of anything. A count at a moment is
  * read at that moment; it is not arithmetic on a scaled rate.
  *
  * It is the sum of the tier series — Solo 193 → 321 and Household 155 → 258 —
- * so the two screens cannot disagree about how many subscriptions there are.
+ * so the two screens cannot disagree about how many members there are.
  */
 const LIVE_SERIES = [348, 371, 393, 406, 429, 451, 475, 498, 521, 544, 561, 579];
 
@@ -81,19 +88,28 @@ const BEHAVIOUR_SERIES = {
   hosted: [0.02, 0.02, 0.03, 0.03, 0.03, 0.04, 0.04, 0.04, 0.04, 0.05, 0.05, 0.05],
 };
 
+/** A household's status key in words — the same five the real reader uses. */
+const STATUS_WORDS = {
+  member: 'Member', trialling: 'Trialling', complimentary: 'Complimentary', invited: 'Invited', none: 'Not a member',
+};
+
 const HOUSEHOLDS = [
-  { id: 'okonkwo', name: 'Okonkwo', area: 'Brockley', people: 4, plan: 'Household', monthPence: 899, joined: '2025-03-12', lastSeenDays: 2, places: 31, daysOut: 4, bookings: 3, ratings: 9, status: 'live', statusNote: null, origin: 'signup' },
-  { id: 'ibrahim', name: 'Ibrahim', area: 'Chorlton', people: 5, plan: 'Household', monthPence: 899, joined: '2026-05-05', lastSeenDays: 0, places: 38, daysOut: 7, bookings: 6, ratings: 14, status: 'live', statusNote: null, origin: 'marketplace' },
-  { id: 'dasgupta', name: 'Dasgupta', area: 'Stockbridge', people: 2, plan: 'Annual', monthPence: 833, joined: '2025-09-22', lastSeenDays: 0, places: 47, daysOut: 6, bookings: 5, ratings: 12, status: 'live', statusNote: null, origin: 'signup' },
-  { id: 'achebe', name: 'Achebe-Lynch', area: 'Kings Heath', people: 4, plan: 'Household', monthPence: 899, joined: '2026-02-17', lastSeenDays: 3, places: 26, daysOut: 5, bookings: 4, ratings: 8, status: 'live', statusNote: null, origin: 'peer' },
-  { id: 'fenwick', name: 'Fenwick', area: 'Jesmond', people: 1, plan: 'Solo', monthPence: 599, joined: '2026-01-04', lastSeenDays: 1, places: 18, daysOut: 3, bookings: 2, ratings: 5, status: 'live', statusNote: null, origin: 'signup' },
-  { id: 'marchetti', name: 'Marchetti', area: 'Headingley', people: 3, plan: 'Trial', monthPence: 0, joined: '2026-08-09', lastSeenDays: 6, places: 12, daysOut: 2, bookings: 1, ratings: 2, status: 'trial', statusNote: '9 days left', origin: 'marketplace' },
-  { id: 'novak', name: 'Novák', area: 'Shawlands', people: 2, plan: 'Trial', monthPence: 0, joined: '2026-09-02', lastSeenDays: 5, places: 9, daysOut: 1, bookings: 1, ratings: 1, status: 'trial', statusNote: '16 days left', origin: 'signup' },
-  { id: 'whitcombe', name: 'Whitcombe', area: 'Totterdown', people: 1, plan: 'Solo', monthPence: 599, joined: '2026-07-14', lastSeenDays: 11, places: 7, daysOut: 1, bookings: 0, ratings: 0, status: 'live', statusNote: null, origin: 'guest_invite' },
-  { id: 'bell', name: 'Bell', area: 'Kirkstall', people: 2, plan: 'Solo', monthPence: 599, joined: '2025-11-30', lastSeenDays: 34, places: 5, daysOut: 0, bookings: 0, ratings: 0, status: 'at_risk', statusNote: null, origin: 'signup' },
-  { id: 'osei', name: 'Osei', area: 'Hyde Park', people: 4, plan: 'Household', monthPence: 899, joined: '2026-04-08', lastSeenDays: 4, places: 22, daysOut: 4, bookings: 3, ratings: 6, status: 'live', statusNote: null, origin: 'marketplace' },
-  { id: 'rahman', name: 'Rahman', area: 'Levenshulme', people: 5, plan: 'Annual', monthPence: 833, joined: '2025-10-19', lastSeenDays: 7, places: 34, daysOut: 5, bookings: 4, ratings: 10, status: 'live', statusNote: null, origin: 'signup' },
-  { id: 'redgrave', name: 'Redgrave', area: 'Didsbury', people: 3, plan: 'Household', monthPence: 0, joined: '2025-06-21', lastSeenDays: 58, places: 14, daysOut: 0, bookings: 0, ratings: 3, status: 'cancelled', statusNote: '4 Sep', origin: 'guest_invite' },
+  { id: 'okonkwo', name: 'Okonkwo', area: 'Brockley', people: 4, plan: 'Household', monthPence: 899, joined: '2025-03-12', lastSeenDays: 2, places: 31, daysOut: 4, bookings: 3, ratings: 9, status: 'member', suspended: false, atRisk: false, statusNote: null, origin: 'signup' },
+  { id: 'ibrahim', name: 'Ibrahim', area: 'Chorlton', people: 5, plan: 'Household', monthPence: 899, joined: '2026-05-05', lastSeenDays: 0, places: 38, daysOut: 7, bookings: 6, ratings: 14, status: 'member', suspended: false, atRisk: false, statusNote: null, origin: 'marketplace' },
+  { id: 'dasgupta', name: 'Dasgupta', area: 'Stockbridge', people: 2, plan: 'Annual', monthPence: 833, joined: '2025-09-22', lastSeenDays: 0, places: 47, daysOut: 6, bookings: 5, ratings: 12, status: 'member', suspended: false, atRisk: false, statusNote: null, origin: 'signup' },
+  { id: 'achebe', name: 'Achebe-Lynch', area: 'Kings Heath', people: 4, plan: 'Household', monthPence: 899, joined: '2026-02-17', lastSeenDays: 3, places: 26, daysOut: 5, bookings: 4, ratings: 8, status: 'member', suspended: false, atRisk: false, statusNote: null, origin: 'peer' },
+  { id: 'fenwick', name: 'Fenwick', area: 'Jesmond', people: 1, plan: 'Solo', monthPence: 599, joined: '2026-01-04', lastSeenDays: 1, places: 18, daysOut: 3, bookings: 2, ratings: 5, status: 'member', suspended: false, atRisk: false, statusNote: null, origin: 'signup' },
+  { id: 'marchetti', name: 'Marchetti', area: 'Headingley', people: 3, plan: 'Trial', monthPence: 0, joined: '2026-08-09', lastSeenDays: 6, places: 12, daysOut: 2, bookings: 1, ratings: 2, status: 'trialling', suspended: false, atRisk: false, statusNote: '9 days left', origin: 'marketplace' },
+  { id: 'novak', name: 'Novák', area: 'Shawlands', people: 2, plan: 'Trial', monthPence: 0, joined: '2026-09-02', lastSeenDays: 5, places: 9, daysOut: 1, bookings: 1, ratings: 1, status: 'trialling', suspended: false, atRisk: false, statusNote: '16 days left', origin: 'signup' },
+  { id: 'whitcombe', name: 'Whitcombe', area: 'Totterdown', people: 1, plan: 'Trial', monthPence: 0, joined: '2026-07-14', lastSeenDays: 11, places: 7, daysOut: 1, bookings: 0, ratings: 0, status: 'none', suspended: false, atRisk: false, statusNote: null, origin: 'guest_invite' },
+  { id: 'bell', name: 'Bell', area: 'Kirkstall', people: 2, plan: 'Solo', monthPence: 599, joined: '2025-11-30', lastSeenDays: 34, places: 5, daysOut: 0, bookings: 0, ratings: 0, status: 'member', suspended: false, atRisk: true, statusNote: 'at risk', origin: 'signup' },
+  { id: 'osei', name: 'Osei', area: 'Hyde Park', people: 4, plan: 'Household', monthPence: 899, joined: '2026-04-08', lastSeenDays: 4, places: 22, daysOut: 4, bookings: 3, ratings: 6, status: 'member', suspended: false, atRisk: false, statusNote: null, origin: 'marketplace' },
+  { id: 'rahman', name: 'Rahman', area: 'Levenshulme', people: 5, plan: 'Annual', monthPence: 833, joined: '2025-10-19', lastSeenDays: 7, places: 34, daysOut: 5, bookings: 4, ratings: 10, status: 'member', suspended: false, atRisk: false, statusNote: null, origin: 'signup' },
+  { id: 'redgrave', name: 'Redgrave', area: 'Didsbury', people: 3, plan: 'Household', monthPence: 0, joined: '2025-06-21', lastSeenDays: 58, places: 14, daysOut: 0, bookings: 0, ratings: 3, status: 'none', suspended: true, atRisk: false, statusNote: 'suspended', origin: 'guest_invite' },
+  // Complimentary is the Founding household or a free plan given by hand, at £0;
+  // invited has not signed in yet (Roger, 3 Oct 2026).
+  { id: 'pemberton', name: 'Pemberton', area: 'Clifton', people: 3, plan: 'Friend', monthPence: 0, joined: '2025-12-01', lastSeenDays: 9, places: 11, daysOut: 2, bookings: 0, ratings: 2, status: 'complimentary', suspended: false, atRisk: false, statusNote: null, origin: 'signup' },
+  { id: 'quayle', name: 'Quayle', area: 'Roath', people: 1, plan: 'Household', monthPence: 0, joined: '2026-09-14', lastSeenDays: null, places: 0, daysOut: 0, bookings: 0, ratings: 0, status: 'invited', suspended: false, atRisk: false, statusNote: null, origin: 'signup' },
 ];
 
 /**
@@ -223,8 +239,9 @@ const SUPPLIERS = [
 /**
  * The three tiers, and what each is sold at in each channel.
  *
- * Solo 321 + Household 258 = 579, the same estate the rest of the model counts:
- * Household's 258 is the 211 paying monthly plus the 47 on annual.
+ * Solo 321 + Household 258 = 579 members, the same estate the rest of the model
+ * counts: Household's 258 is the 211 monthly plus the 47 on annual. Nine on
+ * each tier are trialling, so 561 are paid.
  *
  * Annual is **derived, never stored** — `round(monthly × 12 × (1 −
  * discount/100))` — so the tile, the panel and the revenue line cannot disagree
@@ -232,9 +249,9 @@ const SUPPLIERS = [
  * one, which is the figure that says whether the uplift covers Apple's 15% cut.
  */
 const TIER_SPEC = [
-  { key: 'solo', label: 'Solo', note: 'one login', webPence: 599, iosPence: 699, discountPct: 10, subscribers: 321, series: [193, 206, 218, 225, 238, 250, 263, 276, 289, 302, 311, 321] },
-  { key: 'household', label: 'Household', note: 'six logins', webPence: 899, iosPence: 999, discountPct: 7, subscribers: 258, series: [155, 165, 175, 181, 191, 201, 212, 222, 232, 242, 250, 258] },
-  { key: 'pro', label: 'Pro', note: 'not launched', webPence: 1299, iosPence: 1499, discountPct: 10, subscribers: 0, series: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  { key: 'solo', label: 'Solo', note: 'one login', webPence: 599, iosPence: 699, discountPct: 10, members: 321, paid: 312, trialling: 9, series: [193, 206, 218, 225, 238, 250, 263, 276, 289, 302, 311, 321] },
+  { key: 'household', label: 'Household', note: 'six logins', webPence: 899, iosPence: 999, discountPct: 7, members: 258, paid: 249, trialling: 9, series: [155, 165, 175, 181, 191, 201, 212, 222, 232, 242, 250, 258] },
+  { key: 'pro', label: 'Pro', note: 'not launched', webPence: 1299, iosPence: 1499, discountPct: 10, members: 0, paid: 0, trialling: 0, series: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
 ];
 
 const annual = (pence, discountPct) => Math.round(pence * 12 * (1 - discountPct / 100));
@@ -246,8 +263,8 @@ const TIERS = TIER_SPEC.map((t) => ({
   annualWebPence: annual(t.webPence, t.discountPct),
   annualIosPence: annual(t.iosPence, t.discountPct),
   iosUpliftPct: Math.round((t.iosPence / t.webPence - 1) * 100),
-  /** Subscribers × the website monthly price. A what-if, and labelled as one. */
-  revenueAtThisPricePence: t.subscribers * t.webPence,
+  /** Paid members × the website monthly price. A what-if, and labelled as one. */
+  revenueAtThisPricePence: t.paid * t.webPence,
   priceSetAt: '2026-09-19T00:00:00.000Z',
   history: [{ channel: 'web', pence: t.webPence, discountPct: t.discountPct, from: '2026-09-19T00:00:00.000Z', to: null, by: 'the owner', note: 'Settled 19 Sep 2026' }],
 }));
@@ -262,7 +279,7 @@ const BENEFITS = [
   ['Hotel and activity booking', 'Yes', 'Yes', 'Yes'],
   ['Host tools and event wizard', '—', '—', 'Yes'],
   // Commission is the host's fee by trust level (Verified 20 / Checked 15 /
-  // Epic Trusted 10), not a subscriber-plan benefit, so it reads the same down
+  // Epic Trusted 10), not a membership benefit, so it reads the same down
   // every column now (Settings revised v2; schedule in hostFees.js).
   ['Commission on hosted events (by host level)', '10–20%', '10–20%', '10–20%'],
   ['Priority support', '—', '—', 'Yes'],
@@ -280,7 +297,7 @@ const BENEFITS = [
  * `avgUnit` is a **number** and not "£17.77": the stock/flow rule's second
  * consequence is that derived copy comes from the same scaled numbers as the
  * figure it sits under and never from a hardcoded string, and a pre-formatted
- * one neither converts under Per subscriber nor restates with the period.
+ * one neither converts under Per member nor restates with the period.
  *
  * `details` are what the table indents under each stream — the channels the
  * money actually came through. They deliberately carry **no cost and no
@@ -289,8 +306,8 @@ const BENEFITS = [
  */
 const STREAMS = [
   {
-    key: 'subscriptions', label: 'Subscriptions', revenue: 3851, cost: 2715, margin: 1136, marginPct: 29.5,
-    growth: 9.2, perSub: 6.65, units: 579, unitName: 'subscriptions', avgUnit: 6.65, churn: '3.8%',
+    key: 'subscriptions', label: 'Members', revenue: 3851, cost: 2715, margin: 1136, marginPct: 29.5,
+    growth: 9.2, perSub: 6.65, units: 579, unitName: 'members', avgUnit: 6.65, churn: '3.8%',
     details: [
       { label: 'Household £8.99', units: 211, revenue: 1897, avgUnit: 8.99, growth: 11 },
       { label: 'Solo £5.99', units: 321, revenue: 1602, avgUnit: 4.99, growth: 7.4 },
@@ -370,8 +387,15 @@ export function fixtures() {
       households: 1284,
       customers: 1088,
       active: 862,
-      paying: 579,
-      trial: 182,
+      members: FIXTURE_MEMBERS,
+      paid: FIXTURE_PAID,
+      trialling: FIXTURE_TRIALLING,
+      complimentary: 34,
+      invited: 61,
+      notMembers: 414,
+      peopleCovered: 1612,
+      billed: true,
+      billedNote: null,
       atRisk: 48,
       people: 3612,
       // 1 + 743 + 196 + 148 + 196 = 1,284, the whole estate. Guest invites are
@@ -390,7 +414,7 @@ export function fixtures() {
     // -----------------------------------------------------------------------
     overview: {
       measures: [
-        { key: 'signups', label: 'New subscribers', kind: 'flow', unit: 'count', value: 96, delta: 30, sub: 'on an expected {expected}', expected: 74, series: [58, 62, 60, 68, 64, 72, 70, 78, 76, 84, 88, 96] },
+        { key: 'signups', label: 'New members', kind: 'flow', unit: 'count', value: 96, delta: 30, sub: 'on an expected {expected}', expected: 74, series: [58, 62, 60, 68, 64, 72, 70, 78, 76, 84, 88, 96] },
         { key: 'revenue', label: 'Revenue', kind: 'flow', unit: 'money', value: 9244, delta: 16, sub: '· MRR £3,851 a month of it', series: REVENUE_SERIES },
         { key: 'engagement', label: 'Engagement', kind: 'stock', unit: 'count', value: 862, delta: 8, sub: 'households active in the period', series: [610, 640, 668, 690, 712, 738, 762, 784, 806, 828, 844, 862] },
         { key: 'events', label: 'Events & hosts', kind: 'fixed', unit: 'count', value: 128, delta: 15, sub: 'scheduled next 60 days · 41 hosts', series: [62, 68, 74, 72, 82, 88, 94, 98, 108, 114, 120, 128] },
@@ -400,18 +424,22 @@ export function fixtures() {
         added: 96,
         lost: 23,
         live: 579,
+        trialling: FIXTURE_TRIALLING,
+        complimentary: 34,
         churnPct: 3.8,
         wasChurnPct: 4.4,
         arrivals: [row('Signed up direct', 54, 100), row('Booked first', 21, 39), row('Invited to a trip', 16, 30), row('Second household', 5, 9)],
-        arrivalsNote: 'The {21} who booked something before they subscribed are the best cohort Epic has.',
+        arrivalsNote: 'The {21} who booked something before they became members are the best cohort Epic has.',
         sources: [row('Apple App Store', 31, 100), row('Google Play', 22, 71), row('Instagram', 18, 58), row('Google search', 12, 39), row('A host’s page', 9, 29), row('A friend', 4, 13)],
-        sourcesNote: 'Store listings bring 55% of new subscribers. Instagram is what drives them to the listing.',
+        sourcesNote: 'Store listings bring 55% of new members. Instagram is what drives them to the listing.',
       },
       revenue: {
-        byStream: [row('Subscriptions', 3851, 100), row('Hotels', 3092, 80), row('Hosted events', 1315, 34), row('Paid activities', 986, 26)],
-        byStreamNote: 'Subscription was 74% of revenue last November and is 42% now.',
-        mrrByPlan: [row('Household £8.99 · 211', 1897), row('Solo £5.99 · 321', 1602), row('Annual £100 · 47', 352), row('Trial · 182', 0)],
+        byStream: [row('Members', 3851, 100), row('Hotels', 3092, 80), row('Hosted events', 1315, 34), row('Paid activities', 986, 26)],
+        byStreamNote: 'Membership was 74% of revenue last November and is 42% now.',
+        mrrByPlan: [row('Household £8.99 · 211', 1897), row('Solo £5.99 · 321', 1602), row('Annual £100 · 47', 352), row('Trialling · 18', 0), row('Complimentary · 34', 0)],
         mrr: 3851,
+        billed: true,
+        billedNote: null,
         forecast: {
           today: 3851,
           steps: [row('+ trials converting at 48%', 412), row('+ upgrades to Household', 190), row('− churn at 3.8%', -143)],
@@ -452,12 +480,12 @@ export function fixtures() {
     // Money
     // -----------------------------------------------------------------------
     money: {
-      subscribers: FIXTURE_SUBSCRIBERS,
+      members: FIXTURE_PAID,
       streams: STREAMS.map((s) => ({ ...s, series: STREAM_SERIES[s.key] })),
       total: { revenue: 9244, cost: 2926, margin: 6318, marginPct: 68.3, marginDelta: 2.1, perSub: 15.96, perSubOut: 5.05, perSubKept: 10.91, growth: 16 },
       breakdown: {
         subscriptions: {
-          mrrMoved: [row('Opening MRR', 3608), row('New subscriptions', 512), row('Upgrades', 190), row('Downgrades', -116), row('Churn, 23 subscriptions', -143), row('Closing MRR', 3851)],
+          mrrMoved: [row('Opening MRR', 3608), row('New members', 512), row('Upgrades', 190), row('Downgrades', -116), row('Churn, 23 members', -143), row('Closing MRR', 3851)],
           forecast: [row('MRR today', 3851), row('Growing at', '+9.2% / mo'), row('Forecast next month', 4310), row('Forecast in 12 months', 9840), row('Runway', '12.2 months')],
           forecastNote: 'Cash and overhead are hand-entered — Epic holds no salary or overhead ledger.',
           costs: [row('Search & discovery', 1127), row('Planning & generation', 1104), row('Routing', 318), row('Payment and store fees', 120), row('Infrastructure', 46), row('Margin', 1136)],
@@ -495,14 +523,14 @@ export function fixtures() {
     },
 
     // -----------------------------------------------------------------------
-    // Subscriptions — the editing screen
+    // Members — the editing screen
     // -----------------------------------------------------------------------
     //
     // Three tiers and what each is sold at, on two channels. The App Store
     // price is higher because Apple keeps 15%, and the panel says so: every
-    // subscriber steered to the website is worth 11.6% more.
+    // member steered to the website is worth 11.6% more.
     //
-    // "Revenue at this price" is subscribers × the web monthly, which is a
+    // "Revenue at this price" is paid members × the web monthly, which is a
     // what-if and deliberately not the MRR — the MRR is £3,851 because 47
     // households are on annual at a discount. Two figures that mean different
     // things, so they are labelled differently rather than reconciled.
@@ -511,14 +539,14 @@ export function fixtures() {
       benefits: BENEFITS,
       channels: {
         rows: [
-          { key: 'web', label: 'Our website · Stripe', subscribers: 571, pence: 379100, feePence: 12800 },
-          { key: 'ios', label: 'Apple App Store', subscribers: 8, pence: 6000, feePence: 900 },
-          { key: 'android', label: 'Google Play', subscribers: null, pence: null, feePence: null },
+          { key: 'web', label: 'Our website · Stripe', members: 571, pence: 379100, feePence: 12800 },
+          { key: 'ios', label: 'Apple App Store', members: 8, pence: 6000, feePence: 900 },
+          { key: 'android', label: 'Google Play', members: null, pence: null, feePence: null },
         ],
-        note: 'Apple keeps 15% against 3.4% through the web. Every subscriber steered to the website is worth 11.6% more.',
+        note: 'Apple keeps 15% against 3.4% through the web. Every member steered to the website is worth 11.6% more.',
         net: [row('Website', 3663, 100), row('App Store', 51, 2)],
         blendedFeePct: 3.6,
-        // What the bill would be if every subscriber had bought through Apple —
+        // What the bill would be if every member had bought through Apple —
         // the size of the lever, said as a number rather than as advice.
         ifEveryoneUsedApplePence: -44100,
         mrrAfterFeesPence: 371400,
@@ -531,8 +559,13 @@ export function fixtures() {
         averagePaidPence: 665,
         averagePaidDelta: 3.3,
         onAnnual: 47,
-        onAnnualOf: 579,
+        onAnnualOf: FIXTURE_PAID,
         onAnnualNote: '8% · the lever nobody is pulling',
+        members: FIXTURE_MEMBERS,
+        trialling: FIXTURE_TRIALLING,
+        complimentary: 34,
+        billed: true,
+        billedNote: null,
       },
     },
 
@@ -543,9 +576,16 @@ export function fixtures() {
       households: HOUSEHOLDS,
       shown: HOUSEHOLDS.length,
       total: 1284,
-      paying: 579,
+      members: FIXTURE_MEMBERS,
       payingMrr: 3851,
-      trial: 182,
+      trialling: FIXTURE_TRIALLING,
+      complimentary: 34,
+      invited: 61,
+      notMembers: 414,
+      peopleCovered: 1612,
+      averagePence: 665,
+      billed: true,
+      billedNote: null,
       trialConvertPct: 48,
       trialGranted: 34,
       atRisk: 48,
@@ -697,7 +737,7 @@ function history() {
  *
  * Derived from the row rather than held separately, so the list and the record
  * cannot disagree — the handoff's consistency requirement, which the prototype
- * met the same way. The lifetime subscription figure walks the plan history, so
+ * met the same way. The lifetime membership figure walks the plan history, so
  * a household that upgraded pays the old price for its earlier months.
  */
 export function fixtureHousehold(id) {
@@ -709,9 +749,11 @@ export function fixtureHousehold(id) {
   const lifeMonths = Math.max(1, Math.round((now - joined) / (MONTH_DAYS * 86400000)));
 
   // A Household plan was Solo for its first 40% — the upgrade the record's
-  // subscription history names, and what makes the lifetime figure disagree
+  // membership history names, and what makes the lifetime figure disagree
   // with "months × today's price" in the right direction.
-  const soloMonths = h.plan === 'Household' ? Math.round(lifeMonths * 0.4) : 0;
+  // Only a paid member has a membership to have upgraded: a household that is
+  // not one spent nothing on it, whatever plan its account names.
+  const soloMonths = h.plan === 'Household' && h.monthPence > 0 ? Math.round(lifeMonths * 0.4) : 0;
   const subscriptionPence = soloMonths * 599 + (lifeMonths - soloMonths) * h.monthPence;
 
   const bookingsEver = Math.round((h.bookings * lifeMonths) / 3);
@@ -732,6 +774,8 @@ export function fixtureHousehold(id) {
 
   return {
     ...h,
+    statusWord: STATUS_WORDS[h.status] ?? h.status,
+    billed: true,
     lifeMonths,
     plans: { soloMonths, upgraded: soloMonths > 0 },
     spend: {
@@ -880,9 +924,9 @@ export function scaleFixtures(model, period) {
   /**
    * A flow scales; a stock, a rate and a fixed window do not.
    *
-   * A counted flow is rounded whole on the way out: 283.2 new subscribers is
+   * A counted flow is rounded whole on the way out: 283.2 new members is
    * not a number anybody has. The screen would have rounded it anyway, but a
-   * payload that carries a fifth of a subscriber is a payload that will be
+   * payload that carries a fifth of a member is a payload that will be
    * summed somewhere and come out wrong.
    */
   const scaleMeasure = (v, unit) => {
@@ -895,11 +939,11 @@ export function scaleFixtures(model, period) {
     : mm));
 
   /**
-   * The book of subscriptions, and it balances at every window.
+   * The book of members, and it balances at every window.
    *
    * Opening and closing are **stocks**, read off `LIVE_SERIES` at the two ends
    * of the window. New is a **flow**, counted over it. Lost is then the
-   * difference — which is how a book is actually constructed from a subscriber
+   * difference — which is how a book is actually constructed from a member
    * count and a joiner count, and is the only arrangement that cannot produce a
    * negative opening.
    */
@@ -909,7 +953,7 @@ export function scaleFixtures(model, period) {
   s.live = LIVE_SERIES[end];
   s.opening = LIVE_SERIES[Math.max(0, end - months)];
   s.added = Math.round(s.added * factor);
-  // Never below nought: a period cannot have lost subscriptions it never had.
+  // Never below nought: a period cannot have lost members it never had.
   s.lost = Math.max(0, s.opening + s.added - s.live);
   s.opening = Math.round(s.live - s.added + s.lost);
   s.arrivals = scaleRows(s.arrivals);
@@ -957,10 +1001,10 @@ export function scaleFixtures(model, period) {
   };
 
   /**
-   * Subscriptions.
+   * Members.
    *
    * Almost nothing here moves with the picker, and that is the point. A price
-   * is a price; a tier's subscriber count is a stock; MRR and the average price
+   * is a price; a tier's member count is a stock; MRR and the average price
    * paid are rates and are said "a month". The only flows are what each channel
    * took over the window and the fee that came off it.
    */

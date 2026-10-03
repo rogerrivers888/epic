@@ -18,6 +18,7 @@ import express from 'express';
 import { CAPABILITIES, DOORS, OWNER_ONLY_CAPABILITIES, accessOf, can, isPersonalSession, requires, requireOwnerSignedIn } from '../access.js';
 import * as activity from '../repositories/activity.js';
 import * as insights from '../repositories/insights.js';
+import { NOT_BILLED } from '../repositories/memberships.js';
 import * as rolesRepo from '../repositories/roles.js';
 import { accountById, listAccounts, signInsFor } from '../repositories/accounts.js';
 import { grantStaffRole, clearPriorRole } from '../repositories/staff.js';
@@ -112,15 +113,18 @@ router.get('/overview', async (req, res, next) => {
           insights.mrrByPlan(), insights.revenueByMonth({ months: 12 }), insights.costByMonth({ months: 12 }),
         ]);
         return {
+          // Paid members only, from the shared classification (Roger, 3 Oct
+          // 2026: "Count memberships, not accounts"). Nought while nothing is
+          // billed, and `billed` lets the screen say so.
           mrrPence: byPlan.reduce((n, p) => n + (p.mrr_pence || 0), 0),
+          members: totals.members,
+          billed: totals.billed,
+          billedNote: totals.billed ? null : NOT_BILLED,
           byPlan,
           revenue,
           cost,
           costMonthUsd: totals.cost_month_usd,
-          // Said plainly wherever it is shown: nothing here has been collected,
-          // because Epic has no payment provider. It is what the plans people
-          // are on are priced at.
-          basis: 'contracted',
+          basis: 'members',
         };
       })()
       : null;
@@ -403,7 +407,7 @@ router.get('/reporting/engagement', requires('view_reporting'), async (req, res,
   } catch (err) { next(err); }
 });
 
-/** GET /api/admin/reporting/revenue — what the plans people are on are worth. */
+/** GET /api/admin/reporting/revenue — what paid memberships are worth. */
 router.get('/reporting/revenue', requires('view_financials'), async (req, res, next) => {
   try {
     const [byPlan, revenue, cost, plans, totals] = await Promise.all([
@@ -413,19 +417,28 @@ router.get('/reporting/revenue', requires('view_financials'), async (req, res, n
       rolesRepo.listPlans(),
       insights.estateTotals(),
     ]);
+    /**
+     * Members, not accounts (Roger, 3 Oct 2026). `paying` is paid members,
+     * `free` is complimentary households (Founding, and `owner`/`friend` given
+     * by hand), and ARPU is over paid members — null, never nought, when there
+     * are none. Nothing is billed yet, so it says so.
+     */
     const mrrPence = byPlan.reduce((n, p) => n + (p.mrr_pence || 0), 0);
-    const paying = byPlan.reduce((n, p) => n + (p.price_pence ? p.households : 0), 0);
+    const paying = byPlan.reduce((n, p) => n + (p.paid || 0), 0);
     res.json({
-      // Named on the screen as well as here: none of this has been collected.
-      // Epic holds no card and no payment provider, so "revenue" is what the
-      // plans people are on are priced at, and cash is not knowable from here.
-      basis: 'contracted',
+      basis: 'members',
+      billed: totals.billed,
+      billedNote: totals.billed ? null : NOT_BILLED,
       missing: ['collected', 'failed_payments', 'refunds'],
       mrrPence,
       arrPence: mrrPence * 12,
       paying,
-      free: byPlan.reduce((n, p) => n + p.unpriced, 0),
-      arpuPence: paying ? Math.round(mrrPence / paying) : 0,
+      members: totals.members,
+      trialling: totals.trialling,
+      free: totals.complimentary,
+      invited: totals.invited_households,
+      peopleCovered: totals.people_covered,
+      arpuPence: paying ? Math.round(mrrPence / paying) : null,
       byPlan,
       revenue,
       cost,

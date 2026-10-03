@@ -11,7 +11,7 @@
  *    provider", which is the handoff's seventh non-negotiable;
  *  · **a share under thirty is said as counts** — "7 of 9" — because a
  *    percentage of nine is a lie about how much is known;
- *  · **per-subscriber is a formatting context**, applied once, not converted at
+ *  · **per-member is a formatting context**, applied once, not converted at
  *    two hundred call sites.
  *
  * Nothing here scales anything by a period factor. The API answers with figures
@@ -73,12 +73,15 @@ export type Stream = {
   perSub: number | null;
   units: number | null;
   unitName: string;
-  /** What one unit was worth — a number, so Per subscriber converts it. */
+  /** What one unit was worth — a number, so Per member converts it. */
   avgUnit: number | null;
   churn: string | null;
   series: number[] | null;
   estimated?: boolean;
   gap?: string | null;
+  /** False while no membership is billed; the screen says "Not billed yet". */
+  billed?: boolean;
+  billedNote?: string | null;
   /**
    * The channels the money came through, indented under the stream in the table
    * lens. They deliberately carry no cost and no margin: cost allocates at
@@ -112,7 +115,15 @@ export type HouseholdRow = {
   bookings: number;
   ratings: number;
   costUsd?: number;
-  status: 'live' | 'trial' | 'at_risk' | 'cancelled' | string;
+  /**
+   * The household's membership, not its login (Roger, 3 Oct 2026): member ·
+   * trialling · complimentary · invited · none.
+   */
+  status: 'member' | 'trialling' | 'complimentary' | 'invited' | 'none' | string;
+  /** The lead account is suspended — beside the status, never instead of it. */
+  suspended?: boolean;
+  /** A paid member who has opened nothing in thirty days. */
+  atRisk?: boolean;
   statusNote: string | null;
 };
 
@@ -209,13 +220,16 @@ export type SupplierRecord = {
   period?: Period;
 };
 
-/** A tier on the Subscriptions screen: three editable prices and four derived rows. */
+/** A tier on the Members screen: three editable prices and four derived rows. */
 export type Tier = {
   key: string;
   label: string;
   note: string | null;
   active: boolean;
-  subscribers: number;
+  /** Member households on the tier — paid or trialling in Stripe, never accounts. */
+  members: number;
+  paid?: number;
+  trialling?: number;
   webPence: number | null;
   iosPence: number | null;
   androidPence: number | null;
@@ -242,7 +256,7 @@ export type Subscriptions = {
   tiers: Tier[];
   benefits: Benefit[];
   channels: {
-    rows: { key: string; label: string; subscribers: number | null; pence: number | null; feePence: number | null }[];
+    rows: { key: string; label: string; members: number | null; pence: number | null; feePence: number | null }[];
     note?: string | null;
     net?: Row[] | null;
     blendedFeePct: number | null;
@@ -261,6 +275,11 @@ export type Subscriptions = {
     onAnnualOf: number;
     onAnnualGap?: string | null;
     onAnnualNote?: string | null;
+    members?: number;
+    trialling?: number;
+    complimentary?: number;
+    billed?: boolean;
+    billedNote?: string | null;
   };
 };
 
@@ -272,19 +291,22 @@ export type Suite = {
   gaps: Record<string, string>;
   estate: {
     households: number; customers: number; active: number; active90?: number;
-    paying: number; trial: number; atRisk: number; people: number; origins: Row[];
+    members: number; paid?: number; trialling: number; complimentary?: number; invited?: number;
+    notMembers?: number; peopleCovered?: number; billed?: boolean; billedNote?: string | null;
+    atRisk: number; people: number; origins: Row[];
   };
   overview: {
     measures: Measure[];
     subscriptions: {
       opening: number; added: number; lost: number; live: number;
+      trialling?: number; complimentary?: number;
       churnPct: number | null; wasChurnPct: number | null; churnGap?: string;
       arrivals: Row[] | null; arrivalsNote: string | null;
       sources: Row[] | null; sourcesGap?: string;
     };
     revenue: {
       byStream: Row[]; byStreamGap?: string;
-      mrrByPlan: Row[]; mrr: number;
+      mrrByPlan: Row[]; mrr: number; billed?: boolean; billedNote?: string | null;
       forecast: { today: number; steps: Row[]; total: number } | null; forecastGap?: string;
     };
     engagement: {
@@ -304,7 +326,8 @@ export type Suite = {
     };
   };
   money: {
-    subscribers: number;
+    /** Paid members: what Per member divides by. */
+    members: number;
     streams: Stream[];
     total: {
       revenue: number | null; cost: number | null; margin: number | null; marginPct: number | null;
@@ -329,7 +352,10 @@ export type Suite = {
   };
   customers: {
     households: HouseholdRow[]; shown: number; total: number;
-    paying: number; payingMrr: number; trial: number;
+    /** Members, not accounts (Roger, 3 Oct 2026). */
+    members: number; payingMrr: number | null; trialling: number;
+    complimentary?: number; invited?: number; notMembers?: number; peopleCovered?: number;
+    averagePence?: number | null; billed?: boolean; billedNote?: string | null;
     trialConvertPct: number | null; trialGranted: number | null; atRisk: number;
     /** How the estate arrived — the slice rule 4 makes every figure subject to. */
     origins?: Row[] | null;
@@ -385,7 +411,7 @@ export type Currency = 'gbp' | 'usd';
 const SIGN: Record<Currency, string> = { gbp: '£', usd: '$' };
 
 /**
- * The per-subscriber context.
+ * The per-member context.
  *
  * The handoff: "Per subscriber converts **every** money value on the screen —
  * implement it as a formatting context, not per call site." So it is a property
@@ -393,7 +419,7 @@ const SIGN: Record<Currency, string> = { gbp: '£', usd: '$' };
  */
 export type Fmt = {
   currency: Currency;
-  /** Divide every money figure by this many subscribers, or don't. */
+  /** Divide every money figure by this many members, or don't. */
   perSub: number | null;
   money: (v: number | null | undefined, opts?: { pence?: boolean; sign?: boolean }) => string | null;
   count: (v: number | null | undefined, dp?: number) => string | null;
@@ -411,7 +437,7 @@ export function formatter({ currency = 'gbp', perSub = null }: { currency?: Curr
    * is what the ledger recorded. A fixed number of decimals gets one of the two
    * wrong — either "£9,244.00" on a headline or "$77" on a bill.
    *
-   * Two exceptions. Per subscriber is always to the penny, because £6.65 a
+   * Two exceptions. Per member is always to the penny, because £6.65 a
    * month is the figure and £7 is a different claim. And something that costs
    * less than a penny says so rather than rounding to nought, which on a cost
    * screen would read as free.
@@ -552,9 +578,9 @@ export function onSiteDelta(seconds: number | null | undefined): string | null {
 // the households table
 // ---------------------------------------------------------------------------
 
+/** A household's membership in words — the five the owner named (3 Oct 2026). */
 export const STATUS_WORDS: Record<string, string> = {
-  live: 'Live', trial: 'Trial', at_risk: 'At risk', cancelled: 'Cancelled',
-  active: 'Live', invited: 'Invited', suspended: 'Cancelled',
+  member: 'Member', trialling: 'Trialling', complimentary: 'Complimentary', invited: 'Invited', none: 'Not a member',
 };
 
 export const statusWord = (row: HouseholdRow) =>

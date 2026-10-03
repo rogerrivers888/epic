@@ -11,7 +11,7 @@
  *    the number of bookings, because both come from the same rows.
  *  · **Ratings under thirty are counts** — "7 of 9" — not a percentage.
  *
- * And one more: the lifetime subscription figure agrees with the plan history,
+ * And one more: the lifetime membership figure agrees with the plan history,
  * so a household that upgraded pays the old price for its earlier months. Where
  * there is no history to walk it says the figure is estimated rather than
  * implying a precision the table has not got.
@@ -81,13 +81,14 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
         <Stat
           label="Plan now"
           value={record.monthPence ? pence(record.monthPence) : '—'}
-          sub={[record.plan, record.status].filter(Boolean).join(' · ')}
+          // The membership in words, not the login's status (Roger, 3 Oct 2026).
+          sub={[record.plan, record.statusWord ?? record.status, record.billed === false ? 'not billed yet' : null].filter(Boolean).join(' · ')}
           on
         />
         <Stat
           label="Spent with Epic ever"
           value={pence(s.everPence)}
-          sub={`${pence(s.subscriptionPence)} subscription · ${pence(s.bookedPence)} booked${s.subscriptionEstimated ? ' · estimated' : ''}`}
+          sub={`${pence(s.subscriptionPence)} membership · ${pence(s.bookedPence)} booked${s.subscriptionEstimated ? ' · estimated' : ''}`}
         />
         <Stat
           label="Spent last 12 months"
@@ -174,7 +175,7 @@ export function HouseholdRecordView({ record, error, gaps, onBack, controls, kic
           <Kv label="Favourite shape" value={record.eventsPanel?.shape ?? null} gap="Not enough bookings to say" strong last />
         </SuitePanel>
 
-        <SuitePanel title="Subscription history">
+        <SuitePanel title="Membership history">
           {record.plans?.rows?.length ? (
             record.plans.rows.map((p: any, i: number, all: any[]) => (
               <Kv

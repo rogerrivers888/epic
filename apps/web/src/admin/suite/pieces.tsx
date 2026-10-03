@@ -425,7 +425,7 @@ export function Kv({ label, value, gap, strong, lime, last, onPress, action, wid
 /**
  * A row whose value is a field.
  *
- * The editable screens — Subscriptions and the supplier record — are rows like
+ * The editable screens — Members and the supplier record — are rows like
  * every other panel, with an input where the figure would be. An input with a
  * rule under it rather than a box round it, which is the back office's own
  * grammar (owner, 12 Sep 2026: "the buttons with white boxes around them…

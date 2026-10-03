@@ -7,7 +7,7 @@
  * household pushes, because that is a move.
  *
  * At risk is the one alarm-red thing on the screen, and the handoff allows at
- * most one per screen. It is derived from the state of the row — paying, and
+ * most one per screen. It is derived from the state of the row — a paid member, and
  * nothing opened in thirty days — rather than instrumented, which is the ninth
  * rule: instrument entry, derive exit.
  */
@@ -27,9 +27,9 @@ import { HouseholdRecordView } from './HouseholdRecord';
 import { joinedDay, lastSeen, share, sortRows, statusWord, type HouseholdRow } from './model';
 
 const PLANS = ['All', 'Household', 'Solo', 'Annual', 'Trial', 'Standard'] as const;
-// "Invited" joins the handoff's five now that inviting happens on this screen
-// and an invited household appears in the list the moment the link goes out.
-const STATUSES = ['All', 'Live', 'Trial', 'Invited', 'At risk', 'Cancelled'] as const;
+// A household's status is its membership, not its login (Roger, 3 Oct 2026):
+// the five he named. Suspended and at risk ride beside it in the cell.
+const STATUSES = ['All', 'Member', 'Trialling', 'Complimentary', 'Invited', 'Not a member'] as const;
 type Plan = typeof PLANS[number];
 type Status = typeof STATUSES[number];
 const SORTS = ['name', 'plan', 'monthPence', 'joined', 'lastSeenDays', 'places', 'daysOut', 'bookings', 'ratings', 'status'] as const;
@@ -88,7 +88,7 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
    *
    * `PATCH /api/accounts/:id` already puts an account on a plan and sets its
    * trial end date, and already writes an `account_plan_history` row for the
-   * change — which is what makes the household record's lifetime subscription
+   * change — which is what makes the household record's lifetime membership
    * figure agree with its plan history afterwards.
    */
   const trial = useCallback(async (what: 'grant' | 'extend') => {
@@ -156,7 +156,7 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
   // A cancelled household is still a row you can read, at `#cfcac7` — the
   // handoff's own value, which is `mutedOnInk` here. It used to be only the
   // status cell that dimmed, so the row read as live with one grey word in it.
-  const gone = (h: HouseholdRow) => h.status === 'cancelled';
+  const gone = (h: HouseholdRow) => !!h.suspended;
 
   const columns: Col<HouseholdRow>[] = [
     {
@@ -189,7 +189,7 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
       // so without a gap of its own "9" and "Live" read as one string. The
       // table's 10px row gap is not enough where two alignments meet.
       key: 'status', label: 'Status', width: 140, align: 'left', sort: 'status', pad: 14,
-      cell: (h) => <Cell left alarm={h.status === 'at_risk'} muted={h.status === 'cancelled'}>{statusWord(h)}</Cell>,
+      cell: (h) => <Cell left alarm={!!h.atRisk} muted={gone(h)}>{statusWord(h)}</Cell>,
     },
   ];
 
@@ -203,8 +203,14 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
       {customers.estate ? (
         <HeadStats
           items={[
-            { label: 'Households', value: fmt.plain.count(customers.estate.households), sub: `${fmt.plain.count(customers.estate.people)} people` },
-            { label: 'Invited, not in', value: fmt.plain.count(customers.estate.invited), sub: 'a link was sent' },
+            {
+              label: 'Households',
+              value: fmt.plain.count(customers.estate.households),
+              sub: customers.peopleCovered == null
+                ? `${fmt.plain.count(customers.estate.people)} people`
+                : `${fmt.plain.count(customers.estate.people)} people · ${fmt.plain.count(customers.peopleCovered)} on a membership`,
+            },
+            { label: 'Invited, not signed in', value: fmt.plain.count(customers.estate.invited), sub: 'households · a link was sent' },
             { label: 'Suspended', value: fmt.plain.count(customers.estate.suspended), sub: 'signed out, data kept' },
             { label: 'Signed in now', value: fmt.plain.count(customers.estate.signedIn), sub: 'on at least one device' },
           ]}
@@ -293,22 +299,29 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
 
       <Standing
         items={[
+          // Members, not accounts (Roger, 3 Oct 2026): a paid or trialling
+          // membership; only the paid feed MRR.
           {
-            label: 'Paying',
-            value: fmt.plain.count(customers.paying),
-            sub: canSeeMoney ? `${fmt.revenue.money(customers.payingMrr)} a month` : undefined,
+            label: 'Members',
+            value: fmt.plain.count(customers.members),
+            sub: [
+              `${fmt.plain.count(customers.trialling)} trialling`,
+              customers.billed === false
+                ? (customers.billedNote ?? 'Not billed yet')
+                : canSeeMoney && customers.payingMrr != null ? `${fmt.revenue.money(customers.payingMrr)} a month` : null,
+            ].filter(Boolean).join(' · '),
           },
           {
-            label: 'On trial',
-            value: fmt.plain.count(customers.trial),
+            label: 'Complimentary',
+            value: fmt.plain.count(customers.complimentary ?? null),
             sub: customers.trialConvertPct == null
-              ? undefined
-              : `${customers.trialConvertPct}% convert · ${customers.trialGranted} granted by hand`,
+              ? '£0 · Founding and free plans, not in MRR'
+              : `£0 · ${customers.trialConvertPct}% of trials convert · ${customers.trialGranted} granted by hand`,
           },
           {
             label: 'At risk',
             value: fmt.plain.count(customers.atRisk),
-            sub: 'paying, nothing opened in 30 days',
+            sub: 'paid members, nothing opened in 30 days',
           },
         ]}
       />
@@ -317,7 +330,7 @@ export function Customers({ canSeeMoney, canManage }: { canSeeMoney: boolean; ca
           households is a count, not a percentage. */}
       {customers.total < 30 ? (
         <Text style={type.tiny}>
-          {`Shares on the other screens read as counts while the estate is this small — ${share(customers.paying, customers.total)} paying.`}
+          {`Shares on the other screens read as counts while the estate is this small — ${share(customers.members, customers.total)} members.`}
         </Text>
       ) : null}
     </SuitePage>

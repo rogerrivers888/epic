@@ -15,7 +15,7 @@
  *    somebody was here, and what they were looking at.
  *  · **Flows are summed over the window, stocks are read at its end, rates are
  *    read as they stand.** Nothing is multiplied by a factor, so a period
- *    change cannot scale a count of live subscriptions.
+ *    change cannot scale a count of live members.
  *  · **Guest-invite households are excluded from every estate denominator by
  *    default** (migration 199). A guest invited to somebody else's trip is a
  *    success, and counting them beside a trial signup makes activation read as
@@ -29,7 +29,11 @@ import { query } from '../db.js';
 import { classExpression } from '../domain/costClass.js';
 import { monthBuckets } from '../domain/reportingPeriods.js';
 import { listCounterparties, rateHistory } from './counterparties.js';
-import { annualPence, readBenefits, readChannels, readTiers } from './pricing.js';
+import { readBenefits, readChannels, readStanding, readTiers } from './pricing.js';
+import {
+  CLASS_WORDS, MEMBERSHIP_BILLING, classifyHousehold, classifyHouseholds, membershipMoves, membershipRevenue, membershipRevenueByMonth,
+  membershipStartsByMonth, summarise,
+} from './memberships.js';
 import {
   BILLS_IN_USD, combineBasis, expectedMonths, priceMonths, residueOf, windowMonths, supplierExpected, supplierKind, supplierWindow,
 } from '../desk/supplierCost.js';
@@ -47,7 +51,7 @@ export const GAPS = {
   bookings: 'No payment provider',
   hotel: 'No hotel booking provider',
   activity: 'No activity booking provider',
-  churn: 'No subscription state — plan history is empty',
+  churn: 'No membership state — nothing is billed yet',
   attribution: 'Signup source is not instrumented',
   costByStream: 'Cost is not classified by stream',
   satisfaction: 'Satisfaction is not instrumented',
@@ -75,7 +79,7 @@ export const GAPS = {
   // Routes, photos and the census are one Google bill: the register's Routes
   // entry is inside the Google row, never a second copy of it.
   withinGoogle: 'In Google’s bill',
-  channels: 'No payment provider — the channel a subscription came through is not recorded',
+  channels: 'No payment provider — the channel a membership came through is not recorded',
 };
 
 /** Guest-invite households are out of every denominator unless asked for. */
@@ -144,19 +148,6 @@ async function estate(period) {
        (select count(*)::int from households)                                          as households,
        (select count(*)::int from households h where ${NOT_GUEST} and h.origin <> 'founding') as customers,
        (select count(*)::int from members)                                             as people,
-       -- A subscription is a HOUSEHOLD, not a login. Household is up to six
-       -- logins, and a member who claims their profile gets an account of
-       -- their own on the same plan, so counting accounts made a family of six
-       -- read as six subscriptions and six times the MRR — a figure that grew
-       -- every time somebody's daughter signed in (Codex, 20 Sep 2026).
-       -- member_id is null is the household's own account; the rest are the
-       -- people inside it.
-       (select count(*)::int from accounts a join households h on h.id = a.household_id
-         where a.status <> 'suspended' and a.member_id is null and ${NOT_GUEST}
-           and exists (select 1 from plans p where p.key = a.plan and p.price_pence is not null)) as paying,
-       (select count(*)::int from accounts a join households h on h.id = a.household_id
-         where a.status <> 'suspended' and a.member_id is null and ${NOT_GUEST}
-           and exists (select 1 from plans p where p.key = a.plan and p.price_pence is null))    as trial,
        -- On at least one device right now, which is what the Households screen
        -- counted before it was retired into Customers.
        (select count(distinct a.household_id)::int from api_sessions s
@@ -182,27 +173,48 @@ async function estate(period) {
     peer: 'In somebody’s household', marketplace: 'From a host’s page',
   };
 
-  // At risk: paying, and nothing opened in thirty days. Derived from the state
-  // of the row — the handoff's ninth rule, "instrument entry, derive exit".
-  const { rows: [risk] } = await query(
-    `select count(*)::int as at_risk
-       from accounts a
-       join households h on h.id = a.household_id
-       join plans p on p.key = a.plan
-      where a.status = 'active' and a.member_id is null and p.price_pence is not null and ${NOT_GUEST}
-        and not exists (
+  /**
+   * Members, not accounts (Roger, 3 Oct 2026): a member is a household with a
+   * paid or trialling membership in Stripe, read from the one classification
+   * every report shares (`memberships.js`). An account on a priced plan is not
+   * one, and a member's own login never adds a second household.
+   */
+  const classified = await classifyHouseholds();
+  const m = summarise(classified);
+
+  // At risk: a paid member, and nothing opened in thirty days. Derived from the
+  // state of the row — the handoff's ninth rule, "instrument entry, derive exit".
+  const paidIds = classified.filter((h) => h.cls === 'member_paid').map((h) => h.householdId);
+  const { rows: [risk] } = paidIds.length
+    ? await query(
+      `select count(*)::int as at_risk
+         from unnest($1::uuid[]) as p(id)
+        where not exists (
           select 1 from activity_events e
-           where e.household_id = a.household_id and e.at >= now() - interval '30 days'
+           where e.household_id = p.id and e.at >= now() - interval '30 days'
         )`,
-  );
+      [paidIds],
+    )
+    : { rows: [{ at_risk: 0 }] };
 
   return {
     households: int(counts.households),
     customers: int(counts.customers),
     active: int(counts.active_window),
     active90: int(counts.active_90),
-    paying: int(counts.paying),
-    trial: int(counts.trial),
+    members: m.members,
+    paid: m.paid,
+    trialling: m.trialling,
+    complimentary: m.complimentary,
+    invited: m.invited,
+    notMembers: m.notMembers,
+    peopleCovered: m.peopleCovered,
+    billed: m.billed,
+    billedNote: m.billedNote,
+    // Money and the per-household list ride beside the estate, never in it:
+    // the estate goes to readers without financials.
+    money: { mrrPence: m.mrrPence, averagePence: m.averagePence, byPlan: m.byPlan },
+    classified,
     atRisk: int(risk.at_risk),
     people: int(counts.people),
     signedIn: int(counts.signed_in),
@@ -220,135 +232,41 @@ async function estate(period) {
 // ---------------------------------------------------------------------------
 
 /**
- * Contracted subscription revenue over a window.
+ * Membership revenue over a window.
  *
- * Priced from `account_plan_history` where it has anything to say and from the
- * account as it stands where it does not, which is the same rule
- * `insights.revenueByMonth` already uses. `estimated` says which happened, so
- * the screen can mark it rather than imply a precision it has not got.
- *
- * Nothing here is cash. Epic holds no payment provider, so this is what the
- * plans people are on are worth, and every screen that shows it says so.
+ * Paid members only, priced at what each membership is billed (Roger, 3 Oct
+ * 2026: "Count memberships, not accounts"). It used to price every household
+ * account on a priced plan from `account_plan_history`, which made an
+ * administrator's choice of plan into revenue nobody was ever charged. Nothing
+ * is billed yet, so this is nought, and the screens say "Not billed yet" beside
+ * it rather than leaving a £0 to be read as "nobody pays".
  */
 async function subscriptionRevenue(from, to) {
-  const { rows: [r] } = await query(
-    /**
-     * Two things this query has to get right, and both were wrong (Codex,
-     * 20 Sep 2026):
-     *
-     *  · **A month is priced at what it was sold at.** It read `ph.plan` from
-     *    the history and then took `plans.price_pence` — today's cached price —
-     *    and `accounts.status` as it stands. So changing a price rewrote every
-     *    prior month, and suspending an account removed it from history. The
-     *    history row carries its own `price_pence` and `status` for exactly
-     *    this reason, and now they are what is read. `plans.price_pence` is the
-     *    fallback only for an account that predates the history table, which is
-     *    what `estimated` reports.
-     *  · **`to` is exclusive.** `generate_series` to `date_trunc('month', $2)`
-     *    put the current month inside "last month", because `to` is the first
-     *    instant of this one. It stops a microsecond short now.
-     */
-    `with months as (
-       select generate_series(date_trunc('month', $1::timestamptz),
-                              date_trunc('month', $2::timestamptz - interval '1 microsecond'),
-                              '1 month') as month
-     ),
-     state as (
-       select m.month, a.id as account_id,
-              (select ph.plan from account_plan_history ph
-                where ph.account_id = a.id and ph.from_at < m.month + interval '1 month'
-                order by ph.from_at desc limit 1)                                 as held_plan,
-              (select ph.price_pence from account_plan_history ph
-                where ph.account_id = a.id and ph.from_at < m.month + interval '1 month'
-                order by ph.from_at desc limit 1)                                 as held_pence,
-              (select ph.status from account_plan_history ph
-                where ph.account_id = a.id and ph.from_at < m.month + interval '1 month'
-                order by ph.from_at desc limit 1)                                 as held_status,
-              a.plan                                                              as now_plan,
-              a.status                                                            as now_status,
-              (a.created_at < m.month + interval '1 month')                       as existed
-         from months m
-         -- One account per household: the household's own. A member who claims
-         -- their profile gets a login on the same plan, and counting it would
-         -- charge the family twice (Codex, 20 Sep 2026).
-         left join accounts a on a.member_id is null
-         left join households h on h.id = a.household_id
-        where a.id is null or h.origin <> 'guest_invite'
-     ),
-     priced as (
-       select st.*,
-              coalesce(st.held_status, st.now_status)                             as status,
-              -- The price on the history row first; the plan's cached price only
-              -- where there is no history to read.
-              coalesce(st.held_pence, p.price_pence)                              as pence,
-              (st.held_plan is null)                                              as estimated
-         from state st
-         left join plans p on p.key = coalesce(st.held_plan, st.now_plan)
-     )
-     select coalesce(sum(pence) filter (where existed and status <> 'suspended'), 0)::int as pence,
-            count(*) filter (where existed and estimated)::int                            as estimated_rows,
-            count(*) filter (where existed)::int                                          as rows_total
-       from priced`,
-    [from, to],
-  );
-  /**
-   * Estimated as soon as **any** of it is.
-   *
-   * It used to need every row to be estimated, so a window holding one legacy
-   * account beside twenty with history presented itself as exact (Codex, 20 Sep
-   * 2026). A figure that is partly worked out from today's price is not exact,
-   * and the screen's warning is what says so.
-   */
-  return { pence: int(r.pence), estimated: int(r.estimated_rows) > 0 };
+  return membershipRevenue(from, to);
 }
 
-/** Monthly recurring revenue as it stands, by plan — a rate, never scaled. */
-async function mrr() {
-  const { rows } = await query(
-    /**
-     * `h.origin <> 'guest_invite'` in the LEFT JOIN condition only made `h`
-     * null for a guest — it did not drop the account row — so guests were still
-     * counted and still summed (Codex, 20 Sep 2026). The exclusion belongs in
-     * the aggregate's own filter, where it actually excludes.
-     */
-    /**
-     * Two faults, both Codex's, 20 Sep 2026:
-     *
-     *  · `h.origin <> 'guest_invite'` in the LEFT JOIN condition only made `h`
-     *    null for a guest — it did not drop the account row — so guests were
-     *    still counted and still summed. The exclusion belongs in the
-     *    aggregate's own filter, where it actually excludes.
-     *  · **MRR valued every account at the plan's current price.** So the
-     *    moment `/subscriptions/price` raised the Household price, every
-     *    existing Household account was worth the new one — while the panel
-     *    beside it promised that existing subscriptions keep the row they were
-     *    sold on. It reads each account's own latest history price now, and
-     *    falls back to the plan's cache only where there is no history, which
-     *    is what `estimated` reports.
-     */
-    `select p.key, p.label, p.price_pence,
-            count(a.id) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite')::int as households,
-            coalesce(sum(coalesce(
-              (select ph.price_pence from account_plan_history ph
-                where ph.account_id = a.id and ph.price_pence is not null
-                order by ph.from_at desc limit 1),
-              p.price_pence
-            )) filter (where a.status <> 'suspended' and h.origin <> 'guest_invite'), 0)::int as pence
-       from plans p
-       -- The household's own account, not every login on it.
-       left join accounts a on a.plan = p.key and a.member_id is null
-       left join households h on h.id = a.household_id
-      group by p.key, p.label, p.price_pence, p.position
-      order by p.position`,
-  );
-  return rows.map((r) => ({
-    key: r.key,
-    label: r.price_pence
-      ? `${r.label} £${(r.price_pence / 100).toFixed(2)} · ${int(r.households)}`
-      : `${r.label} · ${int(r.households)}`,
-    households: int(r.households),
-    pence: int(r.pence),
-  }));
+/**
+ * Monthly recurring revenue as it stands, by plan — a rate, never scaled.
+ *
+ * Paid members only; a trialling member is counted on its plan and adds
+ * nothing until it converts. Every plan is listed, so a plan nobody is a member
+ * of reads "· 0" rather than vanishing.
+ */
+async function mrr(byPlan) {
+  const { rows } = await query('select key, label, price_pence from plans order by position, key');
+  return rows.map((r) => {
+    const on = byPlan[r.key] ?? { paid: 0, trialling: 0, mrrPence: 0 };
+    const count = on.paid + on.trialling;
+    const said = on.trialling ? `${count} (${on.trialling} trialling)` : String(count);
+    return {
+      key: r.key,
+      label: r.price_pence
+        ? `${r.label} £${(r.price_pence / 100).toFixed(2)} · ${said}`
+        : `${r.label} · ${said}`,
+      households: count,
+      pence: on.mrrPence,
+    };
+  });
 }
 
 /** What a booking recorded through Epic was worth, and what came back. */
@@ -549,7 +467,7 @@ function apportion(register, costs, owned) {
  * households, not a million rows, and a round trip per column sort would be
  * slower than the sort — the same choice `/api/admin/people` already made.
  */
-async function households(period) {
+async function households(period, classified) {
   const { rows } = await query(
     `select h.id, h.name, h.origin, h.home_label,
             a.id as account_id, a.email, a.plan, a.status, a.trial_ends_on,
@@ -566,21 +484,34 @@ async function households(period) {
             (select coalesce(sum(c.estimated_cost_usd), 0)::float from provider_calls c
               where c.household_id = h.id and c.created_at >= $1)                           as cost_usd
        from households h
-       left join accounts a on a.household_id = h.id and a.member_id is null
+       left join lateral (
+         -- The household's own account; one row a household however many it has.
+         select a.* from accounts a
+          where a.household_id = h.id and a.member_id is null
+          order by (a.status = 'suspended'), a.created_at
+          limit 1
+       ) a on true
        left join plans p on p.key = a.plan
       order by h.created_at`,
     [period.from],
   );
+  const byId = new Map(classified.map((c) => [c.householdId, c]));
 
   const now = Date.now();
   return rows.map((r) => {
     const seen = r.seen_at ?? r.last_seen_at;
     const lastSeenDays = seen ? Math.floor((now - new Date(seen).getTime()) / 86400000) : null;
-    const paying = r.price_pence != null && r.status === 'active';
-    const status = r.status === 'suspended' ? 'cancelled'
-      : r.price_pence == null && r.status === 'active' ? 'trial'
-        : paying && lastSeenDays != null && lastSeenDays >= 30 ? 'at_risk'
-          : r.status === 'active' ? 'live' : r.status;
+    /**
+     * A household's status is its membership, not its login (Roger, 3 Oct
+     * 2026): Member · Trialling · Complimentary · Invited · Not a member. A
+     * guest is never classified, so it reads "Not a member" in the list that
+     * hides it by default. Suspension and at-risk travel beside the status
+     * rather than replacing it.
+     */
+    const c = byId.get(r.id) ?? null;
+    const cls = c?.cls ?? 'none';
+    const status = STATUS_OF[cls];
+    const atRisk = cls === 'member_paid' && lastSeenDays != null && lastSeenDays >= 30;
     return {
       id: r.id,
       accountId: r.account_id,
@@ -589,7 +520,9 @@ async function households(period) {
       people: int(r.people),
       origin: r.origin,
       plan: r.plan_label ?? r.plan ?? '—',
-      monthPence: int(r.price_pence),
+      // What the membership is billed a month: £0 for everybody who is not a
+      // paid member, complimentary included.
+      monthPence: c?.monthlyPence ?? 0,
       joined: r.joined ? new Date(r.joined).toISOString().slice(0, 10) : null,
       lastSeenDays,
       places: int(r.places),
@@ -599,12 +532,19 @@ async function households(period) {
       ratings: int(r.ratings),
       costUsd: r.cost_usd,
       status,
-      statusNote: status === 'trial' && r.trial_ends_on
-        ? `${Math.max(0, Math.ceil((new Date(r.trial_ends_on).getTime() - now) / 86400000))} days left`
-        : null,
+      suspended: r.status === 'suspended',
+      atRisk,
+      statusNote: r.status === 'suspended' ? 'suspended'
+        : atRisk ? 'at risk'
+          : null,
     };
   });
 }
+
+/** A membership class as the household list's status key. */
+const STATUS_OF = {
+  member_paid: 'member', member_trialling: 'trialling', complimentary: 'complimentary', invited: 'invited', none: 'none',
+};
 
 // ---------------------------------------------------------------------------
 // behaviour — per household per month
@@ -698,12 +638,9 @@ async function history(now) {
   };
 
   const [signups, engagement, events, searches, saves, out, trips, attended, hosted, costUsd] = await Promise.all([
-    monthly(`select to_char(date_trunc('month', a.created_at), 'YYYY-MM') as month, count(*)::int as n
-               from accounts a
-               join households h on h.id = a.household_id
-               left join plans p on p.key = a.plan
-              where a.created_at >= $1 and a.member_id is null and ${NOT_GUEST}
-                and p.price_pence is not null group by 1`),
+    // New members a month: memberships that started, never accounts created on
+    // a priced plan (Roger, 3 Oct 2026). Nought while nothing is billed.
+    membershipStartsByMonth(months.map((m) => m.key)),
     monthly(`select to_char(date_trunc('month', e.at), 'YYYY-MM') as month, count(distinct e.household_id)::int as n
                from activity_events e join households h on h.id = e.household_id
               where e.at >= $1 and ${NOT_GUEST} group by 1`),
@@ -734,51 +671,9 @@ async function history(now) {
                from provider_calls c where c.created_at >= $1 group by 1`),
   ]);
 
-  // Revenue, month by month, from the plan each account was on during it.
-  const { rows: revenueRows } = await query(
-    /**
-     * The same rule as `subscriptionRevenue`, and it was missing here.
-     *
-     * This series is what "Open the chart" draws, and it recomputed every one
-     * of the twelve months from the account's *current* status and the plan's
-     * *current* price — so suspending somebody erased them from last year and
-     * changing a price repriced it (Codex, 20 Sep 2026). `account_plan_history`
-     * carries a `status` and a `price_pence` per row for exactly this, and they
-     * are what each bucket reads.
-     */
-    `with span as (
-       select generate_series(date_trunc('month', $1::timestamptz), date_trunc('month', now()), '1 month') as month
-     ),
-     state as (
-       select s.month, a.id as account_id,
-              (select ph.plan from account_plan_history ph
-                where ph.account_id = a.id and ph.from_at < s.month + interval '1 month'
-                order by ph.from_at desc limit 1)                            as held_plan,
-              (select ph.price_pence from account_plan_history ph
-                where ph.account_id = a.id and ph.from_at < s.month + interval '1 month'
-                order by ph.from_at desc limit 1)                            as held_pence,
-              (select ph.status from account_plan_history ph
-                where ph.account_id = a.id and ph.from_at < s.month + interval '1 month'
-                order by ph.from_at desc limit 1)                            as held_status,
-              a.plan                                                          as now_plan,
-              a.status                                                        as now_status,
-              (a.created_at < s.month + interval '1 month')                   as existed
-         from span s
-         -- One account per household: the household's own (Codex, 20 Sep 2026).
-         left join accounts a on a.member_id is null
-         left join households h on h.id = a.household_id
-        where a.id is null or h.origin <> 'guest_invite'
-     )
-     select to_char(st.month, 'YYYY-MM') as month,
-            coalesce(sum(coalesce(st.held_pence, p.price_pence))
-              filter (where st.existed and coalesce(st.held_status, st.now_status) <> 'suspended'), 0)::int as pence
-       from state st
-       left join plans p on p.key = coalesce(st.held_plan, st.now_plan)
-      group by 1 order by 1`,
-    [first],
-  );
-  const byMonth = new Map(revenueRows.map((r) => [r.month, int(r.pence) / 100]));
-  const revenue = months.map((m) => byMonth.get(m.key) ?? 0);
+  // Revenue, month by month: what paid memberships were billed in each, the
+  // same rule as `subscriptionRevenue` (Roger, 3 Oct 2026). In pounds.
+  const revenue = (await membershipRevenueByMonth(months.map((m) => m.key))).map((p) => p / 100);
 
   return {
     labels: months.map((m) => m.label),
@@ -787,7 +682,7 @@ async function history(now) {
       signups, revenue, engagement, events,
       searches, saves, out, trips, attended, hosted,
       cost: costUsd,
-      // The four streams: only subscriptions has a history. The other three are
+      // The four streams: only membership has a history. The other three are
       // absent rather than zero, and the drill says which when it is opened.
       subscriptions: revenue, hotel: null, hosting: null, activity: null,
     },
@@ -1461,7 +1356,7 @@ export async function readSupplierRecord(key, period) {
 }
 
 // ---------------------------------------------------------------------------
-// subscriptions — what we sell and at what price
+// members — what we sell and at what price
 // ---------------------------------------------------------------------------
 
 /**
@@ -1472,27 +1367,16 @@ export async function readSupplierRecord(key, period) {
  * annual figures are derived on the way out rather than stored.
  */
 async function subscriptions() {
-  const [tiers, benefits, channels] = await Promise.all([readTiers(), readBenefits(), readChannels()]);
-  const paying = tiers.reduce((n, t) => n + t.subscribers, 0);
-  const mrrPence = tiers.reduce((n, t) => n + t.subscribers * (t.webPence ?? 0), 0);
-
+  const [tiers, benefits, channels, standing] = await Promise.all([readTiers(), readBenefits(), readChannels(), readStanding()]);
   return {
     tiers,
     benefits,
     channels,
     publishedAt: benefits.reduce((latest, b) => (b.publishedAt && (!latest || b.publishedAt > latest) ? b.publishedAt : latest), null),
     unpublished: benefits.filter((b) => !b.publishedAt).length,
-    standing: {
-      mrrPence,
-      mrrDelta: null,
-      averagePaidPence: paying ? Math.round(mrrPence / paying) : null,
-      averagePaidDelta: null,
-      onAnnual: null,
-      onAnnualOf: paying,
-      // Nothing records an annual subscription: `plan_prices` has the discount
-      // and `accounts` has no interval, so who is on annual is not knowable.
-      onAnnualGap: 'No subscription interval is recorded',
-    },
+    // The same standing the editing screen reads: paid members only, an
+    // average of nobody is null, and "Not billed yet" said where it applies.
+    standing,
   };
 }
 
@@ -1513,11 +1397,10 @@ export async function readSuite(period, { now = new Date() } = {}) {
   // windows, series and expectations ask for it.
   const cache = new Map();
   const supHistP = registerP.then((r) => supplierHistory(now, r, { cache }));
-  const [est, subNow, subPrev, mrrRows, bookNow, bookPrev, costNow, hist, supHist, costs, register, subs] = await Promise.all([
+  const [{ classified, money: estMoney, ...est }, subNow, subPrev, bookNow, bookPrev, costNow, hist, supHist, costs, register, subs] = await Promise.all([
     estate(period),
     subscriptionRevenue(period.from, period.to),
     subscriptionRevenue(period.prevFrom, period.prevTo),
-    mrr(),
     bookings(period.from, period.to),
     bookings(period.prevFrom, period.prevTo),
     cost(period.from, period.to),
@@ -1528,6 +1411,7 @@ export async function readSuite(period, { now = new Date() } = {}) {
     registerP,
     subscriptions(),
   ]);
+  const mrrRows = await mrr(estMoney.byPlan);
   // The drill's cost series is the shared figure too, never the ledger's.
   hist.series.cost = supHist.total;
 
@@ -1538,7 +1422,7 @@ export async function readSuite(period, { now = new Date() } = {}) {
     visits(period),
     returnBuckets(),
     behaviourRates(period, base),
-    households(period),
+    households(period, classified),
   ]);
 
   const [searchPanel, savePanel, outPanel, tripPanel, eventPanel] = await Promise.all([
@@ -1550,33 +1434,33 @@ export async function readSuite(period, { now = new Date() } = {}) {
   ]);
 
   /**
-   * The book of subscriptions, and it has to balance.
+   * The book of members, and it has to balance.
    *
-   * `paying` counts accounts on a **priced** plan, so the new and the lost must
-   * count the same thing or the book reads "live at the start: −6" — which is
-   * what it did when `added` counted every new account, most of which are
-   * trials (20 Sep 2026, opening the screen).
+   * `live` counts member households (paid or trialling in Stripe), so the new
+   * and the lost count memberships that started and ended — never accounts
+   * created or suspended (Roger, 3 Oct 2026: "Count memberships, not
+   * accounts"). All nought while nothing is billed, and the book still
+   * balances.
    *
-   * `signups` therefore counts arrivals onto a priced plan, and `joined` counts
-   * every new household beside it, because "six households joined" is a real
-   * figure and simply not the same one.
+   * `joined` counts every new household beside it, because "six households
+   * joined" is a real figure and simply not the same one.
    */
-  const { rows: [signups] } = await query(
-    `select count(*) filter (where a.created_at >= $1 and a.created_at < $2 and p.price_pence is not null)::int as added,
-            count(*) filter (where a.created_at >= $3 and a.created_at < $4 and p.price_pence is not null)::int as before,
-            count(*) filter (where a.status = 'suspended' and p.price_pence is not null
-                               and a.updated_at >= $1 and a.updated_at < $2)::int as lost,
-            count(*) filter (where a.created_at >= $1 and a.created_at < $2)::int as joined,
-            count(*) filter (where a.created_at >= $3 and a.created_at < $4)::int as joined_before
-       from accounts a
-       join households h on h.id = a.household_id
-       left join plans p on p.key = a.plan
-      where a.member_id is null and ${NOT_GUEST}`,
-    [period.from, period.to, period.prevFrom, period.prevTo],
-  );
+  const [movesNow, movesPrev, { rows: [joinedRow] }] = await Promise.all([
+    membershipMoves(period.from, period.to),
+    membershipMoves(period.prevFrom, period.prevTo),
+    query(
+      `select count(*) filter (where h.created_at >= $1 and h.created_at < $2)::int as joined,
+              count(*) filter (where h.created_at >= $3 and h.created_at < $4)::int as joined_before
+         from households h
+        where ${NOT_GUEST}`,
+      [period.from, period.to, period.prevFrom, period.prevTo],
+    ),
+  ]);
+  const signups = { added: movesNow.added, before: movesPrev.added, lost: movesNow.lost, joined: joinedRow.joined };
 
   const supplierRows = suppliersFrom(register, costNow, costs, supHist);
-  const mrrPence = mrrRows.reduce((n, p) => n + p.pence, 0);
+  // Paid members only; trialling and complimentary are £0 (Roger, 3 Oct 2026).
+  const mrrPence = estMoney.mrrPence;
   const revenue = subNow.pence / 100;
   // Cost is the shared figure, in pounds: what each supplier billed, or its
   // estimate said to be one (desk/supplierCost.js).
@@ -1589,17 +1473,19 @@ export async function readSuite(period, { now = new Date() } = {}) {
   // e.g. '£150 · budgets for Google and Claude only'").
   const { expectedTotal, expectedWords, expectedPartial } = expectedFoot(supplierRows);
 
-  // Only subscriptions has revenue, and cost is not classified by stream, so
+  // Only membership has revenue, and cost is not classified by stream, so
   // margin exists for the estate and not for a stream. Stated rather than
   // apportioned — an invented allocation is worse than a labelled gap.
   const streams = [
     {
-      key: 'subscriptions', label: 'Subscriptions', revenue, cost: null, margin: null, marginPct: null,
-      growth: change(subNow.pence, subPrev.pence), perSub: est.paying ? Math.round((mrrPence / 100 / est.paying) * 100) / 100 : null,
-      units: est.paying, unitName: 'subscriptions',
-      avgUnit: est.paying ? Math.round((mrrPence / 100 / est.paying) * 100) / 100 : null,
+      key: 'subscriptions', label: 'Members', revenue, cost: null, margin: null, marginPct: null,
+      // Per member is over paid members: a trialling member pays nothing yet.
+      growth: change(subNow.pence, subPrev.pence), perSub: est.paid ? Math.round((mrrPence / 100 / est.paid) * 100) / 100 : null,
+      units: est.members, unitName: 'members',
+      avgUnit: est.paid ? Math.round((mrrPence / 100 / est.paid) * 100) / 100 : null,
+      billed: est.billed, billedNote: est.billedNote,
       churn: null, series: hist.series.subscriptions, estimated: subNow.estimated,
-      // The channels a subscription was sold through are not recorded, so there
+      // The channels a membership was sold through are not recorded, so there
       // is nothing to indent under it yet (`pricing.readChannels`).
       details: null,
     },
@@ -1623,21 +1509,24 @@ export async function readSuite(period, { now = new Date() } = {}) {
     overview: {
       measures: [
         {
-          key: 'signups', label: 'New subscribers', kind: 'flow', unit: 'count',
+          key: 'signups', label: 'New members', kind: 'flow', unit: 'count',
           value: int(signups.added), delta: change(int(signups.added), int(signups.before)),
-          // What it counts, said on the tile: an arrival onto a priced plan.
+          // What it counts, said on the tile: a membership that started.
           // `joined` is beside it because six households joining and none of
-          // them subscribing is the fact somebody needs, not a contradiction.
-          sub: int(signups.joined) === int(signups.added)
-            ? 'onto a priced plan'
-            : `onto a priced plan · ${plural(int(signups.joined), 'household')} joined`,
+          // them becoming members is the fact somebody needs, not a contradiction.
+          sub: [
+            est.billed ? 'memberships started' : 'not billed yet',
+            int(signups.joined) === int(signups.added) ? null : `${plural(int(signups.joined), 'household')} joined`,
+          ].filter(Boolean).join(' · '),
           expected: int(signups.before) || null,
           series: hist.series.signups,
         },
         {
           key: 'revenue', label: 'Revenue', kind: 'flow', unit: 'money',
           value: revenue, delta: change(subNow.pence, subPrev.pence),
-          sub: `contracted · MRR £${(mrrPence / 100).toLocaleString()} a month of it`,
+          sub: est.billed
+            ? `paid members · MRR £${(mrrPence / 100).toLocaleString()} a month of it`
+            : `MRR £0 · ${est.billedNote.toLowerCase()}`,
           series: hist.series.revenue,
         },
         {
@@ -1654,11 +1543,13 @@ export async function readSuite(period, { now = new Date() } = {}) {
       ],
       subscriptions: {
         // opening + new − lost = live, always, because all four count the same
-        // thing: an account on a priced plan.
-        opening: est.paying - int(signups.added) + int(signups.lost),
+        // thing: a member household.
+        opening: est.members - int(signups.added) + int(signups.lost),
         added: int(signups.added),
         lost: int(signups.lost),
-        live: est.paying,
+        live: est.members,
+        trialling: est.trialling,
+        complimentary: est.complimentary,
         joined: int(signups.joined),
         churnPct: null,
         wasChurnPct: null,
@@ -1677,12 +1568,14 @@ export async function readSuite(period, { now = new Date() } = {}) {
       },
       revenue: {
         byStream: bars([
-          row('Subscriptions', revenue),
+          row('Members', revenue),
           row('Hotels', null), row('Hosted events', null), row('Paid activities', null),
         ]),
         byStreamGap: GAPS.bookings,
         mrrByPlan: mrrRows.map((p) => row(p.label, p.pence / 100)),
         mrr: mrrPence / 100,
+        billed: est.billed,
+        billedNote: est.billedNote,
         forecast: null,
         forecastGap: GAPS.forecast,
       },
@@ -1724,11 +1617,12 @@ export async function readSuite(period, { now = new Date() } = {}) {
     },
 
     money: {
-      subscribers: est.paying,
+      // Per member divides by paid members: the people the revenue is from.
+      members: est.paid,
       streams,
       total: {
         revenue, cost: cost$, margin: null, marginPct: null, marginDelta: null,
-        perSub: est.paying ? Math.round((revenue / est.paying) * 100) / 100 : null,
+        perSub: est.paid ? Math.round((revenue / est.paid) * 100) / 100 : null,
         perSubOut: null, perSubKept: null,
         growth: change(subNow.pence, subPrev.pence),
       },
@@ -1835,9 +1729,17 @@ export async function readSuite(period, { now = new Date() } = {}) {
       households: list,
       shown: list.length,
       total: est.households,
-      paying: est.paying,
+      // Members, not accounts (Roger, 3 Oct 2026).
+      members: est.members,
       payingMrr: mrrPence / 100,
-      trial: est.trial,
+      trialling: est.trialling,
+      complimentary: est.complimentary,
+      invited: est.invited,
+      notMembers: est.notMembers,
+      peopleCovered: est.peopleCovered,
+      averagePence: estMoney.averagePence,
+      billed: est.billed,
+      billedNote: est.billedNote,
       trialConvertPct: null,
       trialGranted: null,
       atRisk: est.atRisk,
@@ -1853,8 +1755,8 @@ export async function readSuite(period, { now = new Date() } = {}) {
       estate: {
         households: est.households,
         people: est.people,
-        invited: list.filter((h) => h.status === 'invited').length,
-        suspended: list.filter((h) => h.status === 'cancelled').length,
+        invited: est.invited,
+        suspended: list.filter((h) => h.suspended && h.origin !== 'guest_invite').length,
         signedIn: est.signedIn,
       },
     },
@@ -1965,7 +1867,12 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
             a.id as account_id, a.email, a.plan, a.status, a.trial_ends_on, a.created_at as joined,
             p.label as plan_label, p.price_pence
        from households h
-       left join accounts a on a.household_id = h.id and a.member_id is null
+       left join lateral (
+         select a.* from accounts a
+          where a.household_id = h.id and a.member_id is null
+          order by (a.status = 'suspended'), a.created_at
+          limit 1
+       ) a on true
        left join plans p on p.key = a.plan
       where h.id = $1
       limit 1`,
@@ -1973,6 +1880,10 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
   );
   if (!rows.length) return null;
   const h = rows[0];
+  // Its membership, from the one classification every report shares. A guest
+  // is never classified and reads as not a member (Roger, 3 Oct 2026).
+  const membership = await classifyHousehold(id);
+  const cls = membership?.cls ?? 'none';
 
   const [{ rows: [life] }, { rows: [ninety] }, { rows: plans }, { rows: months }] = await Promise.all([
     query(
@@ -2032,17 +1943,14 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
   const bySearchMonth = new Map(months.map((m) => [m.month, int(m.n)]));
   const lifeMonths = Math.max(1, Math.round((now - new Date(h.joined ?? h.created_at)) / (30.4 * 86400000)));
 
-  // Lifetime subscription: the plan history where there is one, and months ×
-  // today's price where there is not — marked `estimated` so the screen can say
-  // so rather than imply a precision the table cannot support.
-  const subscriptionPence = plans.length
-    ? plans.reduce((n, p) => {
-      const from = new Date(p.from_at);
-      const to = p.to_at ? new Date(p.to_at) : now;
-      const held = Math.max(0, Math.round((to - from) / (30.4 * 86400000)));
-      return n + held * int(p.price_pence);
-    }, 0)
-    : lifeMonths * int(h.price_pence);
+  /**
+   * Lifetime membership: what paid memberships were billed, and nothing for a
+   * household that has never had one (Roger, 3 Oct 2026: "Count memberships,
+   * not accounts"). The plan history below is still listed — it is what the
+   * household's account was put on — but a plan an administrator picked is
+   * not money anybody paid. Nought while nothing is billed.
+   */
+  const subscriptionPence = cls === 'member_paid' ? lifeMonths * membership.monthlyPence : 0;
 
   const bookedPence = int(life.booked_pence);
   /**
@@ -2063,14 +1971,20 @@ export async function readHousehold(id, period, { now = new Date() } = {}) {
     area: h.home_label,
     origin: h.origin,
     plan: h.plan_label ?? h.plan,
-    monthPence: int(h.price_pence),
-    status: h.status,
+    // What the membership is billed a month: £0 unless a paid member.
+    monthPence: membership?.monthlyPence ?? 0,
+    status: STATUS_OF[cls],
+    statusWord: CLASS_WORDS[cls],
+    suspended: h.status === 'suspended',
+    billed: MEMBERSHIP_BILLING,
     joined: h.joined ? new Date(h.joined).toISOString().slice(0, 10) : null,
     lifeMonths,
     plans: { rows: plans.map((p) => ({ plan: p.label ?? p.plan, from: p.from_at, to: p.to_at, pence: int(p.price_pence) })), estimated: plans.length === 0 },
     spend: {
       subscriptionPence,
-      subscriptionEstimated: plans.length === 0,
+      // Months × today's membership price is an estimate until Stripe's own
+      // invoices are read; nought for a non-member is not.
+      subscriptionEstimated: cls === 'member_paid',
       bookedPence,
       everPence: subscriptionPence + bookedPence,
       yearPence: null,
