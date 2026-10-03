@@ -469,7 +469,8 @@ async function olderBookingsAhead(hostId, c = null) {
     `select b.occurrence, o.* from experience_bookings b join host_offers o on o.id = b.offer_id
       where b.host_id = $1 and o.lane is null and b.state in ('pending', 'confirmed')
         -- an Ask to book still asked is counted already, with the lane requests (Codex, 3 Oct 2026)
-        and not (b.request_state = 'asked' and b.state = 'pending')`,
+        -- (and an older booking has no request state at all, so the null case is spelt out — Codex, 3 Oct 2026)
+        and (b.request_state is distinct from 'asked' or b.state <> 'pending')`,
     [hostId],
   );
   const today = localDay(new Date(), 'Europe/London');

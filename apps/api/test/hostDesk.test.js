@@ -400,7 +400,8 @@ test('offers made before the lanes: in All events, counted by Stop hosting, and 
 
     // A booking on the older offer stops Stop hosting.
     const { household } = await aHousehold(query);
-    await query(`insert into experience_bookings (offer_id, host_id, household_id, heads, state) values ($1, $2, $3, 2, 'confirmed')`, [soon.id, host.id, household.id]);
+    // Pending, as an older booking below its minimum is, with no request state at all: it still counts.
+    await query(`insert into experience_bookings (offer_id, host_id, household_id, heads, state) values ($1, $2, $3, 2, 'pending')`, [soon.id, host.id, household.id]);
     const stop = await srv.send('POST', '/api/host/desk/stop');
     assert.equal(stop.status, 409, JSON.stringify(stop.body));
     assert.match(stop.body.message, /1 booking is still to happen/);
