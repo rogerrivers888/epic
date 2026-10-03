@@ -6310,7 +6310,9 @@ export type GuestBooking = {
     /** feeKeptPence: the cancellation fee Epic kept from this refund (L5); triggeredBy: who set it off. */
     refunds: { pence: number; feeKeptPence?: number; triggeredBy?: 'guest' | 'host' | 'epic' | 'staff' | null; cause: string | null; state: string; at: string }[] };
   after: { happened: string | null; rated: boolean; tipOpen: boolean; tipFee?: { pct: number; minPence: number } | null } | null;
-  dropOff: boolean; [k: string]: any;
+  dropOff: boolean;
+  /** A free guest account (not a member): Booked says the confirmation and calendar invite were emailed (G11). */
+  guest?: boolean; [k: string]: any;
 };
 export type GuestPayment = { id: string; kind: string; pence: number; state: string; cause: string | null; at: string; title: string | null; bookingId: string | null };
 

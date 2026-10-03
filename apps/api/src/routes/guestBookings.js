@@ -43,6 +43,7 @@ import { feeFor, priceBooking, tipFee, numbersSettlement } from '../domain/money
 import { mainAction, placesLeft, sessionsForBooking, KINDS_BY_LANE, checkParty, childAge, cancelQuote, answersEditable, tipOpen, guestChip } from '../domain/booking.js';
 import { localInstant, localDay, plusDays, slotsFor, bookableDay, dow, perPersonAt, refundWords, hostingConfig } from '../domain/lanes.js';
 import { mediaRef } from './hosting.js';
+import { isGuestAccount } from '../guestAccess.js';
 import { opensPrivately } from '../domain/hosting.js';
 
 export const router = Router();
@@ -1426,7 +1427,7 @@ async function ownBooking(id, householdId) {
 
 router.get('/booked/:id', async (req, res, next) => {
   try {
-    const { household } = await me();
+    const { household, account } = await me();
     await ownBooking(req.params.id, household.id);
     const [b] = (await bookingsOfHousehold(household.id)).filter((x) => x.id === req.params.id);
     if (!b) throw refuse(404, 'not_found', 'That booking isn’t yours.');
@@ -1471,6 +1472,9 @@ router.get('/booked/:id', async (req, res, next) => {
         // The fee rule as the server will charge it, so the screen never shows a different one (Codex, 3 Oct 2026).
         after: lastEnd && lastEnd <= now ? { happened: b.confirmed_happened ?? null, rated: Boolean(b.rated_at), tipOpen: tipOpen(lastEnd, now), tipFee: await tipFeeRule() } : null,
         dropOff: o.parents === 'drop_off',
+        // A free guest account (not a member) is told its confirmation and calendar invite went by email (G11):
+        // the "You're booked" email carries the calendar file (sources/bookingCalendar.js).
+        guest: isGuestAccount(account),
       },
     });
   } catch (err) { next(err); }

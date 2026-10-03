@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
+import { Icon } from '../components/Icon';
 import { api, Booking, TripSummary } from '../api';
 import { paths } from '../routes';
 import { useRouter } from '../router';
@@ -224,7 +225,7 @@ function BookingRows({ bookings, onOpen }: { bookings: Booking[]; onOpen: (b: Bo
       : b.state === 'cancelled' ? { text: 'Called off', red: false }
         : b.state === 'pending' ? { text: b.minCount ? `needs ${Math.max(0, b.minCount - b.heads)} more · Held` : 'Held', red: false }
           : b.state === 'waitlisted' ? { text: 'Waiting list', red: false }
-            : b.isPast ? (['confirmed', 'attended'].includes(b.state) ? { text: b.reviewed ? 'Went' : `Rate ${first} ›`, red: false, strong: !b.reviewed } : { text: 'Not decided in time', red: false })
+            : b.isPast ? (['confirmed', 'attended'].includes(b.state) ? { text: b.reviewed ? 'Went' : `Rate ${first}`, red: false, strong: !b.reviewed, opens: !b.reviewed } : { text: 'Not decided in time', red: false })
               : { text: 'Booked', red: false, strong: true };
     return (
       <Press key={b.id} onPress={() => onOpen(b)} accessibilityRole="button" style={styles.row}>
@@ -232,7 +233,10 @@ function BookingRows({ bookings, onOpen }: { bookings: Booking[]; onOpen: (b: Bo
         <View style={styles.rowBody}>
           <Text style={styles.name} numberOfLines={2}>{b.title ?? 'An experience'}</Text>
           <Text style={styles.meta} numberOfLines={1}>{[first, b.on ? dayShort(b.on) : null, b.startsAt, durationWords(b.durationMin), b.heads > 1 ? `${b.heads} of you` : null, b.amountPence ? money(b.amountPence) : null].filter(Boolean).join(' · ')}</Text>
-          <Text style={[styles.status, status.strong && styles.statusOn, status.red && { color: colors.overrun, fontWeight: '600' }]} numberOfLines={1}>{status.text}</Text>
+          <View style={styles.statusLine}>
+            <Text style={[styles.status, status.strong && styles.statusOn, status.red && { color: colors.overrun, fontWeight: '600' }]} numberOfLines={1}>{status.text}</Text>
+            {'opens' in status && status.opens ? <Icon name="more" size={14} color={colors.accent} strokeWidth={2.4} /> : null}
+          </View>
         </View>
       </Press>
     );
@@ -306,6 +310,7 @@ const styles = StyleSheet.create({
   meta: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
   // Moss for something coming, grey for something that is not — the handoff's
   // two states, and the only two this line has.
-  status: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted, marginTop: 'auto' },
+  statusLine: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 'auto' },
+  status: { fontFamily: fonts.body, fontSize: 13, color: colors.inkMuted },
   statusOn: { color: colors.accent, fontWeight: '600' },
 });

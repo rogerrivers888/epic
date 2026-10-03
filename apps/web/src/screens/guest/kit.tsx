@@ -20,7 +20,7 @@ import { Press } from '../../components/press';
 import { Icon } from '../../components/Icon';
 import { useViewport } from '../../hooks/useViewport';
 import {
-  AMBER, AMBER_DARK, CREAM, DEEP_GREEN, GUEST_DAY_OFF, GUEST_PHOTO_BTN, GUEST_PLACEHOLDER, GUEST_RED, GUEST_SCRIM, GUEST_WARM,
+  AMBER, AMBER_DARK, CREAM, DEEP_GREEN, GUEST_DAY_OFF, GUEST_PHOTO_BTN, GUEST_PHOTO_CLEAR, GUEST_PHOTO_FADE, GUEST_PLACEHOLDER, GUEST_RED, GUEST_SCRIM, GUEST_WARM,
   HAIRLINE, INACTIVE, INK, INK_MUTED, LIME, LIME_TINT, MOSS, TARGET, fonts,
 } from '../../theme';
 
@@ -69,7 +69,7 @@ export function PhotoHead({ uri, webPage, onBack, onShare }: { uri: string | nul
   return (
     <View style={{ height: 230, backgroundColor: INACTIVE, flexShrink: 0 }}>
       {uri ? <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" accessibilityIgnoresInvertColors /> : null}
-      {web ? React.createElement('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(rgba(32,30,29,.35), rgba(32,30,29,0) 40%)' } }) : null}
+      {web ? React.createElement('div', { style: { position: 'absolute', inset: 0, background: `linear-gradient(${GUEST_PHOTO_FADE}, ${GUEST_PHOTO_CLEAR} 40%)` } }) : null}
       <View style={{ position: 'absolute', left: 16, right: 16, top: topInset(44), flexDirection: 'row', justifyContent: 'space-between' }}>
         {webPage
           ? <View style={{ height: 38, paddingHorizontal: 12, backgroundColor: CREAM, justifyContent: 'center' }}><Text style={hx(15)}>epic.day</Text></View>
@@ -96,7 +96,7 @@ export function Foot({ price, sub, label, onPress, disabled, tone = 'ink' }: {
       <Press onPress={disabled ? () => {} : onPress} accessibilityRole="button" accessibilityState={{ disabled: !!disabled }}
              style={[{ height: 50, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, backgroundColor: grey ? INACTIVE : INK }, price ? null : { flex: 1 }]}>
         <Text style={[tx(15, '700', grey ? INK_MUTED : CREAM), nowrap]}>{label}</Text>
-        <Text style={tx(15, '700', grey ? INK_MUTED : CREAM)}>→</Text>
+        <Icon name="forward" size={17} color={grey ? INK_MUTED : CREAM} strokeWidth={2.4} />
       </Press>
     </View>
   );
@@ -160,7 +160,7 @@ export function HostRow({ face, name, line, onPress, ask }: { face: string | nul
         <Text style={tx(14.5, '700')} numberOfLines={1}>{name}</Text>
         <Text style={tx(12.5, '400', INK_MUTED)} numberOfLines={1}>{line}</Text>
       </View>
-      {ask ? <GreyAction label={ask.label} onPress={ask.onPress} /> : onPress ? <Text style={tx(14, '700', INK_MUTED)}>›</Text> : null}
+      {ask ? <GreyAction label={ask.label} onPress={ask.onPress} /> : onPress ? <Icon name="more" size={16} color={INK_MUTED} strokeWidth={2.4} /> : null}
     </Press>
   );
 }
@@ -214,7 +214,7 @@ export function Rows({ items }: { items: RowItem[] }) {
             {r.sub ? <Text style={tx(12.5, '400', INK_MUTED)}>{r.sub}</Text> : null}
           </View>
           {r.value ? <Text style={[tx(13.5, '700', r.valueColor ?? INK), nowrap]}>{r.value}</Text> : null}
-          {r.onPress ? <Text style={tx(14, '700', INK_MUTED)}>›</Text> : null}
+          {r.onPress ? <Icon name="more" size={16} color={INK_MUTED} strokeWidth={2.4} /> : null}
         </Press>
       ))}
     </View>
@@ -351,7 +351,7 @@ export function BookingRows({ items }: { items: BookingCard[] }) {
               {c.extra ? <Text style={[tx(12, '700', DEEP_GREEN), nowrap]}>{c.extra}</Text> : null}
             </View>
           </View>
-          <Text style={tx(14, '700', INK_MUTED)}>›</Text>
+          <Icon name="more" size={16} color={INK_MUTED} strokeWidth={2.4} />
         </Press>
       ))}
     </View>
@@ -370,9 +370,9 @@ export function MonthPicker({ month, days, picked, onPick, onPrev, onNext }: {
   return (
     <View style={{ borderWidth: 1, borderColor: HAIRLINE, padding: 10, gap: 8 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Press onPress={onPrev ?? (() => {})} accessibilityRole="button" accessibilityLabel="Previous month" style={{ paddingHorizontal: 8, opacity: onPrev ? 1 : 0.3 }}><Text style={tx(14, '700')}>‹</Text></Press>
+        <Press onPress={onPrev ?? (() => {})} accessibilityRole="button" accessibilityLabel="Previous month" style={{ paddingHorizontal: 8, opacity: onPrev ? 1 : 0.3 }}><Icon name="previous" size={16} color={INK} strokeWidth={2.4} /></Press>
         <Text style={tx(14, '700')}>{name}</Text>
-        <Press onPress={onNext ?? (() => {})} accessibilityRole="button" accessibilityLabel="Next month" style={{ paddingHorizontal: 8, opacity: onNext ? 1 : 0.3 }}><Text style={tx(14, '700')}>›</Text></Press>
+        <Press onPress={onNext ?? (() => {})} accessibilityRole="button" accessibilityLabel="Next month" style={{ paddingHorizontal: 8, opacity: onNext ? 1 : 0.3 }}><Icon name="more" size={16} color={INK} strokeWidth={2.4} /></Press>
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <Text key={`h${i}`} style={[{ width: `${100 / 7}%`, textAlign: 'center' }, tx(11, '700', INK_MUTED)]}>{d}</Text>)}

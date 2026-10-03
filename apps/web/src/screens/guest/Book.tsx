@@ -36,6 +36,7 @@ import { CardBox, confirmWithCard, finishWithBank, loadStripe, payWithWallet, pr
 import { whenWords } from './EventPage';
 import { FreeAccount } from './FreeAccount';
 import { storage } from '../../storage';
+import { ageAnswer, capToast, payProblemTitle, roomForOneMore, type AgeAnswer } from './whoGoing';
 
 type Who = { key: string; name: string; adult: boolean; age: number | null; dob: string | null; memberId: string | null; line: string };
 
@@ -54,7 +55,7 @@ type Who = { key: string; name: string; adult: boolean; age: number | null; dob:
 type Draft = {
   offerId: string; nonce: string; at: number; mode: 'drop_in' | 'book_ahead'; picks: string[]; month: number; day: string | null; time: string | null; length: number | null;
   ticked: string[]; extra: Who[]; contacts: Record<string, string>; over18: boolean; diet: string[]; bring: string | null;
-  plusOne: boolean; stay: string | null; dobs: Record<string, string>;
+  plusOne: boolean; stay: string | null; dobs: Record<string, string>; ages?: Record<string, number>;
 };
 function takeDraft(id: string, nonce: string): Draft | null {
   try {
@@ -132,8 +133,14 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   const [plusOne, setPlusOne] = useState(false);
   const [stay, setStay] = useState<string | null>(null);
   const [method, setMethod] = useState<'wallet' | 'card'>('card');
-  // A household child with no age on record: the birthday is asked here, for this booking (Codex, 3 Oct 2026).
+  // A household child with no age on record: their age or date of birth is asked here, for this booking — their
+  // choice which, as for someone added (Codex, 3 Oct 2026; README › Who's going).
   const [dobs, setDobs] = useState<Record<string, string>>({});
+  const [ages, setAges] = useState<Record<string, number>>({});
+  // The cap stopped a tick (or an added person was left unticked): the line under the list turns amber.
+  const [capHit, setCapHit] = useState(false);
+  // Declines in a row on this form (G26): a retry declined again reads "Payment didn't go through".
+  const [declines, setDeclines] = useState(0);
   const [sheet, setSheet] = useState<null | { kind: 'add' } | { kind: 'contact'; key: string } | { kind: 'dob'; key: string } | { kind: 'declined' | 'failed'; message: string } | { kind: 'bank' }>(null);
   const [busy, setBusy] = useState(false);
   // An unpaid booking already made: paying again confirms the same one, never books twice (G26).
@@ -151,7 +158,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
     if (!d) return;
     setMode(d.mode); setPicks(new Set(d.picks)); setMonth(d.month); setDay(d.day); setTime(d.time); setLength(d.length);
     setExtra(d.extra); setContacts(d.contacts); setOver18(d.over18); setDiet(new Set(d.diet)); setBring(d.bring);
-    setPlusOne(d.plusOne); setStay(d.stay); setDobs(d.dobs);
+    setPlusOne(d.plusOne); setStay(d.stay); setDobs(d.dobs); setAges(d.ages ?? {});
     // Who was ticked: the people added by hand keep their keys; "You" is whoever you are now.
     setTicked(new Set(d.ticked)); draftTicked.current = d.ticked;
   }, [id, draftMark, setQuery]);
@@ -173,9 +180,9 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   const people: Who[] = useMemo(() => {
     // You first, then the other grown-ups, then the children — as the household reads.
     const rank = (w: Who) => (w.line === 'You' ? 0 : w.adult ? 1 : 2);
-    const base: Who[] = hh?.members?.length ? hh.members.map((m) => fromMember(dobs[m.id] ? { ...m, birthDate: dobs[m.id] } : m, hh.me)).sort((x, y) => rank(x) - rank(y)) : [{ key: 'you', name: 'You', adult: true, age: null, dob: null, memberId: null, line: 'You' }];
+    const base: Who[] = hh?.members?.length ? hh.members.map((m) => fromMember(dobs[m.id] ? { ...m, birthDate: dobs[m.id] } : ages[m.id] != null ? { ...m, age: ages[m.id] } : m, hh.me)).sort((x, y) => rank(x) - rank(y)) : [{ key: 'you', name: 'You', adult: true, age: null, dob: null, memberId: null, line: 'You' }];
     return [...base, ...extra];
-  }, [hh, extra, dobs]);
+  }, [hh, extra, dobs, ages]);
   // You start ticked, once who can go is known — after the household has loaded, when there is one —
   // unless this is a drop off (children only) or for children alone.
   const started = useRef(false);
@@ -229,13 +236,17 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
 
   const flip = (p: Who) => {
     if (why(p)) return;
-    setTicked((t) => {
-      const n = new Set(t);
-      if (n.has(p.key)) { n.delete(p.key); return n; }
-      if (chosen.length >= cap) { toast.show(cap === 1 ? 'Only 1 place left' : `Only ${cap} places left`); return t; }
-      n.add(p.key);
-      return n;
-    });
+    if (ticked.has(p.key)) { setTicked((t) => { const n = new Set(t); n.delete(p.key); return n; }); setCapHit(false); return; }
+    if (!roomForOneMore(chosen.length, cap)) { setCapHit(true); toast.show(capToast(cap)); return; }
+    setTicked((t) => new Set([...t, p.key]));
+  };
+  // + Add someone: added straight away, and ticked when there's room for them; otherwise left unticked, as a tick would be.
+  const addSomeone = (w: Who) => {
+    setExtra((x) => [...x, w]);
+    setSheet(null);
+    if (why(w)) return;
+    if (!roomForOneMore(chosen.length, cap)) { setCapHit(true); toast.show(capToast(cap)); return; }
+    setTicked((t) => new Set([...t, w.key]));
   };
 
   // ---- the price, worked out the way the server does (domain/money.js priceBooking)
@@ -278,7 +289,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
     const youKey = people.find((p) => p.line === 'You')?.key;
     const nonce = draftNonce();
     const d: Draft = {
-      offerId: offer.id, nonce, at: Date.now(), mode, picks: [...picks], month, day, time, length, extra, contacts, over18, diet: [...diet], bring, plusOne, stay, dobs,
+      offerId: offer.id, nonce, at: Date.now(), mode, picks: [...picks], month, day, time, length, extra, contacts, over18, diet: [...diet], bring, plusOne, stay, dobs, ages,
       ticked: [...ticked].map((k) => (k === youKey ? 'you' : k)),
     };
     try { storage.setItem(BOOK_DRAFT_KEY, JSON.stringify(d)); } catch { return here; /* nowhere to keep it: the form starts afresh */ }
@@ -324,6 +335,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
     // rather than booking a second time (Codex, 3 Oct 2026).
     const r = await api.guestPaid(bookingId, '').catch(() => null);
     if (r && r.state === 'cancelled') setPending(null);
+    setDeclines((n) => (out.state === 'declined' ? n + 1 : n));
     setSheet({ kind: out.state, message: out.message });
   };
 
@@ -340,7 +352,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
     if (!ok || busy) return;
     if (!signedIn()) { toast.show('Make your free account first'); return; }
     if (!contactsOk) { toast.show('Add an emergency contact for each child'); return; }
-    if (chosen.some((p) => !p.adult && ageOf(p, onDay) == null)) { toast.show('Add each child’s birthday'); return; }
+    if (chosen.some((p) => !p.adult && ageOf(p, onDay) == null)) { toast.show('Add each child’s age or date of birth'); return; }
     if (!adultOk) { toast.show('Tick to say you’re 18 or over'); return; }
     setBusy(true);
     try {
@@ -403,13 +415,13 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
       return {
         key: pp.key, name: pp.name, line: w ?? pp.line, on, disabled: Boolean(w), onPress: () => flip(pp),
         extra: !on || pp.adult ? null : [
-          ...(ageOf(pp, onDay) == null ? [{ label: 'Add their birthday', color: MOSS, onPress: () => setSheet({ kind: 'dob', key: pp.key }) }] : []),
+          ...(ageOf(pp, onDay) == null ? [{ label: 'Add their age or date of birth', color: MOSS, onPress: () => setSheet({ kind: 'dob', key: pp.key }) }] : []),
           ...(who.dropOff ? [{ label: phone ? `Emergency contact · ${phone}` : 'Add an emergency contact', color: phone ? undefined : MOSS, onPress: () => setSheet({ kind: 'contact', key: pp.key }) }] : []),
         ],
       };
     })} />,
     <Rows key="add" items={[{ title: '+ Add someone', sub: 'Someone outside your household', weight: '700', onPress: () => setSheet({ kind: 'add' }) }]} />,
-    <Para key="cap" color={left != null && left <= 3 ? AMBER_DARK : INK_MUTED}>{capWords}</Para>,
+    <Para key="cap" color={(left != null && left <= 3) || (capHit && chosen.length >= cap) ? AMBER_DARK : INK_MUTED}>{capWords}</Para>,
   );
   if (who.adultsOnly) blocks.push(<People key="18" items={[{ key: '18', name: 'I’m 18 or over', line: 'Everyone on this booking', on: over18, onPress: () => setOver18(!over18) }]} />);
   if (who.dropOff && offer.endsAt) blocks.push(<Notice key="collect" bg={AMBER} weight="700">{`Collect at ${offer.endsAt}`}</Notice>);
@@ -445,8 +457,15 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   }
 
   // ---- sheets
-  const sheets = sheet?.kind === 'add' ? <AddSomeone onClose={() => setSheet(null)} onAdd={(w) => { setExtra((x) => [...x, w]); setTicked((t) => new Set([...t, w.key])); setSheet(null); }} />
-    : sheet?.kind === 'dob' ? <BirthdaySheet onClose={() => setSheet(null)} onSave={(v) => { setDobs((d) => ({ ...d, [sheet.key]: v })); setSheet(null); }} />
+  const sheets = sheet?.kind === 'add' ? <AddSomeone onClose={() => setSheet(null)} onAdd={addSomeone} />
+    : sheet?.kind === 'dob' ? (
+      <AgeSheet onClose={() => setSheet(null)} onSave={(v) => {
+        const k = sheet.key;
+        if (v.dob) { setDobs((d) => ({ ...d, [k]: v.dob! })); setAges((a) => { const n = { ...a }; delete n[k]; return n; }); }
+        else { setAges((a) => ({ ...a, [k]: v.age! })); setDobs((d) => { const n = { ...d }; delete n[k]; return n; }); }
+        setSheet(null);
+      }} />
+    )
     : sheet?.kind === 'contact' ? <ContactSheet initial={contacts[sheet.key] ?? (hh?.members.find((m) => m.id === hh.me)?.mobile ?? '')} onClose={() => setSheet(null)} onSave={(v) => { setContacts((c) => ({ ...c, [sheet.key]: v })); setSheet(null); }} />
       : sheet?.kind === 'bank' ? (
         <GuestSheet title="Confirm with your bank" onClose={() => setSheet(null)}>
@@ -458,12 +477,12 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
           ]} />
         </GuestSheet>
       ) : sheet?.kind === 'declined' || sheet?.kind === 'failed' ? (
-        <GuestSheet title={sheet.kind === 'declined' ? 'Your card was declined' : 'Payment didn’t go through'} onClose={() => setSheet(null)}>
-          <Para>{sheet.kind === 'declined' ? 'Your bank said no. Nothing was taken. Try another card or Apple Pay.' : 'Something went wrong on our side. Nothing was taken.'}</Para>
+        <GuestSheet title={payProblemTitle(sheet.kind, declines)} onClose={() => setSheet(null)}>
+          <Para>{sheet.kind === 'declined' ? 'Your bank said no. Nothing was taken.' : 'Something went wrong on our side. Nothing was taken.'}</Para>
           <Notice>Everything you filled in is kept.</Notice>
           <Buttons items={[
             { label: 'Try again', tone: 'ink', onPress: () => { setSheet(null); void go(); } },
-            { label: 'Use another card', onPress: () => { setSheet(null); setMethod('card'); card.current?.clear?.(); } },
+            { label: 'Use another card', onPress: () => { setSheet(null); setDeclines(0); setMethod('card'); card.current?.clear?.(); } },
           ]} />
         </GuestSheet>
       ) : null;
@@ -479,44 +498,48 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   );
 }
 
-/** + Add someone: a name, Adult or Child, and for a child their age or date of birth — their choice. */
-function BirthdaySheet({ onClose, onSave }: { onClose: () => void; onSave: (dob: string) => void }) {
-  const [dob, setDob] = useState('');
+/** A child's age or date of birth — their choice which (README › Who's going): Age · Date of birth, then the one asked. */
+function AgeOrBirthday({ value, onChange }: { value: AgeAnswer; onChange: (v: AgeAnswer) => void }) {
   return (
-    <GuestSheet title="Their birthday" onClose={onClose}>
-      <BirthdayPicker value={dob || null} onChange={(v) => setDob(v ?? '')} label="Date of birth" maxAge={17} clearable={false} />
-      <Buttons items={[{ label: 'Save', tone: 'ink', onPress: () => { if (/^\d{4}-\d{2}-\d{2}$/.test(dob)) onSave(dob); } }]} />
+    <>
+      <Seg items={[{ label: 'Age', on: !value.byDob, onPress: () => onChange({ ...value, byDob: false }) }, { label: 'Date of birth', on: value.byDob, onPress: () => onChange({ ...value, byDob: true }) }]} />
+      {value.byDob
+        ? <BirthdayPicker value={value.dob || null} onChange={(v) => onChange({ ...value, dob: v ?? '' })} label="Date of birth" maxAge={17} clearable={false} />
+        : <Field value={value.age} onChange={(v) => onChange({ ...value, age: v })} placeholder="8" keyboardType="numeric" maxLength={2} />}
+    </>
+  );
+}
+
+/** A household child with no age on record: the same age-or-date-of-birth control as + Add someone. */
+function AgeSheet({ onClose, onSave }: { onClose: () => void; onSave: (v: { age: number | null; dob: string | null }) => void }) {
+  const [a, setA] = useState<AgeAnswer>({ byDob: false, age: '', dob: '' });
+  const got = ageAnswer(a);
+  return (
+    <GuestSheet title="Their age" onClose={onClose}>
+      <AgeOrBirthday value={a} onChange={setA} />
+      <Buttons items={[{ label: 'Save', tone: 'ink', disabled: !got, onPress: () => { if (got) onSave(got); } }]} />
     </GuestSheet>
   );
 }
 
+/** + Add someone: a name, Adult or Child, and for a child their age or date of birth — their choice. */
 function AddSomeone({ onClose, onAdd }: { onClose: () => void; onAdd: (w: Who) => void }) {
   const [name, setName] = useState('');
   const [child, setChild] = useState(false);
-  const [byDob, setByDob] = useState(false);
-  const [age, setAge] = useState('');
-  const [dob, setDob] = useState('');
-  const n = Number(age);
-  const dobOk = /^\d{4}-\d{2}-\d{2}$/.test(dob.trim());
-  const ok = name.trim().length > 0 && (!child || (byDob ? dobOk : Number.isInteger(n) && n >= 0 && n <= 17));
+  const [a, setA] = useState<AgeAnswer>({ byDob: false, age: '', dob: '' });
+  const got = ageAnswer(a);
+  const ok = name.trim().length > 0 && (!child || got != null);
   return (
     <GuestSheet title="Add someone" onClose={onClose}>
       <Field label="Name" value={name} onChange={setName} placeholder="Their first name" maxLength={60} />
       <Seg items={[{ label: 'Adult', on: !child, onPress: () => setChild(false) }, { label: 'Child', on: child, onPress: () => setChild(true) }]} />
-      {child ? (
-        <>
-          <Seg items={[{ label: 'Age', on: !byDob, onPress: () => setByDob(false) }, { label: 'Date of birth', on: byDob, onPress: () => setByDob(true) }]} />
-          {byDob
-            ? <BirthdayPicker value={dob || null} onChange={(v) => setDob(v ?? '')} label="Date of birth" maxAge={17} clearable={false} />
-            : <Field value={age} onChange={setAge} placeholder="8" keyboardType="numeric" maxLength={2} />}
-        </>
-      ) : null}
+      {child ? <AgeOrBirthday value={a} onChange={setA} /> : null}
       <Buttons items={[{
         label: 'Add to this booking', tone: 'ink', onPress: () => {
           if (!ok) return;
           const key = `x${Date.now()}`;
-          onAdd(child
-            ? { key, name: name.trim(), adult: false, age: byDob ? null : n, dob: byDob ? dob.trim() : null, memberId: null, line: byDob ? 'Child · added' : `Age ${n} · added` }
+          onAdd(child && got
+            ? { key, name: name.trim(), adult: false, age: got.age, dob: got.dob, memberId: null, line: got.age == null ? 'Child · added' : `Age ${got.age} · added` }
             : { key, name: name.trim(), adult: true, age: null, dob: null, memberId: null, line: 'Added' });
         },
       }]} />

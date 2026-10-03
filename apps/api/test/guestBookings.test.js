@@ -367,6 +367,21 @@ test('Trips › Booked and the booking page: upcoming, past, invites; answers ed
   } finally { await srv.close(); }
 });
 
+test('G11: the booking page says whether the account is a free guest one, so Booked can say the invite was emailed', async () => {
+  const { o } = await anEvent({ firstIn: 3 });
+  const member = await aPerson();
+  const visitor = await aPerson('Sam Guest');
+  await query(`update accounts set plan = 'guest' where id = $1`, [visitor.account.id]);
+  const ms = await server(member.account);
+  const vs = await server({ ...visitor.account, plan: 'guest' });
+  try {
+    const m = await ms.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    const v = await vs.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    assert.equal((await ms.get(`/api/booked/${m.body.booking.id}`)).body.booking.guest, false, 'a member is not told about the emailed invite');
+    assert.equal((await vs.get(`/api/booked/${v.body.booking.id}`)).body.booking.guest, true, 'a free guest account is');
+  } finally { await ms.close(); await vs.close(); }
+});
+
 test('after the event: did it happen (a complaint holds the payout), rate once, tip within a week', async () => {
   settings.forget();
   const { o, h } = await anEvent({ firstIn: 1 });

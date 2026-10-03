@@ -2,8 +2,9 @@
  * Booked (guest handoff G11): "It's in your Plans" in lime, the booking as a
  * card with its chip, then Add to calendar · Message the host, and See it in
  * Plans. An Ask to book says the host has a day to answer and the card is held.
- * Reached as `/bookings/<id>?done=1` straight after booking or paying. (The emailed calendar
- * invite the design mentions for non-members isn't sent yet, so the line saying so isn't drawn.)
+ * Reached as `/bookings/<id>?done=1` straight after booking or paying. A free guest account (not a
+ * member) also reads "We've emailed a confirmation with a calendar invite." — the "You're booked"
+ * email carries the calendar file (api/src/sources/bookingCalendar.js); the booking says `guest`.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -13,7 +14,7 @@ import { CompactBand } from '../../components/Band';
 import { mediaUrl } from '../../components/hosting';
 import { paths } from '../../routes';
 import { useRouter } from '../../router';
-import { AMBER, BookingRows, Buttons, CHIP_BG, Foot, GuestPage, LIME, Notice, Waiting, dayWords, firstName, useToast } from './kit';
+import { AMBER, BookingRows, Buttons, CHIP_BG, Foot, GuestPage, LIME, Notice, Para, Waiting, dayWords, firstName, useToast } from './kit';
 
 /** A calendar file for the sessions booked, made on the phone; nothing is sent anywhere. */
 /** An Ask to book in its own terms: the host's real deadline, and a hold only when there is one (Codex, 3 Oct 2026). */
@@ -64,6 +65,7 @@ export function Booked({ id }: { id: string }) {
       foot={<Foot label="See it in Plans" onPress={() => navigate(paths.trips())} />}
       overlay={toast.node}>
       <Notice bg={LIME} weight="700">{asked ? askedWords(b, host) : 'It’s in your Plans.'}</Notice>
+      {b.guest && !asked ? <Para>We’ve emailed a confirmation with a calendar invite.</Para> : null}
       <BookingRows items={[{ key: b.id, photo: mediaUrl(b.event.photo), title: b.event.title ?? 'Your booking', line, chip: b.chipWords, chipBg: CHIP_BG[b.chip] ?? AMBER, extra, onPress: () => navigate(paths.booking(b.id)) }]} />
       <Buttons items={[
         // Nothing to put in a calendar until there's a session: an Ask to book has one only once the host accepts.

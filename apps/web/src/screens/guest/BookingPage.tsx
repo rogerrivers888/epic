@@ -23,9 +23,10 @@ import { BookingScreen } from '../BookingScreen';
 import { Booked, addToCalendar } from './Booked';
 import {
   AMBER, Buttons, Chips, DEEP_GREEN, Field, Foot, GoingAhead, GUEST_RED, GuestPage, GuestSheet, INACTIVE, INK, INK_MUTED, Kick, LIME, LIME_TINT, Notice, Para,
-  PriceLines, Rows, Seg, Stars, Waiting, dayWords, firstName, gbp, useToast,
+  PriceLines, Rows, Seg, Stars, Waiting, dayWords, firstName, gbp, shortDay, useToast,
 } from './kit';
 import { CardBox, confirmWithCard, finishWithBank, loadStripe, type PayOutcome } from './pay';
+import { lastRefundAt } from './whoGoing';
 
 const POLICY: Record<string, string> = { flexible: 'Flexible', moderate: 'Moderate', strict: 'Strict' };
 const at = (d: string, t: string | null) => `${dayWords(d)}${t ? ` · ${t}` : ''}`;
@@ -127,9 +128,12 @@ export function BookingPage({ id }: { id: string }) {
     const others = (opt?.slots ?? []).flatMap((s) => s.times.map((t) => ({ date: s.date, time: t }))).slice(0, 6);
     if (others.length) blocks.push(<Kick key="other-k">{`Other times with ${host}`}</Kick>, <Chips key="other" items={others.map((o) => ({ key: `${o.date}${o.time}`, label: at(o.date, o.time), on: false, onPress: () => navigate(paths.experienceBook(b.event.id)) }))} />);
   } else if (calledOff) {
-    const back = b.money.refunds.filter((r) => r.state === 'succeeded').reduce((n, r) => n + r.pence, 0);
+    const gone = b.money.refunds.filter((r) => r.state === 'succeeded');
+    const back = gone.reduce((n, r) => n + r.pence, 0);
+    // The day the money went back: the latest refund's, in the screen's own "21 Sep".
+    const backOn = lastRefundAt(gone);
     const ga = b.goingAhead;
-    blocks.push(<Notice key="off">{`Called off.${ga ? ` It needed ${ga.min}${ga.decidesOn ? ` by ${dayWords(ga.decidesOn)}` : ''} and had ${ga.booked}.` : ''}${back ? ` ${gbp(back)} went back to your card.` : ''}`}</Notice>);
+    blocks.push(<Notice key="off">{`Called off.${ga ? ` It needed ${ga.min}${ga.decidesOn ? ` by ${dayWords(ga.decidesOn)}` : ''} and had ${ga.booked}.` : ''}${back ? ` ${gbp(back)} went back to your card${backOn ? ` on ${shortDay(backOn)}` : ''}.` : ''}`}</Notice>);
   } else if (b.request?.state === 'asked') {
     blocks.push(<Notice key="ask" bg={AMBER} weight="700">{`Requested · ${host} has until ${b.request.respondBy ? new Date(b.request.respondBy).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'tomorrow'} to say yes. Your card is held, not charged.`}</Notice>);
   } else if (!cancelled && lane === 'course' && next) {
@@ -220,7 +224,7 @@ export function BookingPage({ id }: { id: string }) {
     <GuestSheet title="Cancel" onClose={() => setCancelling(null)}>
       {lane === 'weekly' && next && live.length > 1 ? (
         <Seg items={[
-          { label: `${dayWords(next.date)} only`, on: !cancelling.whole, onPress: () => { void quoteFor(false); } },
+          { label: 'This session only', on: !cancelling.whole, onPress: () => { void quoteFor(false); } },
           { label: `All ${live.length} sessions`, on: cancelling.whole, onPress: () => { void quoteFor(true); } },
         ]} />
       ) : null}
@@ -311,7 +315,8 @@ export function After({ id }: { id: string }) {
         <Notice bg={LIME} weight="700">{`Thanks. ${host} will see your review${sent.tip ? ` and your ${gbp(sent.tip)} tip` : ''}.`}</Notice>
         <Kick>Then</Kick>
         <Buttons items={[
-          ...(b.event.lane === 'weekly' || b.event.lane === 'oneoff' ? [{ label: 'Book again', onPress: () => navigate(paths.experience(b.event.id)) }] : []),
+          // Every lane can be booked again: an on-request offer goes straight to Ask to book with the host, the rest to the event.
+          ...(b.event.lane ? [{ label: 'Book again', onPress: () => navigate(b.event.lane === 'onrequest' ? paths.experienceBook(b.event.id) : paths.experience(b.event.id)) }] : []),
           { label: `More from ${host}`, onPress: () => navigate(paths.hostProfile(b.event.host.id)) },
         ]} />
       </GuestPage>
@@ -354,7 +359,7 @@ export function After({ id }: { id: string }) {
     <Kick key="h">1 · Did it happen?</Kick>,
     <Seg key="hs" items={[{ label: 'Yes', on: hap === 'yes', onPress: () => setHap('yes') }, { label: 'No', on: hap === 'no', onPress: () => setHap('no') }, { label: 'Went wrong', on: hap === 'wrong', onPress: () => setHap('wrong') }]} />,
   ];
-  if (hap === 'wrong') blocks.push(<Notice key="w" bg={AMBER}>{`We’ll hold ${host}’s payout and look into it. Tell us what happened.`}</Notice>, <Field key="wf" value={what} onChange={setWhat} placeholder="What went wrong" height={72} maxLength={2000} />);
+  if (hap === 'wrong') blocks.push(<Notice key="w" bg={AMBER}>{`We’ll hold ${host}’s payout and look into it`}</Notice>, <Field key="wf" value={what} onChange={setWhat} placeholder="What went wrong" height={72} maxLength={2000} />);
   if (!b.after?.rated) {
     blocks.push(
       <Kick key="r" top={6}>2 · Rate it</Kick>,

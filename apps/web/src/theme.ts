@@ -112,6 +112,7 @@ export const VIDEO_SCRIM = 'rgba(32,30,29,0.55)';
 export const ON_VIDEO_SOFT = 'rgba(255,253,249,0.16)';
 export const ON_VIDEO_FAINT = 'rgba(255,253,249,0.3)';
 export const SHEET_SCRIM = 'rgba(32,30,29,0.5)';
+export const MENU_SCRIM = 'rgba(32,30,29,0.4)'; // behind the Trips screen's menu
 export const EMPTY_BLOCK = '#E6E2DC'; // Preview's grey block for a part not filled in yet
 export const DISABLED_GREY = '#C3BEBA'; // a calendar day nobody can book
 export const TICK_EDGE = '#B5B0AE';   // an unticked box's edge
@@ -131,6 +132,8 @@ export const GUEST_PLACEHOLDER = '#9B9797'; // an empty field's hint
 export const GUEST_DAY_OFF = '#C3BEBA';     // a calendar day the host isn't free
 export const GUEST_PHOTO_BTN = 'rgba(32,30,29,0.32)'; // back and share over the photo: 38px squares at 32% ink
 export const GUEST_SCRIM = 'rgba(32,30,29,0.42)';     // behind a sheet
+export const GUEST_PHOTO_FADE = 'rgba(32,30,29,0.35)'; // the soft ink fade from the top of the event photo…
+export const GUEST_PHOTO_CLEAR = 'rgba(32,30,29,0)';   // …to nothing, 40% of the way down
 export const GUEST_WARM = '#A8A4A2';        // the × on the ink promo
 
 /**

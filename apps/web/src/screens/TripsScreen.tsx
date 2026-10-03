@@ -5,7 +5,7 @@ import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
 import { GroupPanel } from '../components/GroupPanel';
 import { api, Booking, HouseholdResponse, OwnedImage, Place, PlanAction, PlanResponse, Stay, StayPricing, TripDay, TripDetail, TripPlace, VenuePhotoRef, DayStop } from '../api';
-import { colors, fonts, memberColors, radius, spacing, TARGET, type, BORDER } from '../theme';
+import { colors, fonts, memberColors, MENU_SCRIM, radius, spacing, TARGET, type, BORDER } from '../theme';
 import { useCachedResource, peekCache, TRIPS_KEY, TEN_MINUTES } from '../cache/resourceCache';
 import { Button, Card, Chip, Row, Segmented, StatusLine, Stepper, Wrap, clock, minutes } from '../components/ui';
 import { SourcePicker, TripSpendLine } from '../components/SourcePicker';
@@ -1417,7 +1417,7 @@ const styles = StyleSheet.create({
   // The working surfaces, one tap behind the ⋯.
   menu: { borderWidth: BORDER, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.surface, overflow: 'hidden' },
   // Over the map, the same menu is a sheet: there is no page under it to sit on.
-  menuScrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(32,30,29,0.4)' },
+  menuScrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: MENU_SCRIM },
   menuSheet: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingBottom: spacing.xl, overflow: 'hidden' },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minHeight: TARGET, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: BORDER, borderTopColor: colors.line },
   // The itinerary's timed spine.

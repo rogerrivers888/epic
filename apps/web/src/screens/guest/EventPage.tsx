@@ -86,7 +86,7 @@ export function whoWords(opt: GuestOptions | null, o: Experience): string {
   return [ages, stay].filter(Boolean).join(' · ');
 }
 
-/** "Saturdays 13:00 to 17:00 · pick a time when you ask", from the slots the host is free for. */
+/** "Saturdays 13:00 to 17:00", from the slots the host is free for. */
 function freeWords(opt: GuestOptions | null): string | null {
   const slots = opt?.slots ?? [];
   if (!slots.length) return null;
@@ -99,7 +99,7 @@ function freeWords(opt: GuestOptions | null): string | null {
   }
   const order = [1, 2, 3, 4, 5, 6, 0].filter((d) => byDay.has(d));
   const parts = order.slice(0, 2).map((d) => `${WEEKDAY[d]}s ${byDay.get(d)!.from} to ${byDay.get(d)!.to}`);
-  return `${parts.join(' · ')}${order.length > 2 ? ' and more' : ''} · pick a time when you ask`;
+  return `${parts.join(' · ')}${order.length > 2 ? ' and more' : ''}`;
 }
 
 export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: { offer: Experience; payments: PaymentsConfig } | null }) {
@@ -213,7 +213,7 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   if (offeredAt) {
     blocks.push(
       <Notice key="g18" bg={LIME} weight="800">{`Your place is ready · ${hoursLeft} h left`}</Notice>,
-      <Para key="g18t" color={INK_MUTED}>{`A place came free. Take it before ${byWhen}, or it goes to the next person.`}</Para>,
+      <Para key="g18t" color={INK_MUTED}>{`Take it before ${byWhen}, or it goes to the next person.`}</Para>,
       <Buttons key="g18b" row items={[
         { label: `Book now · ${offerPrice}`, tone: 'ink', onPress: () => navigate(withQuery(bookHref, { session: opt?.waitlist.offeredSession ?? null })) },
         { label: 'Pass', onPress: () => { void pass(); } },
