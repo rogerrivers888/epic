@@ -75,7 +75,7 @@ export class SecondMembership extends Error {
  * Stripe says it is paid again; a cancelled membership keeps its end; and when
  * it first became paid is kept for good, whatever it is now.
  */
-export async function upsertFromSubscription({ householdId, subscriptionId, facts, mode = 'test', pauseReason = null, stamp = null, changedAt = null }) {
+export async function upsertFromSubscription({ householdId, subscriptionId, facts, mode = 'test', pauseReason = null, stamp = null, changedAt = null, pausedFrom = null }) {
   if (!facts.status) return null;
   // First paid: the trial's end, or the start when there was none — once Stripe says it is active, i.e. paid. A pause
   // keeps a date already set but never makes one: a first payment that fails is not revenue (Codex, 3 Oct 2026).
@@ -93,7 +93,11 @@ export async function upsertFromSubscription({ householdId, subscriptionId, fact
          status = excluded.status,
          stripe_price_id = excluded.stripe_price_id,
          price_history = case when memberships.monthly_pence is distinct from excluded.monthly_pence
-                              then memberships.price_history || jsonb_build_array(jsonb_build_object('until', coalesce($19::timestamptz, now()), 'monthlyPence', memberships.monthly_pence))
+                              then memberships.price_history || jsonb_build_array(jsonb_build_object('until',
+                                   -- Never before the last change already recorded: a stale event's time is not this change's.
+                                   coalesce(case when $19::timestamptz > coalesce((memberships.price_history->-1->>'until')::timestamptz, '-infinity'::timestamptz)
+                                                 then $19::timestamptz end, now()),
+                                   'monthlyPence', memberships.monthly_pence))
                               else memberships.price_history end,
          monthly_pence = excluded.monthly_pence,
          amount_pence = excluded.amount_pence,
@@ -114,7 +118,7 @@ export async function upsertFromSubscription({ householdId, subscriptionId, fact
        returning *`,
       [householdId, facts.planKey ?? 'unknown', facts.status, subscriptionId, facts.priceId, facts.monthlyPence ?? 0, facts.interval ?? 'month',
         facts.trialEnd, facts.currentPeriodEnd, facts.cancelAtPeriodEnd ?? false, facts.startedAt, facts.endedAt, pauseReason, mode,
-        paidFrom, stamp ?? await readStamp(), facts.amountPence ?? facts.monthlyPence ?? 0, facts.currentPeriodStart ?? null, changedAt],
+        paidFrom, stamp ?? await readStamp(), facts.amountPence ?? facts.monthlyPence ?? 0, pausedFrom, changedAt],
     ));
   } catch (err) {
     // The household is a member already under another subscription: Stripe has made a second (two Checkouts finished).

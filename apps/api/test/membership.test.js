@@ -535,7 +535,7 @@ test('a first payment given up on is no membership; a pause and a price change a
   // The renewal for the period from 1 Apr fails; the event arrives days later.
   sub.status = 'past_due';
   sub.items.data[0].current_period_start = secs(new Date('2023-04-01T00:00:00Z'));
-  await applyStripeEvent({ ...event('invoice.payment_failed', { id: 'in_d', object: 'invoice', subscription: sub.id }), created: secs(new Date('2023-04-01T00:00:00Z')) });
+  await applyStripeEvent({ ...event('invoice.payment_failed', { id: 'in_d', object: 'invoice', subscription: sub.id, billing_reason: 'subscription_cycle' }), created: secs(new Date('2023-04-01T00:00:00Z')) });
   const m = await billing.membershipBySubscription(sub.id);
   assert.equal(new Date(m.paused_at).toISOString(), '2023-04-01T00:00:00.000Z');
   assert.equal(m.price_history[0].until.slice(0, 10), '2023-03-10');
@@ -552,4 +552,25 @@ test('a late event never dates a price change it did not show', async () => {
   const m = await billing.membershipBySubscription(sub.id);
   assert.equal(m.plan_key, 'pro');
   assert.notEqual(m.price_history[0].until.slice(0, 7), '2022-02', 'not dated by an event that showed the old price');
+});
+
+test('a stale event never dates a change before one already recorded; a mid-cycle failure is not dated from the cycle', async () => {
+  const { household } = await aMember();
+  const sub = aSub(household.id, { status: 'active', trialEnd: new Date('2021-01-01T00:00:00Z') });
+  await applyStripeEvent(event('customer.subscription.updated', sub));
+  const solo = JSON.parse(JSON.stringify(sub.items.data[0].price));
+  sub.items.data[0].price = { ...solo, id: 'price_pro_1299', unit_amount: 1299, metadata: { epic_plan: 'pro' } };
+  await applyStripeEvent({ ...event('customer.subscription.updated', sub), created: secs(new Date('2021-05-01T00:00:00Z')) });
+  // Back to Solo; a stale January event that also shows Solo arrives now.
+  sub.items.data[0].price = solo;
+  await applyStripeEvent({ ...event('customer.subscription.updated', JSON.parse(JSON.stringify(sub))), created: secs(new Date('2021-01-15T00:00:00Z')) });
+  const m = await billing.membershipBySubscription(sub.id);
+  const untils = m.price_history.map((p) => new Date(p.until).getTime());
+  assert.deepEqual(untils, [...untils].sort((a, b) => a - b), 'in order');
+  assert.ok(untils[1] > new Date('2021-05-01T00:00:00Z').getTime());
+  // A proration invoice failing mid-cycle: the pause is not dated from the cycle's start.
+  sub.status = 'past_due';
+  sub.items.data[0].current_period_start = secs(new Date('2021-01-01T00:00:00Z'));
+  await applyStripeEvent(event('invoice.payment_failed', { id: 'in_p', object: 'invoice', subscription: sub.id, billing_reason: 'subscription_update' }));
+  assert.ok(new Date((await billing.membershipBySubscription(sub.id)).paused_at).getFullYear() >= 2026);
 });

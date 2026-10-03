@@ -151,7 +151,7 @@ const invoiceSubscription = (inv) => (typeof inv?.subscription === 'string' ? in
   ?? inv?.parent?.subscription_details?.subscription ?? null;
 
 /** Read the subscription back and write it down. Returns the stored row, or null when it is not one of ours. */
-async function sync(subscriptionId, { pauseReason = null, changedAt = null, snapshotPriceId = null } = {}) {
+async function sync(subscriptionId, { pauseReason = null, changedAt = null, snapshotPriceId = null, renewalFailed = false } = {}) {
   // Stamped before the read, so an older read finishing later is dropped rather than written over a newer one.
   const stamp = await billing.readStamp();
   const sub = await stripe.retrieveSubscription(subscriptionId);
@@ -170,7 +170,10 @@ async function sync(subscriptionId, { pauseReason = null, changedAt = null, snap
   // (Codex, 3 Oct 2026).
   if (!(snapshotPriceId && snapshotPriceId === facts.priceId)) changedAt = null;
   try {
-    return await billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason, stamp, changedAt });
+    return await billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason, stamp, changedAt,
+      // A renewal that failed leaves the period now running unpaid, so the pause starts with it. Any other failure (a
+      // mid-cycle invoice, a plan switch's proration) falls in a period already paid: dated when it is seen (Codex).
+      pausedFrom: renewalFailed ? facts.currentPeriodStart : null });
   } catch (err) {
     if (err.code !== 'second_membership') throw err;
     // The backstop for two Checkouts finished at once: the household keeps the membership it had, and the second is
@@ -202,7 +205,7 @@ export async function applyMembershipEvent(event) {
   }
   if ((type === 'invoice.paid' || type === 'invoice.payment_failed' || type === 'invoice.payment_succeeded') && invoiceSubscription(obj)) {
     const failed = type === 'invoice.payment_failed';
-    const row = await sync(invoiceSubscription(obj), { pauseReason: failed ? `payment_failed:${obj.billing_reason ?? 'invoice'}:${obj.id}` : null, changedAt: at });
+    const row = await sync(invoiceSubscription(obj), { pauseReason: failed ? `payment_failed:${obj.billing_reason ?? 'invoice'}:${obj.id}` : null, changedAt: at, renewalFailed: failed && obj.billing_reason === 'subscription_cycle' });
     return Boolean(row);
   }
   return false;
