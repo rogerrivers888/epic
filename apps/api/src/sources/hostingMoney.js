@@ -334,6 +334,8 @@ export async function moneyTick({ now = new Date() } = {}) {
   const guest = await import('../routes/guestBookings.js');
   await guest.lapseRequests({ now });
   await guest.dropUnpaid({ now });
+  // More places asked for and not paid within 30 minutes go back (change how many are going).
+  await guest.expirePartyChanges({ now }).catch((err) => console.error(`epic-api: party changes — ${err.message}`));
   await (await import('../routes/hostingAdmin.js')).releaseApproved();
   await warnUnderMinimum({ now });
   await decideDue({ now });

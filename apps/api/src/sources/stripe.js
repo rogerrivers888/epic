@@ -603,7 +603,7 @@ export function statementSuffix(name) {
   return /[A-Z]/.test(clean) ? clean : null;
 }
 
-export function paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, kind = 'booking', tipId = null, hostName = null }) {
+export function paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, kind = 'booking', tipId = null, hostName = null, changeId = null }) {
   if (!/^acct_/.test(String(destination ?? ''))) throw Object.assign(new Error('This host can’t take payments yet.'), { status: 409, code: 'host_not_ready' });
   const fee = Math.round(Number(applicationFeePence));
   if (!Number.isInteger(fee) || fee < 0 || fee > amountPence) throw Object.assign(new Error('Epic’s fee on this booking is not right.'), { status: 500, code: 'bad_application_fee' });
@@ -617,14 +617,14 @@ export function paymentIntentBody({ amountPence, destination, applicationFeePenc
     on_behalf_of: destination,
     ...(fee > 0 ? { application_fee_amount: fee } : {}),
     ...(statementSuffix(hostName) ? { statement_descriptor_suffix: statementSuffix(hostName) } : {}),
-    metadata: { epic_kind: kind, epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId, epic_charge_model: 'destination', ...(tipId ? { epic_tip_id: tipId } : {}) },
+    metadata: { epic_kind: kind, epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId, epic_charge_model: 'destination', ...(tipId ? { epic_tip_id: tipId } : {}), ...(changeId ? { epic_change_id: changeId } : {}) },
   };
 }
 
 /** A guest's payment for a booking or a tip. `hold` holds the card without charging it. */
-export function paymentIntent({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey, kind = 'booking', tipId = null, hostName = null }) {
-  const body = paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold, email, kind, tipId, hostName });
-  return call('POST', '/payment_intents', body, { householdId, purpose: kind === 'tip' ? 'booking.tip' : hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
+export function paymentIntent({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey, kind = 'booking', tipId = null, hostName = null, changeId = null }) {
+  const body = paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold, email, kind, tipId, hostName, changeId });
+  return call('POST', '/payment_intents', body, { householdId, purpose: kind === 'tip' ? 'booking.tip' : kind === 'party_change' ? 'booking.party_change' : hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
 }
 
 /**

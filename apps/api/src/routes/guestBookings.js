@@ -581,6 +581,7 @@ export async function recordFailedPayment(pi, { bookingId = null, householdId = 
 export async function applyPaymentIntent(pi) {
   const bookingId = pi?.metadata?.epic_booking_id;
   if (pi?.metadata?.epic_kind === 'tip') return applyTipIntent(pi);
+  if (pi?.metadata?.epic_kind === 'party_change') return applyPartyIntent(pi);
   if (!bookingId || !UUID.test(bookingId)) return null;
   // The PaymentIntent was read back from Stripe, so its metadata is Stripe's word. Stripe can answer before our own
   // write of the intent's id has landed: a booking with no intent yet takes this one (Codex, 2 Oct 2026).
@@ -734,7 +735,12 @@ router.post('/booked/:id/payment', async (req, res, next) => {
   try {
     const { household } = await me();
     const b = await ownBooking(req.params.id, household.id);
+    // A payment for more places (change how many are going): read that one back.
+    const { rows: [pc] } = typeof req.body?.paymentIntent === 'string'
+      ? await query(`select stripe_payment_intent from booking_party_changes where booking_id = $1 and stripe_payment_intent = $2`, [b.id, req.body.paymentIntent]) : { rows: [] };
+    if (pc) await applyPartyIntent(await stripe.retrievePaymentIntent(pc.stripe_payment_intent, { householdId: household.id }));
     // A booking far ahead whose card was being saved: read the SetupIntent back instead (L4).
+    else
     if (!b.stripe_payment_intent && b.stripe_setup_intent) await applySetupIntent(await stripe.retrieveSetupIntent(b.stripe_setup_intent, { householdId: household.id }));
     else if (!b.stripe_payment_intent) throw refuse(409, 'nothing_to_pay', 'There’s nothing to pay on this one.');
     else await applyPaymentIntent(await stripe.retrievePaymentIntent(b.stripe_payment_intent, { householdId: household.id }));
@@ -785,6 +791,243 @@ export function laterAmounts(b) {
   const feePence = value > 0 ? Math.round((Number(b.fee_pence ?? 0) * amountPence) / value) : 0;
   return { amountPence, feePence };
 }
+
+// ---------------------------------------------------------------------------
+// Change how many are going (attendee README; Stripe build, 3 Oct 2026)
+//
+// A booking grows or shrinks in place. More: only with room, the places held at
+// once while the guest pays the difference (or, on a card saved for later, the
+// later charge grows). Fewer: the removed people's share comes back under the
+// booking's own refund policy, through the same refund queue as a cancellation.
+// ---------------------------------------------------------------------------
+
+/** What a booking's party is today, in priceFor's terms. */
+const partyOf = (b) => {
+  const list = Array.isArray(b.party) ? b.party : [];
+  const children = list.filter((p) => p?.child).length;
+  return { adults: Math.max(0, list.length - children), children };
+};
+
+/**
+ * What changing a booking to `party` would do: who comes, what it costs or gives back, whether there is room.
+ * Pure on what is read; writes nothing. `by` is who asks — a host removing people refunds them in full (host-caused).
+ */
+async function quoteParty(c, b, o, body, { by = 'guest', now = new Date() } = {}) {
+  if (b.state !== 'confirmed') throw refuse(409, 'not_confirmed', 'Only a confirmed booking can change.');
+  if (b.request_state === 'asked') throw refuse(409, 'not_confirmed', 'Wait for the host’s answer first.');
+  const paidStates = ['charged', 'partially_refunded', 'card_saved', 'charge_failed'];
+  const paid = Number(b.value_pence ?? 0) > 0 && paidThroughEpic(o);
+  if (paid && !paidStates.includes(b.payment_state)) throw refuse(409, 'not_paid', 'This booking isn’t paid for yet.');
+  const e = await eventWithSessions(o.id, c);
+  const { rows: mine } = await c.query(`select session_id from booking_sessions where booking_id = $1 and state = 'booked'`, [b.id]);
+  const live = e.sessions.filter((s) => mine.some((m) => m.session_id === s.id) && s.state === 'scheduled' && startOf(s, o) > now);
+  if (!live.length) throw refuse(409, 'nothing_left', 'There’s nothing left to change on this one.');
+  const party = parseParty(body);
+  const check = checkParty(party, o, { onDate: ymd(live[0].on_date), adultAge: hostingConfig().adultAge });
+  if (check.error) throw refuse(400, check.error, check.message);
+  const fromHeads = Number(b.heads);
+  const toHeads = check.heads;
+  if (toHeads === fromHeads && check.children === partyOf(b).children) throw refuse(409, 'no_change', 'That’s who’s going already.');
+  const kind = b.booking_kind ?? 'whole';
+  const priceNow = (p) => (paid ? priceFor(o, kind, p, live.length).valuePence : 0);
+  const was = priceNow(partyOf(b));
+  const will = priceNow({ adults: check.adults, children: check.children });
+  const out = { party, check, fromHeads, toHeads, live, paid, chargePence: 0, feePence: 0, refundPence: 0, feeKeptPence: 0, deltaPence: will - was, cause: null };
+  if (toHeads > fromHeads) {
+    for (const s of live) {
+      const left = placesLeft(s, o);
+      if (left != null && left - s.reserved < toHeads - fromHeads) throw refuse(409, 'full', 'There isn’t room for that many.');
+    }
+  }
+  if (!paid) return out;
+  if (will >= was) {
+    // More: the guest pays what the extra people cost at today's prices, and Epic's fee on it at the booking's rate.
+    out.chargePence = will - was;
+    out.feePence = Math.round((out.chargePence * Number(b.fee_rate_pct ?? 0)) / 100);
+    return out;
+  }
+  // Fewer: the share of what is still paid for the remaining sessions that the removed people stand for.
+  const basis = chargeBasis(b);
+  const left = Math.max(0, Number(basis.charged_pence ?? 0) - Number(basis.refunded_pence ?? 0) - Number(basis.cancellation_fee_pence ?? 0));
+  const { rows: [{ n: allN }] } = await c.query(`select count(*)::int as n from booking_sessions where booking_id = $1 and state in ('booked', 'attended')`, [b.id]);
+  const liveShare = Math.floor((left * live.length) / Math.max(1, allN));
+  const share = was > 0 ? Math.round((liveShare * (was - will)) / was) : 0;
+  if (by === 'host' || ['card_saved', 'charge_failed'].includes(b.payment_state)) {
+    // Host-caused, or nothing taken yet: all of the share, no fee.
+    out.refundPence = share;
+    out.cause = by === 'host' ? 'host_cancelled' : 'party_reduced';
+    return out;
+  }
+  const s = await settingsRepo.current();
+  const terms = b.refund_policy ? { ...(s.refund_terms ?? {}), [b.refund_policy]: b.refund_terms ?? s.refund_terms?.[b.refund_policy] } : s.refund_terms;
+  const q = cancelQuote({
+    booking: { ...b, charged_pence: share, refunded_pence: 0, cancellation_fee_pence: 0, all_sessions_count: live.length, forfeited_count: 0 },
+    lane: o.lane, sessions: live.map((x) => ({ id: x.id, startsAt: startOf(x, o), movedAfterBooking: movedSinceBooking(b, [x]) })),
+    losing: live.map((x) => x.id), now, terms, feePct: b.cancellation_fee_pct == null ? null : Number(b.cancellation_fee_pct),
+  });
+  if (q.pence == null) throw refuse(409, 'needs_a_person', q.words);
+  out.refundPence = q.pence;
+  out.feeKeptPence = q.feeKeptPence ?? 0;
+  out.cause = 'party_reduced';
+  out.words = q.words ?? null;
+  return out;
+}
+
+/** Write the booking's new party: head count, who, and the children's details. */
+async function setParty(c, b, party, heads) {
+  const list = [...Array(party.adults)].map(() => ({ child: false })).concat(party.children.map((k) => ({ name: k.name, child: true })));
+  await c.query('update experience_bookings set heads = $2, party = $3::jsonb where id = $1', [b.id, heads, JSON.stringify(list)]);
+  await c.query('delete from booking_children where booking_id = $1', [b.id]);
+  for (const k of party.children) {
+    await c.query('insert into booking_children (booking_id, name, age, date_of_birth, needs, emergency_contact) values ($1, $2, $3, $4, $5::jsonb, $6)',
+      [b.id, k.name, k.dob ? null : childAge(k), k.dob, JSON.stringify(k.needs), k.emergencyContact]);
+  }
+}
+
+/** Put a booking's party back as it was before a change that was not paid for. */
+async function restoreParty(c, change) {
+  await c.query('update experience_bookings set heads = $2, party = $3::jsonb where id = $1', [change.booking_id, change.from_heads, JSON.stringify(change.from_party)]);
+  await c.query('delete from booking_children where booking_id = $1', [change.booking_id]);
+  for (const k of change.from_children ?? []) {
+    await c.query('insert into booking_children (booking_id, name, age, date_of_birth, needs, emergency_contact) values ($1, $2, $3, $4, $5::jsonb, $6)',
+      [change.booking_id, k.name, k.age, k.date_of_birth, JSON.stringify(k.needs ?? []), k.emergency_contact]);
+  }
+}
+
+/**
+ * The quote, for the booking page: GET /booked/:id/party-quote?adults=&children= (children as JSON) — or a host's
+ * view of their own booking, by `hostId`.
+ */
+export async function partyQuote({ bookingId, householdId = null, hostId = null, party, by = 'guest' }) {
+  return withTransaction(async (c) => {
+    const { rows: [b] } = await c.query('select * from experience_bookings where id = $1 and ($2::uuid is null or household_id = $2) and ($3::uuid is null or host_id = $3)', [bookingId, householdId, hostId]);
+    if (!b || (!householdId && !hostId)) throw refuse(404, 'not_found', 'That booking isn’t yours.');
+    const o = await repo.offerById(b.offer_id);
+    const q = await quoteParty(c, b, o, party, { by });
+    return { fromHeads: q.fromHeads, toHeads: q.toHeads, chargePence: q.chargePence, refundPence: q.refundPence, feeKeptPence: q.feeKeptPence, words: q.words ?? null, later: ['card_saved', 'charge_failed'].includes(b.payment_state) };
+  });
+}
+
+/**
+ * Change how many are going. The hook the hosting chat's screens call (and the guest route below):
+ *   changeParty({ bookingId, householdId | hostId, party: { adults, children, adultConfirmed }, by: 'guest' | 'host', account })
+ * Answers `{ change, pay }` — `pay` (a client secret) only when the guest must pay for more places now.
+ */
+export async function changeParty({ bookingId, householdId = null, hostId = null, party, by = 'guest', account = null }) {
+  if (!householdId && !hostId) throw refuse(404, 'not_found', 'That booking isn’t yours.');
+  const out = await withTransaction(async (c) => {
+    const { rows: [b0] } = await c.query('select offer_id from experience_bookings where id = $1 and ($2::uuid is null or household_id = $2) and ($3::uuid is null or host_id = $3)', [bookingId, householdId, hostId]);
+    if (!b0) throw refuse(404, 'not_found', 'That booking isn’t yours.');
+    await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${b0.offer_id}`]);
+    const { rows: [b] } = await c.query('select * from experience_bookings where id = $1 for update', [bookingId]);
+    const { rows: [waiting] } = await c.query(`select id from booking_party_changes where booking_id = $1 and state = 'pending'`, [b.id]);
+    if (waiting) throw refuse(409, 'change_waiting', 'Finish paying for the last change first.');
+    const o = await repo.offerById(b.offer_id);
+    const q = await quoteParty(c, b, o, party, { by });
+    const { rows: kids } = await c.query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1', [b.id]);
+    const later = ['card_saved', 'charge_failed'].includes(b.payment_state);
+    const payNow = q.paid && q.chargePence > 0 && !later;
+    const { rows: [change] } = await c.query(
+      `insert into booking_party_changes (booking_id, from_heads, to_heads, from_party, to_party, from_children, delta_pence, charge_pence, fee_pence, refund_pence, fee_kept_pence, state, by_label, by_account, finished_at)
+       values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, case when $12 = 'done' then now() end) returning *`,
+      [b.id, q.fromHeads, q.toHeads, JSON.stringify(b.party ?? []), JSON.stringify(q.party), JSON.stringify(kids), q.deltaPence, q.chargePence, q.feePence, q.refundPence, q.feeKeptPence,
+        payNow ? 'pending' : 'done', by, account?.id ?? null],
+    );
+    // The places are the guest's from now: held by the head count, and given back if the payment doesn't happen.
+    await setParty(c, b, q.party, q.toHeads);
+    if (q.paid && q.chargePence > 0 && later) {
+      // A card saved for later (L4): the later charge grows, and Epic's fee and the host's part with it.
+      await c.query('update experience_bookings set value_pence = value_pence + $2, fee_pence = fee_pence + $3, host_pence = host_pence + $2 - $3 where id = $1', [b.id, q.chargePence, q.feePence]);
+    }
+    if (q.paid && q.refundPence + q.feeKeptPence > 0) {
+      const line = await owe(c, b, { amountPence: q.refundPence, feeKeptPence: q.feeKeptPence, cause: q.cause, key: `party:${change.id}`, wholeBooking: false, triggeredBy: by });
+      if (line) await c.query('update booking_party_changes set refund_line = $2 where id = $1', [change.id, line.id]);
+    }
+    await logChange({ subjectKind: 'booking', subjectId: b.id, field: 'party', before: { heads: q.fromHeads }, after: { heads: q.toHeads, charge: q.chargePence, refund: q.refundPence, feeKept: q.feeKeptPence }, by: account?.id ?? null, byLabel: by }, c);
+    return { b, o, change, payNow };
+  });
+  const { b, change, payNow } = out;
+  // Fewer places: a waiting-list household may take them now.
+  if (change.to_heads < change.from_heads) void offerFreedPlaces().catch(() => null);
+  if (!payNow) return { change: partyChangePayload(change), pay: null };
+  const host = await repo.hostById(b.host_id);
+  let pi;
+  try {
+    if (!hostCanBeCharged(host)) throw refuse(409, 'host_not_ready', 'This host can’t take payments just now.');
+    pi = await stripe.paymentIntent({ amountPence: change.charge_pence, destination: host.stripe_account_id, applicationFeePence: change.fee_pence, hostName: host.name,
+      bookingId: b.id, offerId: b.offer_id, householdId: b.household_id, email: account?.email ?? null, idempotencyKey: `party-${change.id}`, kind: 'party_change', changeId: change.id });
+  } catch (err) {
+    // The payment can't start: the places go back at once.
+    await withTransaction(async (c) => { await restoreParty(c, change); await c.query(`update booking_party_changes set state = 'failed', finished_at = now() where id = $1 and state = 'pending'`, [change.id]); });
+    throw err;
+  }
+  await query('update booking_party_changes set stripe_payment_intent = $2 where id = $1', [change.id, pi.id]);
+  await ledger.record({ kind: 'charge', bookingId: b.id, offerId: b.offer_id, hostId: b.host_id, householdId: b.household_id, amountPence: change.charge_pence, epicPence: change.fee_pence, hostPence: change.charge_pence - change.fee_pence, bookingValuePence: change.charge_pence, ratePct: b.fee_rate_pct, state: 'pending', stripeRef: pi.id, mode: 'test', reason: 'party_added' });
+  return { change: partyChangePayload({ ...change, stripe_payment_intent: pi.id }), pay: { clientSecret: pi.client_secret ?? null, paymentIntent: pi.id, amountPence: change.charge_pence } };
+}
+
+const partyChangePayload = (x) => ({ id: x.id, fromHeads: x.from_heads, toHeads: x.to_heads, chargePence: x.charge_pence, refundPence: x.refund_pence, feeKeptPence: x.fee_kept_pence, state: x.state });
+
+/** Stripe's word on a payment for more places: paid, they are kept and counted; failed, they go back. */
+export async function applyPartyIntent(pi) {
+  const changeId = pi?.metadata?.epic_change_id;
+  if (!changeId || !UUID.test(changeId)) return null;
+  await query('update booking_party_changes set stripe_payment_intent = $2 where id = $1 and stripe_payment_intent is null', [changeId, pi.id]);
+  return withTransaction(async (c) => {
+    const { rows: [x] } = await c.query('select * from booking_party_changes where id = $1 and stripe_payment_intent = $2 for update', [changeId, pi.id]);
+    if (!x || x.state !== 'pending') return x?.id ?? null;
+    if (pi.status === 'succeeded') {
+      await c.query(
+        `update experience_bookings set charged_pence = charged_pence + $2, value_pence = value_pence + $2, fee_pence = fee_pence + $3, host_pence = host_pence + $2 - $3
+          where id = $1`, [x.booking_id, x.charge_pence, x.fee_pence]);
+      await c.query(`update booking_party_changes set state = 'done', finished_at = now() where id = $1`, [x.id]);
+      await c.query(`update hosting_payments set state = 'succeeded', updated_at = now() where stripe_ref = $1 and kind = 'charge'`, [pi.id]);
+      return x.id;
+    }
+    if (pi.status === 'canceled' || (pi.status === 'requires_payment_method' && pi.last_payment_error)) {
+      await restoreParty(c, x);
+      await c.query(`update booking_party_changes set state = 'failed', finished_at = now() where id = $1`, [x.id]);
+      await c.query(`update hosting_payments set state = 'failed', updated_at = now() where stripe_ref = $1`, [pi.id]);
+    }
+    return x.id;
+  });
+}
+
+/** A change for more places not paid within 30 minutes: the payment is cancelled and the places go back. */
+export async function expirePartyChanges({ now = new Date(), cancel = stripe.cancelPayment, read = stripe.retrievePaymentIntent } = {}) {
+  const { rows } = await query(`select * from booking_party_changes where state = 'pending' and created_at < $1::timestamptz - interval '30 minutes' limit 50`, [now]);
+  for (const x of rows) {
+    if (x.stripe_payment_intent) {
+      const pi = await read(x.stripe_payment_intent).catch(() => null);
+      if (pi?.status === 'succeeded') { await applyPartyIntent(pi); continue; }
+      if (pi && pi.status !== 'canceled') { try { await cancel(x.stripe_payment_intent, { idempotencyKey: `party-cancel-${x.id}` }); } catch { continue; } }
+    }
+    await withTransaction(async (c) => {
+      const { rows: [again] } = await c.query(`select * from booking_party_changes where id = $1 and state = 'pending' for update`, [x.id]);
+      if (!again) return;
+      await restoreParty(c, again);
+      await c.query(`update booking_party_changes set state = 'expired', finished_at = now() where id = $1`, [x.id]);
+      if (again.stripe_payment_intent) await c.query(`update hosting_payments set state = 'failed', updated_at = now() where stripe_ref = $1 and state = 'pending'`, [again.stripe_payment_intent]);
+    });
+  }
+  return rows.length;
+}
+
+router.get('/booked/:id/party-quote', async (req, res, next) => {
+  try {
+    const { household } = await me();
+    let children = [];
+    try { children = req.query.children ? JSON.parse(String(req.query.children)) : []; } catch { throw refuse(400, 'children', 'Children don’t read right.'); }
+    res.json(await partyQuote({ bookingId: req.params.id, householdId: household.id, party: { adults: req.query.adults, children, adultConfirmed: req.query.adultConfirmed === 'true' } }));
+  } catch (err) { next(err); }
+});
+
+router.post('/booked/:id/party', async (req, res, next) => {
+  try {
+    const { household, account } = await me();
+    res.json(await changeParty({ bookingId: req.params.id, householdId: household.id, party: req.body?.party ?? req.body, by: 'guest', account }));
+  } catch (err) { next(err); }
+});
 
 // ---------------------------------------------------------------------------
 // the waiting list

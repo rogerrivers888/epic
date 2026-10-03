@@ -1168,3 +1168,87 @@ test('L4: the charge date follows the sessions — the earliest cancelled, it mo
     assert.equal(Math.round((await due() - first) / 86_400_000), 7, 'a week later, with the next session');
   } finally { await srv.close(); }
 });
+
+// ---------------------------------------------------------------------------
+// Change how many are going (the hosting chat's hook: changeParty / partyQuote)
+// ---------------------------------------------------------------------------
+
+/** A paid one-off, booked and paid for by `adults` adults. */
+async function aPaidBooking({ adults = 2, firstIn = 30, max = 10, policy = 'flexible' } = {}) {
+  const ev = await anEvent({ price: 2000, priceMode: 'same_each', firstIn, max, policy });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  const r = await srv.send('POST', `/api/experiences/${ev.o.id}/booking`, { when: { kind: 'whole' }, party: { adults } });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  pays(r.body.pay.paymentIntent);
+  await srv.send('POST', `/api/booked/${r.body.booking.id}/payment`, {});
+  return { ...ev, a, srv, id: r.body.booking.id };
+}
+
+test('more going: only with room, the places held at once, the difference paid as a destination charge; failing gives them back', async () => {
+  settings.forget();
+  const { srv, id, h } = await aPaidBooking({ adults: 2, max: 4 });
+  try {
+    assert.equal((await srv.send('POST', `/api/booked/${id}/party`, { adults: 5 })).body.error, 'full', 'four places, two taken by them: five is too many');
+    const q = await srv.get(`/api/booked/${id}/party-quote?adults=4`);
+    assert.deepEqual([q.body.fromHeads, q.body.toHeads, q.body.chargePence, q.body.refundPence], [2, 4, 4000, 0]);
+    calls.length = 0;
+    const r = await srv.send('POST', `/api/booked/${id}/party`, { adults: 4 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual([r.body.change.fromHeads, r.body.change.toHeads, r.body.pay.amountPence], [2, 4, 4000]);
+    const f = new URLSearchParams(calls.find((c) => c.url === '/v1/payment_intents').body);
+    assert.deepEqual([f.get('transfer_data[destination]'), f.get('application_fee_amount'), f.get('metadata[epic_kind]')], [h.stripe_account_id, '800', 'party_change']);
+    // The places are theirs while they pay: nobody else can have them.
+    assert.equal((await query('select heads from experience_bookings where id = $1', [id])).rows[0].heads, 4);
+    assert.equal((await srv.send('POST', `/api/booked/${id}/party`, { adults: 3 })).body.error, 'change_waiting', 'one change at a time');
+    pays(r.body.pay.paymentIntent);
+    const done = await srv.send('POST', `/api/booked/${id}/payment`, { paymentIntent: r.body.pay.paymentIntent });
+    assert.equal(done.status, 200);
+    const { rows: [b] } = await query('select heads, charged_pence, value_pence, fee_pence, host_pence from experience_bookings where id = $1', [id]);
+    assert.deepEqual([b.heads, b.charged_pence, b.value_pence, b.fee_pence, b.host_pence], [4, 8000, 8000, 1600, 6400]);
+    assert.equal((await query(`select state from booking_party_changes where booking_id = $1`, [id])).rows[0].state, 'done');
+
+  } finally { await srv.close(); }
+});
+
+test('more going, never paid: the places go back after 30 minutes', async () => {
+  settings.forget();
+  const { srv, id } = await aPaidBooking({ adults: 1, max: 4 });
+  try {
+    const r = await srv.send('POST', `/api/booked/${id}/party`, { adults: 3 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    await guest.expirePartyChanges({ now: new Date(Date.now() + 31 * 60_000) });
+    assert.equal((await query('select heads from experience_bookings where id = $1', [id])).rows[0].heads, 1);
+    assert.equal((await query(`select state from booking_party_changes where booking_id = $1`, [id])).rows[0].state, 'expired');
+  } finally { await srv.close(); }
+});
+
+test('fewer going: their share comes back under the refund policy, through the refund queue, with the 5% where it would all come back', async () => {
+  settings.forget();
+  const { srv, id } = await aPaidBooking({ adults: 4, firstIn: 30 });
+  try {
+    const q = await srv.get(`/api/booked/${id}/party-quote?adults=3`);
+    // £80 for four; one fewer is £20 of it — a full refund under Flexible this far ahead, less the 5% cancellation fee (L5).
+    assert.deepEqual([q.body.refundPence, q.body.feeKeptPence, q.body.chargePence], [1900, 100, 0]);
+    const r = await srv.send('POST', `/api/booked/${id}/party`, { adults: 3 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.pay, null);
+    const { rows: [line] } = await query(`select amount_pence, fee_kept_pence, cause, triggered_by, state from hosting_payments where booking_id = $1 and kind = 'refund'`, [id]);
+    assert.deepEqual([line.amount_pence, line.fee_kept_pence, line.cause, line.triggered_by, line.state], [1900, 100, 'party_reduced', 'guest', 'pending']);
+    const { rows: [b] } = await query('select heads, refunded_pence, cancellation_fee_pence from experience_bookings where id = $1', [id]);
+    assert.deepEqual([b.heads, b.refunded_pence, b.cancellation_fee_pence], [3, 1900, 100]);
+    assert.equal((await srv.send('POST', `/api/booked/${id}/party`, { adults: 3 })).body.error, 'no_change');
+  } finally { await srv.close(); }
+});
+
+test('a host removing people refunds them in full; the hook answers only to the booking’s own household or host', async () => {
+  settings.forget();
+  const { srv, id, h } = await aPaidBooking({ adults: 2 });
+  try {
+    await assert.rejects(() => guest.changeParty({ bookingId: id, householdId: crypto.randomUUID(), party: { adults: 1 } }), /isn’t yours/);
+    const r = await guest.changeParty({ bookingId: id, hostId: h.id, party: { adults: 1 }, by: 'host' });
+    assert.deepEqual([r.change.refundPence, r.change.feeKeptPence], [2000, 0]);
+    const { rows: [line] } = await query(`select cause, triggered_by from hosting_payments where booking_id = $1 and kind = 'refund'`, [id]);
+    assert.deepEqual([line.cause, line.triggered_by], ['host_cancelled', 'host']);
+  } finally { await srv.close(); }
+});
