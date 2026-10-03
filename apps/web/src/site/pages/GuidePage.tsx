@@ -28,6 +28,13 @@ import { GuideAlertForm } from '../GuideAlertForm';
 import { SiteH1, SiteH2, SiteP } from '../type';
 
 const web = Platform.OS === 'web';
+/**
+ * The design caps a measure in characters (`max-width: 68ch`), so it widens with
+ * the type: one `ch` of Archivo is 0.5727em (measured, 739.9px for 68ch at 19px).
+ */
+const ch = (n: number, fontSize: number) => n * 0.5727 * fontSize;
+/** The line height the design's text inherits wherever it sets none (its body rule). */
+const LH = 1.55;
 /** The placeholder grey of an unfilled photo slot, and the ink of its brief (the design's #3a3735). */
 const SLOT = HAIRLINE;
 const SLOT_INK = INK_HOVER;
@@ -38,7 +45,7 @@ export function GuidePage({ locale, guide: slug }: { locale: SiteLocale; guide: 
   const { navigate } = useRouter();
   const phone = width < 700;
   /** `clamp(min, n·cqw, max)`, as the design sizes everything against the page's width. */
-  const fluid = (min: number, cqw: number, max: number) => Math.round(Math.max(min, Math.min(max, (width * cqw) / 100)));
+  const fluid = (min: number, cqw: number, max: number) => Math.max(min, Math.min(max, (width * cqw) / 100));
   const pad = fluid(20, 4.4, 56);
   const h1 = fluid(52, 10, 132);
   const inner = width - 2 * pad;
@@ -142,12 +149,12 @@ export function GuidePage({ locale, guide: slug }: { locale: SiteLocale; guide: 
       <View style={[s.pair, stacked && { flexDirection: 'column' }]}>
         <View nativeID={tellId} style={[s.soon, !stacked && s.half, { paddingTop: fluid(32, 4.4, 56), paddingBottom: fluid(36, 4.4, 56), paddingHorizontal: pad }]}>
           <SiteH2 style={[s.pairH2, { color: LIME, fontSize: fluid(38, 4.6, 60), letterSpacing: -0.05 * fluid(38, 4.6, 60), lineHeight: fluid(38, 4.6, 60) * 0.95 }]}>{g.soonH2}</SiteH2>
-          <SiteP style={[s.pairP, { color: ON_INK_MUTED, fontSize: fluid(17, 1.5, 19), lineHeight: fluid(17, 1.5, 19) * 1.5 }]}>{g.soonLine}</SiteP>
+          <SiteP style={[s.pairP, { color: ON_INK_MUTED, fontSize: fluid(17, 1.5, 19), lineHeight: fluid(17, 1.5, 19) * 1.5, maxWidth: ch(52, fluid(17, 1.5, 19)) }]}>{g.soonLine}</SiteP>
           <GuideAlertForm locale={locale} slug={slug} guide={g} />
         </View>
         <View style={[s.host, !stacked && s.half, { paddingTop: fluid(32, 4.4, 56), paddingBottom: fluid(36, 4.4, 56), paddingHorizontal: pad }]}>
           <SiteH2 style={[s.pairH2, { fontSize: fluid(38, 4.6, 60), letterSpacing: -0.05 * fluid(38, 4.6, 60), lineHeight: fluid(38, 4.6, 60) * 0.95 }]}>{g.hostH2}</SiteH2>
-          <SiteP style={[s.pairP, { fontWeight: '500', fontSize: fluid(17, 1.5, 19), lineHeight: fluid(17, 1.5, 19) * 1.5 }]}>{g.hostP}</SiteP>
+          <SiteP style={[s.pairP, { fontWeight: '500', fontSize: fluid(17, 1.5, 19), lineHeight: fluid(17, 1.5, 19) * 1.5, maxWidth: ch(52, fluid(17, 1.5, 19)) }]}>{g.hostP}</SiteP>
           {/* The host version of this page (/host/{subcategory}) is not designed yet; the host page is where hosting is explained. */}
           <Pressable
             accessibilityRole="link"
@@ -175,18 +182,28 @@ type Fluid = (min: number, cqw: number, max: number) => number;
 /** How many columns of at least `min` fit in `width` with `gap` between, as CSS grid's auto-fit does. */
 const colsFor = (width: number, min: number, gap: number, most: number) => Math.max(1, Math.min(most, Math.floor((width + gap) / (min + gap))));
 
+/**
+ * The design's `repeat(auto-fit, minmax(min, 1fr))`: as many equal columns as fit
+ * the width the grid actually has (measured, not worked out from the page), and
+ * every cell in a row as tall as the tallest, as a CSS grid row is — each cell
+ * is a column its card grows to fill.
+ */
 function Grid({ width, min, gap, rowGap = gap, count, children }: { width: number; min: number; gap: number; rowGap?: number; count: number; children: React.ReactNode[] }) {
-  const cols = colsFor(width, min, gap, count);
-  const cell = (width - gap * (cols - 1)) / cols;
+  const [measured, setMeasured] = useState<number | null>(null);
+  const w = measured ?? width;
+  const cols = colsFor(w, min, gap, count);
+  const cell = (w - gap * (cols - 1)) / cols;
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: gap, rowGap }}>
-      {children.map((c, i) => <View key={i} style={{ width: cols === 1 ? '100%' : cell }}>{c}</View>)}
+    <View onLayout={(e) => setMeasured(e.nativeEvent.layout.width)} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'stretch', columnGap: gap, rowGap }}>
+      {/* A hair under the column and allowed to grow back to it: a fractional width
+          that adds up to a hair over the row wraps the last card (900px, 3 Oct 2026). */}
+      {children.map((c, i) => <View key={i} style={cols === 1 ? { width: '100%' } : { flexBasis: cell - 1, flexGrow: 1, maxWidth: cell, flexDirection: 'column' }}>{c}</View>)}
     </View>
   );
 }
 
 function Section({ b, n, width, phone, fluid, published }: { b: GuideBlock; n: string; width: number; phone: boolean; fluid: Fluid; published: boolean }) {
-  const body: TextStyle = { fontSize: fluid(17, 1.5, 19), lineHeight: fluid(17, 1.5, 19) * 1.6 };
+  const body: TextStyle = { fontSize: fluid(17, 1.5, 19), lineHeight: fluid(17, 1.5, 19) * 1.6, maxWidth: ch(68, fluid(17, 1.5, 19)) };
   const h2 = fluid(32, 3.8, 48);
   return (
     <View nativeID={b.id} style={[s.block, { paddingTop: fluid(24, 2.6, 32), paddingBottom: fluid(40, 4.4, 56) }, web && ({ scrollMarginTop: 12 } as object)]}>
@@ -194,7 +211,7 @@ function Section({ b, n, width, phone, fluid, published }: { b: GuideBlock; n: s
       <SiteH2 style={[s.h2, { marginTop: -8, fontSize: h2, letterSpacing: -0.04 * h2, lineHeight: h2 }]}>{b.h2}</SiteH2>
       {b.img ? (
         <View style={[s.slot, { height: fluid(220, 30, 380) }]}>
-          <Text style={[s.slotBrief, { fontSize: fluid(14, 1.3, 16), lineHeight: fluid(14, 1.3, 16) * 1.35, left: 16, right: 16, bottom: 16, maxWidth: 520 }]}>{b.img}</Text>
+          <Text style={[s.slotBrief, { fontSize: fluid(14, 1.3, 16), lineHeight: fluid(14, 1.3, 16) * 1.35, left: 16, right: 16, bottom: 16, maxWidth: ch(52, fluid(14, 1.3, 16)) }]}>{b.img}</Text>
           <Text style={[s.slotTag, { left: 16, top: 16 }]}>Photo to license</Text>
         </View>
       ) : null}
@@ -203,10 +220,10 @@ function Section({ b, n, width, phone, fluid, published }: { b: GuideBlock; n: s
       {b.tiles ? (
         <Grid width={width} min={220} gap={8} count={b.tiles.length}>
           {b.tiles.map((x) => (
-            <View key={x.t} style={{ backgroundColor: INACTIVE }}>
+            <View key={x.t} style={{ flexGrow: 1, backgroundColor: INACTIVE }}>
               <View style={[s.slot, { aspectRatio: 4 / 3 }]}>
                 <Text style={[s.slotBrief, { fontSize: 13, lineHeight: 17, left: 12, right: 12, bottom: 12 }]}>{x.want}</Text>
-                <Text style={[s.slotTag, { fontSize: 10.5 }]}>Photo to license</Text>
+                <Text style={[s.slotTag, { fontSize: 10.5, lineHeight: 10.5 * LH }]}>Photo to license</Text>
               </View>
               <View style={s.tileText}>
                 <Text style={s.tileT} {...(web ? ({ role: 'heading', 'aria-level': 3 } as object) : {})}>{x.t}</Text>
@@ -315,10 +332,10 @@ function Places({ g, phone }: { g: Guide; phone: boolean }) {
       <View style={{ borderTopWidth: 1, borderTopColor: HAIRLINE }}>
         {g.places.map((p) => (
           <View key={p.n} style={s.placeMob}>
-            <Text style={[s.placeN, { fontSize: 19 }]} {...(web ? ({ role: 'heading', 'aria-level': 3 } as object) : {})}>{p.n}</Text>
+            <Text style={[s.placeN, { fontSize: 19, lineHeight: 19 * LH }]} {...(web ? ({ role: 'heading', 'aria-level': 3 } as object) : {})}>{p.n}</Text>
             <Text style={s.placeWhere}>{p.where}</Text>
             <Text style={s.tableCell}>{p.what}</Text>
-            <Text style={[s.placeWhere, { fontSize: 13 }]}>Source: {source(p)}</Text>
+            <Text style={[s.placeWhere, { fontSize: 13, lineHeight: 13 * LH }]}>Source: {source(p)}</Text>
           </View>
         ))}
       </View>
@@ -359,13 +376,13 @@ function Faqs({ g, pad, fluid, phone }: { g: Guide; pad: number; fluid: Fluid; p
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ expanded: on }}
-                {...(web ? ({ 'aria-controls': answerId } as object) : {})}
+                {...(web ? ({ 'aria-controls': answerId, 'aria-expanded': on } as object) : {})}
                 onPress={() => setOpen(on ? -1 : i)}
                 style={s.faqQ}
               >
                 {({ hovered }: any) => (
                   <>
-                    <Text style={[s.faqQText, { fontSize: fluid(18, 1.6, 21), lineHeight: fluid(18, 1.6, 21) * 1.3 }, hovered && { color: MOSS }]}>{q}</Text>
+                    <Text style={[s.faqQText, { fontSize: fluid(18, 1.6, 21), lineHeight: fluid(18, 1.6, 21) * LH, letterSpacing: -0.01 * fluid(18, 1.6, 21) }, hovered && { color: MOSS }]}>{q}</Text>
                     <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke={hovered ? MOSS : INK} strokeWidth={2.4} strokeLinecap="square">
                       <Path d={on ? 'M5 12h14' : 'M12 5v14M5 12h14'} />
                     </Svg>
@@ -396,34 +413,34 @@ const row: ViewStyle = { flexDirection: 'row' };
 const s = StyleSheet.create({
   crumbs: { ...row, flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   crumb: { ...row, alignItems: 'center', gap: 8 },
-  crumbText: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '600', color: INK },
+  crumbText: { fontFamily: fonts.heading, fontSize: 15, lineHeight: 15 * LH, fontWeight: '600', color: INK },
   h1: { ...head, margin: 0 },
   h1Lime: { backgroundColor: LIME },
   introRow: { ...row, flexWrap: 'wrap', rowGap: 24, borderTopWidth: 1, borderTopColor: HAIRLINE },
   intro: { ...body, fontWeight: '500', maxWidth: 760 },
   fact: { ...row, flexWrap: 'wrap', alignItems: 'baseline', columnGap: 10, rowGap: 4, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
-  factA: { ...head, fontSize: 20, letterSpacing: -0.4 },
-  factB: { ...body, fontSize: 16, color: INK_MUTED },
+  factA: { ...head, fontSize: 20, lineHeight: 20 * LH, letterSpacing: -0.4 },
+  factB: { ...body, fontSize: 16, lineHeight: 16 * LH, color: INK_MUTED },
 
   strip: { ...row, gap: 4 },
   stripCell: { flex: 1, minWidth: 0, backgroundColor: SLOT, overflow: 'hidden', position: 'relative', padding: 12, justifyContent: 'space-between', gap: 10 },
-  stripTag: { alignSelf: 'flex-start', backgroundColor: CREAM, fontFamily: fonts.heading, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', paddingVertical: 4, paddingHorizontal: 8, color: INK },
+  stripTag: { alignSelf: 'flex-start', backgroundColor: CREAM, fontFamily: fonts.heading, fontSize: 11, lineHeight: 11 * LH, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', paddingVertical: 4, paddingHorizontal: 8, color: INK },
   stripBrief: { fontFamily: fonts.heading, fontWeight: '700', color: SLOT_INK },
   slot: { position: 'relative', backgroundColor: SLOT, overflow: 'hidden' },
   slotBrief: { position: 'absolute', fontFamily: fonts.heading, fontWeight: '700', color: SLOT_INK },
-  slotTag: { position: 'absolute', left: 12, top: 12, backgroundColor: CREAM, fontFamily: fonts.heading, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', paddingVertical: 4, paddingHorizontal: 8, color: INK },
+  slotTag: { position: 'absolute', left: 12, top: 12, backgroundColor: CREAM, fontFamily: fonts.heading, fontSize: 11, lineHeight: 11 * LH, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', paddingVertical: 4, paddingHorizontal: 8, color: INK },
 
   guideRow: { ...row, flexWrap: 'wrap', alignItems: 'flex-start' },
-  kicker: { fontFamily: fonts.heading, fontSize: 13, fontWeight: '700', letterSpacing: 0.78, textTransform: 'uppercase', color: INK },
+  kicker: { fontFamily: fonts.heading, fontSize: 13, lineHeight: 13 * LH, fontWeight: '700', letterSpacing: 0.78, textTransform: 'uppercase', color: INK },
   tocRow: { ...row, gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
   tocN: { width: 26, fontFamily: fonts.heading, fontSize: 16, fontWeight: '700', color: INK_MUTED, lineHeight: 21 },
   tocH: { flex: 1, fontFamily: fonts.heading, fontSize: 16, fontWeight: '700', color: INK, lineHeight: 21 },
 
   block: { gap: 20, borderTopWidth: 1, borderTopColor: HAIRLINE },
-  blockN: { ...head, fontSize: 16, color: MOSS },
+  blockN: { ...head, fontSize: 16, lineHeight: 16 * LH, color: MOSS },
   h2: { ...head, ...(web ? ({ textWrap: 'balance' } as object) : {}) },
   h2Big: { ...head, ...(web ? ({ textWrap: 'balance' } as object) : {}) },
-  para: { ...body, maxWidth: 680, ...(web ? ({ textWrap: 'pretty' } as object) : {}) },
+  para: { ...body, ...(web ? ({ textWrap: 'pretty' } as object) : {}) },
 
   tileText: { paddingTop: 14, paddingHorizontal: 16, paddingBottom: 16, gap: 5 },
   tileT: { ...head, fontSize: 20, letterSpacing: -0.4, lineHeight: 22 },
@@ -438,41 +455,41 @@ const s = StyleSheet.create({
   step: { ...row, gap: 12, paddingVertical: 16, borderTopWidth: 1, borderTopColor: HAIRLINE },
   stepN: { ...head, width: 48, fontSize: 22, letterSpacing: -0.44, lineHeight: 24 },
   stepT: { ...head, fontSize: 19, letterSpacing: -0.29, lineHeight: 23 },
-  stepD: { ...body, fontSize: 16, lineHeight: 24, maxWidth: 600 },
+  stepD: { ...body, fontSize: 16, lineHeight: 24, maxWidth: ch(62, 16) },
 
-  listRow: { ...row, gap: 14, paddingVertical: 16, borderTopWidth: 1, borderTopColor: HAIRLINE },
+  listRow: { ...row, flexGrow: 1, gap: 14, paddingVertical: 16, borderTopWidth: 1, borderTopColor: HAIRLINE },
   bullet: { width: 10, height: 10, backgroundColor: LIME, marginTop: 7 },
   listT: { ...head, fontSize: 18, letterSpacing: -0.27, lineHeight: 22 },
   listD: { ...body, fontSize: 16, lineHeight: 24 },
-  check: { marginTop: 4, borderWidth: 1, borderColor: HAIRLINE, fontFamily: fonts.heading, fontSize: 11, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', paddingVertical: 3, paddingHorizontal: 7, color: INK_MUTED },
+  check: { marginTop: 4, borderWidth: 1, borderColor: HAIRLINE, fontFamily: fonts.heading, fontSize: 11, lineHeight: 11 * LH, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', paddingVertical: 3, paddingHorizontal: 7, color: INK_MUTED },
 
   tableRow: { ...row, gap: 24, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
   tableCol: { flex: 1, minWidth: 0 },
   tableCell: { ...body, fontSize: 16, lineHeight: 23 },
   tableMobRow: { gap: 8, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
   tableMobA: { ...head, fontSize: 18, lineHeight: 22 },
-  tableMobH: { fontFamily: fonts.heading, fontSize: 12, fontWeight: '700', letterSpacing: 0.72, textTransform: 'uppercase', color: INK_MUTED },
+  tableMobH: { fontFamily: fonts.heading, fontSize: 12, lineHeight: 12 * LH, fontWeight: '700', letterSpacing: 0.72, textTransform: 'uppercase', color: INK_MUTED },
 
-  note: { backgroundColor: LIME_TINT, paddingVertical: 18, paddingHorizontal: 20, ...body, fontSize: 17, lineHeight: 25, maxWidth: 680 },
+  note: { backgroundColor: LIME_TINT, paddingVertical: 18, paddingHorizontal: 20, ...body, fontSize: 17, lineHeight: 25.5, maxWidth: ch(68, 17) },
   noteT: { fontFamily: fonts.heading, fontWeight: '800' },
 
   placeMob: { gap: 6, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
-  placeN: { ...head, fontSize: 20, letterSpacing: -0.4 },
-  placeWhere: { ...body, fontSize: 15, color: INK_MUTED },
+  placeN: { ...head, fontSize: 20, lineHeight: 20 * LH, letterSpacing: -0.4 },
+  placeWhere: { ...body, fontSize: 15, lineHeight: 15 * LH, color: INK_MUTED },
 
   pair: { ...row },
   half: { flex: 1, minWidth: 0 },
   soon: { backgroundColor: INK, gap: 18 },
   host: { backgroundColor: LIME, gap: 18 },
   pairH2: { ...head, ...(web ? ({ textWrap: 'balance' } as object) : {}) },
-  pairP: { ...body, maxWidth: 520, ...(web ? ({ textWrap: 'pretty' } as object) : {}) },
+  pairP: { ...body, ...(web ? ({ textWrap: 'pretty' } as object) : {}) },
   hostButton: { height: 56, backgroundColor: INK, ...row, alignItems: 'center', justifyContent: 'space-between', gap: 24, paddingHorizontal: 18, marginTop: 'auto' },
   hostButtonText: { fontFamily: fonts.heading, fontSize: 17, fontWeight: '700', color: CREAM },
 
   faqRow: { ...row, flexWrap: 'wrap', alignItems: 'flex-start', rowGap: 20 },
   faqQ: { ...row, justifyContent: 'space-between', alignItems: 'center', gap: 16, paddingVertical: 18 },
   faqQText: { flex: 1, fontFamily: fonts.heading, fontWeight: '700', letterSpacing: -0.2, color: INK },
-  faqA: { ...body, fontSize: 17, lineHeight: 27, paddingBottom: 22, maxWidth: 680, ...(web ? ({ textWrap: 'pretty' } as object) : {}) },
+  faqA: { ...body, fontSize: 17, lineHeight: 27.2, paddingBottom: 22, maxWidth: ch(68, 17), ...(web ? ({ textWrap: 'pretty' } as object) : {}) },
 
-  reviewed: { fontFamily: fonts.heading, fontSize: 15, fontWeight: '600', color: INK_MUTED },
+  reviewed: { fontFamily: fonts.heading, fontSize: 15, lineHeight: 15 * LH, fontWeight: '600', color: INK_MUTED },
 });

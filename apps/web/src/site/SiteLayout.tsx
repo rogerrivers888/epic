@@ -51,6 +51,13 @@ const WORDS: Strings<{
 
 const fill = (s: string, values: Record<string, string>) => s.replace(/\{(\w+)\}/g, (_, k) => values[k] ?? '');
 
+/**
+ * The events pages size everything against the page's width, `clamp(min, n%, max)`
+ * as their design does, so the header and footer edges sit on the same gutter as
+ * the guide below them at every width — not 56px above 700 and 20px under it.
+ */
+const clampTo = (width: number, min: number, pct: number, max: number) => Math.max(min, Math.min(max, (width * pct) / 100));
+
 export function SiteLayout({ locale, header, children }: { locale: SiteLocale; header: HeaderStyle; children: React.ReactNode }) {
   // The page's language for assistive tech and the browser (the server writes the
   // same into the HTML it sends, so a crawler never depends on this).
@@ -71,7 +78,7 @@ export function SiteLayout({ locale, header, children }: { locale: SiteLocale; h
       <ScrollView ref={scroller} style={styles.root} contentContainerStyle={{ flexGrow: 1 }}>
         <SiteHeader locale={locale} header={header} />
         <View style={{ flexGrow: 1 }}>{children}</View>
-        <SiteFooter locale={locale} />
+        <SiteFooter locale={locale} fluid={header.events === true} />
       </ScrollView>
       {TRACKING_ON ? <CookieBanner locale={locale} /> : null}
     </View>
@@ -87,11 +94,14 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
   const ink = onInk ? LIME : INK;
   const ground = header.tone === 'cream' ? CREAM : header.tone === 'lime' ? LIME : INK;
 
+  // The events header's sizes, from the design: font clamp(15,1.3,16), gaps clamp(12,2.2,28).
+  const evFont = clampTo(width, 15, 1.3, 16);
+  const evText = { fontSize: evFont, lineHeight: evFont * 1.55 };
   const right = header.events ? (
-    <View style={[styles.headRight, { gap: phone ? 12 : 28 }]}>
+    <View style={[styles.headRight, { gap: clampTo(width, 12, 2.2, 28) }]}>
       {/* The page you are on. There is no events hub yet, so it is a marker, not a link. */}
       <View {...(Platform.OS === 'web' ? ({ 'aria-current': 'page' } as object) : {})} style={styles.eventsNow}>
-        <Text style={[styles.headLink, phone && { fontSize: 15 }]}>{w.events}</Text>
+        <Text style={[styles.headLink, evText]}>{w.events}</Text>
       </View>
       {/* Real addresses, so they open in a new tab and work before the script does (Codex). */}
       <Pressable
@@ -99,15 +109,15 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
         {...(Platform.OS === 'web' ? ({ href: paths.siteHost(locale) } as object) : {})}
         onPress={(e: any) => { e?.preventDefault?.(); navigate(paths.siteHost(locale)); }}
       >
-        {({ hovered }: any) => <Text style={[styles.headLink, phone && { fontSize: 15 }, hovered && { color: MOSS }]}>{w.host}</Text>}
+        {({ hovered }: any) => <Text style={[styles.headLink, evText, hovered && { color: MOSS }]}>{w.host}</Text>}
       </Pressable>
       <Pressable
         accessibilityRole="link"
         {...(Platform.OS === 'web' ? ({ href: paths.login() } as object) : {})}
         onPress={(e: any) => { e?.preventDefault?.(); navigate(paths.login()); }}
-        style={({ hovered }: any) => [styles.logInRuled, phone && { paddingHorizontal: 12 }, hovered && { backgroundColor: INACTIVE }]}
+        style={({ hovered }: any) => [styles.logInRuled, { paddingHorizontal: clampTo(width, 12, 1.4, 18) }, hovered && { backgroundColor: INACTIVE }]}
       >
-        <Text style={[styles.headLink, phone && { fontSize: 15 }]}>{w.logIn}</Text>
+        <Text style={[styles.headLink, evText]}>{w.logIn}</Text>
       </Pressable>
     </View>
   ) : (
@@ -136,11 +146,11 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
 
   return (
     // Clear of the status bar and the notch when opened from the home screen (insets.ts).
-    <View style={[styles.head, header.events && styles.headRuled, { backgroundColor: ground, height: insetTop(phone ? 64 : 84), paddingTop: insetTop(0), paddingLeft: insetLeft(phone ? 20 : 56), paddingRight: insetRight(phone ? 20 : 56) }]}>
+    <View style={[styles.head, header.events && styles.headRuled, { backgroundColor: ground, height: insetTop(header.events ? clampTo(width, 64, 6.6, 84) : phone ? 64 : 84), paddingTop: insetTop(0), paddingLeft: insetLeft(header.events ? clampTo(width, 20, 4.4, 56) : phone ? 20 : 56), paddingRight: insetRight(header.events ? clampTo(width, 20, 4.4, 56) : phone ? 20 : 56) }]}>
       <Pressable accessibilityRole="link" accessibilityLabel="Epic" onPress={() => navigate(paths.siteHome(locale))} style={styles.headLeft}>
         {header.left === 'domain' && !phone
           ? <Text style={[styles.domain, { color: ink }]}>epic.day</Text>
-          : <Wordmark height={phone ? 26 : 30} ink={ink} ground={ground} />}
+          : <Wordmark height={header.events ? clampTo(width, 26, 2.4, 30) : phone ? 26 : 30} ink={ink} ground={ground} />}
         {header.host && !phone ? (
           <>
             <View style={styles.hostRule} />
@@ -153,7 +163,7 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
   );
 }
 
-function SiteFooter({ locale }: { locale: SiteLocale }) {
+function SiteFooter({ locale, fluid = false }: { locale: SiteLocale; fluid?: boolean }) {
   const w = pick(WORDS, locale);
   const { width } = useViewport();
   const { navigate } = useRouter();
@@ -232,7 +242,9 @@ function SiteFooter({ locale }: { locale: SiteLocale }) {
   );
 
   return (
-    <View style={[styles.foot, phone ? { paddingLeft: insetLeft(20), paddingRight: insetRight(20), paddingTop: 24, paddingBottom: insetBottom(20), gap: 16 } : { paddingLeft: insetLeft(56), paddingRight: insetRight(56), paddingTop: 28, paddingBottom: insetBottom(20), gap: 20 }]}>
+    <View style={[styles.foot, phone ? { paddingLeft: insetLeft(20), paddingRight: insetRight(20), paddingTop: 24, paddingBottom: insetBottom(20), gap: 16 } : { paddingLeft: insetLeft(56), paddingRight: insetRight(56), paddingTop: 28, paddingBottom: insetBottom(20), gap: 20 },
+      // On the events pages the footer's edges follow the page's gutter (see clampTo).
+      fluid && { paddingLeft: insetLeft(clampTo(width, 20, 4.4, 56)), paddingRight: insetRight(clampTo(width, 20, 4.4, 56)) }]}>
       {phone ? (
         <>
           <Wordmark height={26} ink={CREAM} ground={INK} />
