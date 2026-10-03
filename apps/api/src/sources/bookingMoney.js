@@ -225,8 +225,13 @@ export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = 
       return { moved, late: moved.some((m) => m.late), guests, told: [] };
     }
     for (const { x, onDate, startsAt, endsAt, endsOn, late } of plan) {
-      // A weekly session decides a set number of hours before it starts, so its deadline moves with the time too (Codex, 2 Oct 2026).
-      const decidesAt = x.decides_at ? new Date(new Date(x.decides_at).getTime() + delta * 86_400_000 + (offer.lane === 'weekly' ? shiftMin * 60_000 : 0)) : null;
+      // Worked out again in local time, so a daylight-saving change can't move it an hour (Codex, 2 Oct 2026): a weekly
+      // session decides a set number of hours before its new start; an event decides at the same local time, days on.
+      const tz = tzOf(offer);
+      const decidesAt = !x.decides_at ? null
+        : offer.lane === 'weekly'
+          ? new Date(localInstant(onDate, startsAt ?? '00:00', tz).getTime() - (localInstant(ymd(x.on_date), hm(x.starts_at) ?? '00:00', tz).getTime() - new Date(x.decides_at).getTime()))
+          : (() => { const d = new Date(x.decides_at); const t = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d); return localInstant(plusDays(localDay(d, tz), delta), t, tz); })();
       await c.query(
         `update offer_sessions
             set on_date = $2, starts_at = $3, ends_at = $4, ends_on = $5::date,

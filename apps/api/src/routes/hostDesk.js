@@ -639,6 +639,15 @@ router.post('/host/desk/events/:id/edit', async (req, res, next) => {
     if (!Object.keys(patch).length) throw refuse(400, 'nothing', 'Nothing to change.');
     await withTransaction(async (c) => {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${o.id}`]);
+      // Counted again under the lock a booking takes, so a booking a moment ago is counted too (Codex, 2 Oct 2026).
+      if (patch.maxCount != null) {
+        const { rows: [{ most }] } = await c.query(
+          `select coalesce(max(n), 0)::int as most from (select (select coalesce(sum(b.heads), 0) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+                    where bs.session_id = s.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')) as n
+               from offer_sessions s where s.offer_id = $1 and s.state = 'scheduled') x`, [o.id],
+        );
+        if (patch.maxCount < most) throw refuse(409, 'below_booked', `The most can’t go below the ${most} already booked.`);
+      }
       await repo.updateOffer(o.id, patch, c);
       await logChange({ subjectKind: 'event', subjectId: o.id, field: Object.keys(patch).join(','), before: { description: o.description, maxCount: o.max_count }, after: patch, by: account?.id ?? null, byLabel: 'host' }, c);
     });
@@ -969,7 +978,10 @@ router.get('/host/desk/profile', async (_req, res, next) => {
       `select (select count(*) from experience_bookings b where b.host_id = $1 and (
                   (b.request_state = 'asked' and b.state = 'pending')
                   or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id
-                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled')))::int as bookings,
+                              join host_offers xo on xo.id = x.offer_id
+                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled'
+                                -- only a session still to finish counts; one that has happened is done (Codex, 2 Oct 2026)
+                                and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
               (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`,
       [host.id],
     );
@@ -1048,7 +1060,10 @@ router.post('/host/desk/stop', async (_req, res, next) => {
         `select (select count(*) from experience_bookings b where b.host_id = $1 and (
                   (b.request_state = 'asked' and b.state = 'pending')
                   or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id
-                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled')))::int as bookings,
+                              join host_offers xo on xo.id = x.offer_id
+                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled'
+                                -- only a session still to finish counts; one that has happened is done (Codex, 2 Oct 2026)
+                                and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
                 (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`,
         [host.id],
       );

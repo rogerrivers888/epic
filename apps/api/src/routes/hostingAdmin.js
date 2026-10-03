@@ -265,7 +265,11 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
     const { rows: [{ n: introUsedN }] } = await query(`select count(*)::int as n from experience_bookings where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and coalesce(cancel_cause, '') not in ('unpaid', 'payment_setup_failed', 'payment_failed')))`, [h.id]);
     const { rows: [open] } = await query(`select count(*)::int as n from hosting_complaints where host_id = $1 and state = 'open'`, [h.id]);
     const { rows: [outstanding] } = await query(
-      `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed'))::int as bookings,
+      `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed') and (
+                  (b.request_state = 'asked')
+                  or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id join host_offers xo on xo.id = x.offer_id
+                              where bs.booking_id = b.id and bs.state = 'booked' and x.state = 'scheduled'
+                                and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
               (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`, [h.id],
     );
     res.json({
@@ -362,7 +366,11 @@ router.post('/hosts/:id/remove', requireOwnerSignedIn('remove a host'), async (r
     const out = await withTransaction(async (c) => {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${req.params.id}`]);
       const { rows: [o] } = await c.query(
-        `select (select count(*) from experience_bookings where host_id = $1 and state in ('pending', 'confirmed'))::int as bookings,
+        `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed') and (
+                  (b.request_state = 'asked')
+                  or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id join host_offers xo on xo.id = x.offer_id
+                              where bs.booking_id = b.id and bs.state = 'booked' and x.state = 'scheduled'
+                                and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
                 (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released'))::int as payouts`, [req.params.id],
       );
       if (o.bookings || o.payouts) return { refused: o };

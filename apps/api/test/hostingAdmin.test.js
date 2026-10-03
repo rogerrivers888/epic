@@ -121,7 +121,9 @@ test('ask for changes: ticked reasons and a new one the list keeps; the host is 
 test('the owner-only doors: a fee override and removing a host refuse staff; removal refuses while bookings are outstanding', async () => {
   const { h, o } = await inReview({ adults: true });
   const g = await aHousehold(query);
-  await query(`insert into experience_bookings (offer_id, host_id, household_id, state) values ($1, $2, $3, 'confirmed')`, [o.id, h.id, g.household.id]);
+  const { rows: [b] } = await query(`insert into experience_bookings (offer_id, host_id, household_id, state) values ($1, $2, $3, 'confirmed') returning id`, [o.id, h.id, g.household.id]);
+  const { rows: [sx] } = await query(`insert into offer_sessions (offer_id, on_date, starts_at, ends_at) values ($1, current_date + 10, '10:00', '12:00') returning id`, [o.id]);
+  await query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, sx.id]);
   const staff = await server(STAFF);
   const owner = await server(OWNER);
   try {

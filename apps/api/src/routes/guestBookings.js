@@ -535,22 +535,28 @@ export async function offerFreedPlaces({ now = new Date() } = {}) {
   );
   let offered = 0;
   for (const l of lines) {
-    const e = await eventWithSessions(l.offer_id);
-    if (!e) continue;
-    const targets = l.session_id ? e.sessions.filter((x) => x.id === l.session_id) : ahead(e.sessions, e.offer, now);
-    if (!targets.length || targets.some((x) => startOf(x, e.offer) <= now)) continue;
-    const left = Math.min(...targets.map((x) => (placesLeft(x, e.offer) ?? Infinity) - x.reserved));
-    if (!(left > 0)) continue;
-    const { rows: [first] } = await query(
-      `select * from offer_waitlist where offer_id = $1 and session_id is not distinct from $2 and state = 'waiting' order by created_at limit 1`,
-      [l.offer_id, l.session_id],
-    );
-    if (!first || first.party > left) continue;
-    const { rowCount } = await query(
-      `update offer_waitlist set state = 'offered', offered_at = $2, offer_expires_at = $3 where id = $1 and state = 'waiting'`,
-      [first.id, now, new Date(now.getTime() + hours * 3_600_000)],
-    );
-    if (!rowCount) continue;
+    // Counted and offered under the event's own lock, so a booking can't take the same place meanwhile (Codex, 2 Oct 2026).
+    const r = await withTransaction(async (c) => {
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${l.offer_id}`]);
+      const e = await eventWithSessions(l.offer_id, c);
+      if (!e) return null;
+      const targets = l.session_id ? e.sessions.filter((x) => x.id === l.session_id) : ahead(e.sessions, e.offer, now);
+      if (!targets.length || targets.some((x) => startOf(x, e.offer) <= now)) return null;
+      const left = Math.min(...targets.map((x) => (placesLeft(x, e.offer) ?? Infinity) - x.reserved));
+      if (!(left > 0)) return null;
+      const { rows: [first] } = await c.query(
+        `select * from offer_waitlist where offer_id = $1 and session_id is not distinct from $2 and state = 'waiting' order by created_at limit 1`,
+        [l.offer_id, l.session_id],
+      );
+      if (!first || first.party > left) return null;
+      const { rowCount } = await c.query(
+        `update offer_waitlist set state = 'offered', offered_at = $2, offer_expires_at = $3 where id = $1 and state = 'waiting'`,
+        [first.id, now, new Date(now.getTime() + hours * 3_600_000)],
+      );
+      return rowCount ? { e, first } : null;
+    });
+    if (!r) continue;
+    const { e, first } = r;
     offered += 1;
     await notifications.notify({ householdId: first.household_id, kind: 'waitlist_offered', title: `Your place is ready: ${e.offer.title ?? 'an event'}`, body: `Book within ${hours} hours`, link: `/experiences/${e.offer.id}${e.offer.visibility !== 'public' && e.offer.link_token ? `?l=${e.offer.link_token}` : ''}`, dedupeKey: `waitlist_offered:${first.id}` }).catch(() => null);
   }
