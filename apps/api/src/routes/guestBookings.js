@@ -416,7 +416,7 @@ async function book({ offerId, body, household, account, invite = null }) {
         [o.id, host.id, household.id, check.heads, JSON.stringify([...Array(check.adults)].map((_, i) => (party.adultNames[i] ? { name: party.adultNames[i], child: false } : { child: false })).concat(party.children.map((k) => ({ name: k.name, child: true })))),
           paid || asked ? 'pending' : 'confirmed', price.valuePence, when.kind, asked ? 'asked' : null, asked ? new Date(Date.now() + askHours * 3_600_000) : null,
           when.slot?.date ?? null, when.slot?.time ?? null, when.slot?.length ?? null,
-          policy, JSON.stringify(policy ? s.refund_terms?.[policy] ?? null : null), JSON.stringify(cleanAnswers(body.answers, o.guest_questions)), party.adultConfirmed,
+          policy, JSON.stringify(policy ? s.refund_terms?.[policy] ?? null : null), JSON.stringify(editedAnswers(body.answers, o.guest_questions, await bringTaken(o.id, null, c))), party.adultConfirmed,
           invite ? 'invite' : viaHostLink ? 'link' : ['search', 'profile', 'collection', 'web'].includes(body.source) ? body.source : 'search', viaHostLink,
           JSON.stringify(price.lines), price.grossPence, price.discountPence, price.valuePence, fee.ratePct, fee.reason, fee.feePence, fee.hostPence,
           paid ? 'destination' : null,
@@ -1447,11 +1447,11 @@ router.get('/booked', async (_req, res, next) => {
 /** Within an hour's reach, by the straight-line estimate Events near you uses (about 0.75 km a minute). */
 const NEAR_KM = 45;
 
-/** What other live bookings on this event said they're bringing (G13's "taken"), this booking's own aside. */
+/** What other live bookings on this event said they're bringing (G13's "taken"), this booking's own aside (none yet, when booking). */
 async function bringTaken(offerId, bookingId, client = null) {
   const { rows } = await (client ?? { query }).query(
     `select distinct answers->>'bring' as item from experience_bookings
-      where offer_id = $1 and id <> $2 and state in ('pending', 'confirmed', 'attended') and answers ? 'bring'`,
+      where offer_id = $1 and ($2::uuid is null or id <> $2) and state in ('pending', 'confirmed', 'attended') and answers ? 'bring'`,
     [offerId, bookingId],
   );
   return rows.map((r) => r.item).filter(Boolean);
@@ -1471,8 +1471,9 @@ function firstStartOf(b, o, heldSessions) {
 const DIET_WORDS = { vegetarian: 'Vegetarian', vegan: 'Vegan', gluten_free: 'Gluten free', nut_allergy: 'Nut allergy', dairy_free: 'Dairy free', halal: 'Halal' };
 
 /**
- * "What you told the host", changed (README › Every booking page): the same questions the booking asked, and only
- * answers the host's own lists allow — dietary from the host's ticks (the usual six when the host set none), a
+ * What the guest tells the host, when booking and when changed after (README › Every booking page): the same
+ * questions, and only answers the host's own lists allow — dietary from the host's ticks (the usual six only when
+ * the event has no dietary setting at all; none when the host turned it off), a
  * thing to bring from the host's list that nobody else has taken, a place to stay from the host's places, a
  * plus-one only when the host asked. A note is the guest's own words. Anything else is refused, not dropped.
  */
@@ -1481,6 +1482,8 @@ export function editedAnswers(raw, asked = {}, taken = []) {
   const q = asked ?? {};
   const bad = (message) => refuse(400, 'bad_answer', message);
   if (out.dietary != null) {
+    // The usual six only for an event with no dietary setting at all; a host who turned it off asked nothing.
+    if (q.diet && !q.diet.on) throw bad('The host didn’t ask about dietary needs.');
     const keys = q.diet?.ticks?.length ? q.diet.ticks : Object.keys(DIET_WORDS);
     const allowed = new Map(keys.flatMap((k) => [[k.toLowerCase(), DIET_WORDS[k] ?? k], [(DIET_WORDS[k] ?? k).toLowerCase(), DIET_WORDS[k] ?? k]]));
     const pick = (v) => { const w = allowed.get(String(v).trim().toLowerCase()); if (!w) throw bad('Pick from the host’s list.'); return w; };

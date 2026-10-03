@@ -1531,3 +1531,46 @@ test('G22: a booking’s Receipt is Settings › Payments narrowed to that booki
     try { assert.equal((await os.get(`/api/payments?booking=${one}`)).body.payments.length, 0, 'never somebody else’s'); } finally { await os.close(); }
   } finally { await srv.close(); }
 });
+
+test('Codex: booking checks what the guest tells the host as the edit does — the host’s lists, and one guest per thing to bring', async () => {
+  const { o } = await anEvent({ firstIn: 5, max: 10 });
+  await query(`update host_offers set guest_questions = $2::jsonb where id = $1`, [o.id, JSON.stringify({
+    diet: { on: true, ticks: ['vegan'] }, plusOne: { on: false },
+    bring: { on: true, items: [{ id: 'i1', name: 'Salad' }, { id: 'i2', name: 'Bread' }] }, stay: { on: false, places: [{ id: 'p1', name: 'The barn' }] },
+  })]);
+  const [a, b] = [await aPerson(), await aPerson()];
+  const [sa, sb] = [await server(a.account), await server(b.account)];
+  const book = (srv, answers) => srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, answers });
+  try {
+    const first = await book(sa, { bring: 'Bread', dietary: ['vegan'] });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    assert.deepEqual((await sa.get(`/api/booked/${first.body.booking.id}`)).body.booking.answers, { bring: 'Bread', dietary: ['Vegan'] });
+    const again = await book(sb, { bring: 'Bread' });
+    assert.deepEqual([again.status, again.body.error, again.body.message], [409, 'taken', 'Someone else is bringing that.'], 'two guests can’t claim the same thing');
+    assert.equal((await book(sb, { bring: 'Cake' })).status, 400, 'not on the host’s list');
+    assert.equal((await book(sb, { dietary: ['Halal'] })).status, 400, 'not one of the host’s ticks');
+    assert.equal((await book(sb, { stay: 'The barn' })).status, 400, 'stay over is off');
+    assert.equal((await book(sb, { plusOne: true })).status, 400, 'a plus-one wasn’t asked');
+    assert.equal((await query('select count(*)::int as n from experience_bookings where offer_id = $1 and household_id = $2', [o.id, b.household.id])).rows[0].n, 0, 'a refused answer books nothing');
+    // A cancelled booking gives its thing back.
+    await sa.send('POST', `/api/booked/${first.body.booking.id}/cancel`, {});
+    assert.equal((await book(sb, { bring: 'Bread' })).status, 201);
+  } finally { await sa.close(); await sb.close(); }
+});
+
+test('Codex: dietary turned off by the host is refused; the usual six only when the event has no dietary setting at all', async () => {
+  const { o } = await anEvent({ firstIn: 5 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    await query(`update host_offers set guest_questions = $2::jsonb where id = $1`, [o.id, JSON.stringify({ diet: { on: false, ticks: [] } })]);
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, answers: { dietary: ['Vegan'] } });
+    assert.equal(r.status, 400, 'turned off: not asked');
+    const ok = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, answers: { note: 'Hi' } });
+    assert.equal(ok.status, 201);
+    assert.equal((await srv.send('PATCH', `/api/booked/${ok.body.booking.id}/answers`, { answers: { dietary: 'Vegan' } })).status, 400, 'nor on the edit');
+    await query(`update host_offers set guest_questions = '{}'::jsonb where id = $1`, [o.id]);
+    assert.equal((await srv.send('PATCH', `/api/booked/${ok.body.booking.id}/answers`, { answers: { dietary: 'Vegan' } })).status, 200, 'no setting at all: the usual six');
+    assert.throws(() => guest.editedAnswers({ dietary: 'Vegan' }, { diet: { on: false } }), /didn’t ask/);
+  } finally { await srv.close(); }
+});
