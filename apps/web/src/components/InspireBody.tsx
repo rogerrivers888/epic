@@ -240,6 +240,7 @@ function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crow
 const KIND_TAG: Record<string, string> = { oneoff: 'One-off', weekly: 'Weekly', course: 'Course', onrequest: 'On request' };
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DOW_FULL = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
 const eventDay = (ymd: string) => { const d = new Date(`${ymd}T12:00:00Z`); return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
 const pounds = (p: number) => `£${(p / 100).toFixed(p % 100 ? 2 : 0)}`;
 
@@ -267,7 +268,7 @@ export function eventBadge(e: EventNear): { words: string; bg: string } | null {
 
 /** "Sat 3 Oct · 8 min · £12 a child"; in a category lane it starts "Event ·" and leaves out the drive (G1b). */
 export function eventMeta(e: EventNear, mixed: boolean): string {
-  const when = e.date ? (e.lane === 'weekly' && (e.sessionsAhead ?? 0) > 1 ? `${DOW[new Date(`${e.date}T12:00:00Z`).getUTCDay()]}days` : eventDay(e.date)) : 'On request';
+  const when = e.date ? (e.lane === 'weekly' && (e.sessionsAhead ?? 0) > 1 ? DOW_FULL[new Date(`${e.date}T12:00:00Z`).getUTCDay()] : eventDay(e.date)) : 'On request';
   return mixed ? `Event · ${when} · ${eventPrice(e)}` : [when, e.minutesAway != null ? `${e.minutesAway} min` : null, eventPrice(e)].filter(Boolean).join(' · ');
 }
 

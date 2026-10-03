@@ -711,6 +711,8 @@ function card(b, now) {
     session: (b.lane === 'course' || b.lane === 'weekly') && idx && all > 1 ? { n: idx, of: all } : null,
     // Every date still booked, so a trip's day finds a course's later sessions too (Codex, 3 Oct 2026).
     dates: [...new Set(live.map((x) => ymd(x.on_date)))],
+    // …and each one's time, so a trip day shows that day's start (Codex, 3 Oct 2026).
+    times: Object.fromEntries(live.map((x) => [ymd(x.on_date), hm(x.starts_at)])),
     chip: chip.chip, chipWords: chip.words,
     numbers: b.min_count && chip.chip === 'waiting' ? { booked: nextS?.booked ?? 0, min: b.min_count } : null,
     rateIt: Boolean(lastEnd && lastEnd <= now.getTime() && !b.rated_at && b.state !== 'cancelled'),

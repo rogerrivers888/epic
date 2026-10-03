@@ -17,6 +17,7 @@ import {
   Buttons, Chips, Facts, Field, Foot, GuestPage, INK_MUTED, Kick, Para, People, PhotoHead, PriceLines, Seg, Title, Waiting, dayWords, firstName, gbp, useToast,
 } from './kit';
 import { CardBox, confirmWithCard, finishWithBank, loadStripe } from './pay';
+import { whenWords } from './EventPage';
 
 const DIET: Record<string, string> = { vegetarian: 'Vegetarian', vegan: 'Vegan', gluten_free: 'Gluten free', nut_allergy: 'Nut allergy', dairy_free: 'Dairy free', halal: 'Halal' };
 
@@ -90,7 +91,8 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
   const needsPicking = Boolean(opt && (opt.lane === 'onrequest' || (opt.lane === 'weekly' && !opt.kinds.includes('drop_in')) || opt.who.adultsOnly || opt.who.dropOff));
   const q = opt?.questions ?? {};
   const taken = new Set(v.taken ?? []);
-  const when = `${o.startsOn ? dayWords(o.startsOn) : ''}${o.startsAt ? ` · ${o.startsAt}` : ''}`;
+  // The event page's own words for when, from the booking options: every lane has a date or says On request (Codex, 3 Oct 2026).
+  const when = o.lane ? whenWords(o, opt) : `${o.startsOn ? dayWords(o.startsOn) : ''}${o.startsAt ? ` · ${o.startsAt}` : ''}`;
   const here = webPage ? paths.invited(token) : paths.invited(token);
   const logIn = () => navigate(`${paths.login()}?next=${encodeURIComponent(here)}`);
 

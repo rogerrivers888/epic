@@ -1003,7 +1003,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
             {bookedToday.length ? (
               <View style={{ gap: 8, marginBottom: 12 }}>
                 <Kick>Booked this day</Kick>
-                <BookingRows items={bookedToday.map((c) => ({ key: c.id!, photo: mediaUrl(c.photo), title: c.title ?? 'An event', line: c.time ? `${c.time}` : '', chip: c.chipWords, chipBg: CHIP_BG[c.chip] ?? INACTIVE, onPress: () => navigate(paths.booking(c.id!)) }))} />
+                <BookingRows items={bookedToday.map((c) => ({ key: c.id!, photo: mediaUrl(c.photo), title: c.title ?? 'An event', line: (day?.date && c.times?.[day.date]) ?? c.time ?? '', chip: c.chipWords, chipBg: CHIP_BG[c.chip] ?? INACTIVE, onPress: () => navigate(paths.booking(c.id!)) }))} />
               </View>
             ) : null}
             <View style={styles.timeline}>
