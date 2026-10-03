@@ -734,7 +734,8 @@ router.post('/reports/dac7', requireOwnerSignedIn('produce the DAC7 export'), as
     const year = Number(req.body?.year);
     if (!Number.isInteger(year) || year < 2024 || year > 2100) throw refuse(400, 'year', 'Which year.');
     const rows = await dac7Rows(year);
-    const cell = (v) => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    // A cell that would start a spreadsheet formula is made plain text first (Codex, 2 Oct 2026).
+    const cell = (v) => { let t = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
     const lines = [['Host', 'Tax reference', 'Address', 'Consideration (£)', 'Fees (£)', 'Tips (£)', 'Activities'].join(',')];
     for (const r of rows) lines.push([r.name, r.tax_reference, r.tax_address, (r.consideration / 100).toFixed(2), (r.fees / 100).toFixed(2), (r.tips / 100).toFixed(2), r.activities].map(cell).join(','));
     await logChange({ subjectKind: 'setting', subjectId: `dac7:${year}`, field: 'export', after: { year, hosts: rows.length }, why: 'DAC7 export produced', by: by(), byLabel: 'staff' });

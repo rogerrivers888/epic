@@ -734,7 +734,8 @@ router.get('/host/desk/earnings', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-const csvCell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+// A cell that would start a spreadsheet formula is made plain text first (Codex, 2 Oct 2026).
+const csvCell = (v) => { let s = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 const pounds = (p) => (Number(p ?? 0) / 100).toFixed(2);
 
 /**

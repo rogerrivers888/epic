@@ -531,6 +531,8 @@ router.post('/experiences/:id/waitlist', async (req, res, next) => {
       if (!opensPrivately(o, { linkToken: typeof req.body?.linkToken === 'string' ? req.body.linkToken.slice(0, 64) : null, invite })) throw refuse(404, 'not_found', 'This one is invitation only.');
     }
     const party = Math.max(1, Math.min(o.party_max ?? 20, Math.floor(Number(req.body?.party) || 1)));
+    // Never more than the event could ever hold, or it would stand at the front for good (Codex, 2 Oct 2026).
+    if (o.max_count && party > o.max_count) throw refuse(400, 'too_many', `It takes ${o.max_count} at most.`);
     let sessionId = null;
     if (o.lane === 'weekly') {
       sessionId = req.body?.sessionId;
@@ -750,6 +752,9 @@ async function quoteFor(b, o, sessionIds, now = new Date()) {
   const live = held.filter((x) => x.held === 'booked' && x.state === 'scheduled' && startOf(x, o) > now);
   const everStarted = held.filter((x) => x.held !== 'cancelled').map((x) => startOf(x, o)).some((t) => t <= now);
   const losing = sessionIds ?? live.map((x) => x.id);
+  // Nothing still to come: nothing to cancel (Codex, 2 Oct 2026).
+  // (An unanswered request has no session yet: withdrawing it is always possible.)
+  if (!losing.length && b.request_state !== 'asked') throw refuse(409, 'nothing_left', 'There’s nothing left to cancel on this one.');
   if (o.lane !== 'weekly' && sessionIds && losing.length !== live.length) throw refuse(400, 'whole_only', 'This one is cancelled as a whole.');
   if (losing.some((id) => !live.some((x) => x.id === id))) throw refuse(409, 'session_gone', 'That session isn’t yours to cancel.');
   if (live.filter((x) => losing.includes(x.id)).some((x) => startOf(x, o) <= now)) throw refuse(409, 'started', 'A session that has started can’t be cancelled.');
@@ -926,6 +931,17 @@ router.post('/booked/:id/tip', async (req, res, next) => {
     const fee = tipFee(amount, s);
     if (fee == null) throw refuse(503, 'fees_not_set', 'Tips open once Epic has finished setting its fees.');
     if (!stripe.stripeStatus().ready) throw refuse(503, 'payments_not_open', 'Paying for events opens soon.');
+    // A tip started and left (the payment sheet closed) frees the booking after half an hour — its PaymentIntent is
+    // cancelled first, so it can never be paid alongside a new one (Codex, 2 Oct 2026).
+    const { rows: [stale] } = await query(`select * from booking_tips where booking_id = $1 and state = 'pending' and created_at < now() - interval '30 minutes'`, [b.id]);
+    if (stale) {
+      let gone = !stale.stripe_ref;
+      if (stale.stripe_ref) {
+        const pi = await stripe.cancelPayment(stale.stripe_ref, { householdId: household.id, idempotencyKey: `tip-abandon-${stale.id}` }).catch(() => null);
+        gone = pi?.status === 'canceled';
+      }
+      if (gone) await query(`update booking_tips set state = 'failed' where id = $1 and state = 'pending'`, [stale.id]);
+    }
     // One a booking, held by the database: a double tap can't make two (Codex, 2 Oct 2026).
     const { rows: [t] } = await query(
       `insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence) values ($1, $2, $3, $4, $5, $6)
