@@ -219,6 +219,7 @@ export async function preview(key, { version = null, channels = null, fields = n
   let words = t.channels;
   if (channels) words = validateChannels(t.trigger, channels, { category: t.category });
   else if (version != null) {
+    if (!(Number.isInteger(Number(version)) && Number(version) >= 1)) throw refuse(400, 'bad_request', 'A version is a whole number from 1.');
     const { rows: [v] } = await query('select channels from message_template_versions where template_key = $1 and version = $2', [t.key, Number(version)]);
     if (!v) throw refuse(404, 'no_version', `There is no version ${version} of this template.`);
     words = v.channels;
@@ -336,6 +337,11 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
     // A kind the notifications list does not know yet is registered there when its sender is wired, not guessed here (Codex, 3 Oct 2026).
     if (!notifications.KINDS[t.notificationKind]) throw refuse(409, 'kind_not_registered', `“${t.name}” is written under “${t.notificationKind}”, which in-app notifications do not have yet.`);
     if (!to.householdId && !to.accountId) throw refuse(400, 'no_recipient', 'An in-app message needs a household or an account.');
+  }
+  // A host's message is sent to a household or an account, never to a bare address: the host's own
+  // e-mail switches are kept by household, and a bare address would step round them (Codex, 3 Oct 2026).
+  if (notifications.KINDS[t.notificationKind]?.audience === 'host' && !to.householdId && !to.accountId) {
+    throw refuse(400, 'no_recipient', `“${t.name}” goes to a host: say which household or account, so their e-mail settings are kept.`);
   }
   const values = await valuesFor(t.trigger, fields);
   const addr = await addressFor(to);

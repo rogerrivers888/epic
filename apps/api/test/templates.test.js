@@ -157,3 +157,8 @@ test('every in-app template is written under a notification kind for its own aud
   }
   await assert.rejects(templates.deliver({ templateKey: 'contact_details_hidden', to: { householdId: '00000000-0000-0000-0000-000000000000' } }), { code: 'kind_not_registered' });
 });
+
+test('a host’s message names its household or account, and a nonsense version is refused in words (Codex, 3 Oct 2026)', async () => {
+  await assert.rejects(templates.deliver({ templateKey: 'new_tip', fields: { amount: '5.00', link: 'x' }, to: { email: 'host@example.com' } }), { code: 'no_recipient' });
+  await assert.rejects(templates.preview('rating_dropped', { version: 'abc' }), { code: 'bad_request' });
+});
