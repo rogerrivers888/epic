@@ -815,3 +815,17 @@ test('Codex: a read already under way when an account is marked closed never put
   const now = await repo.hostById(host.id);
   assert.deepEqual([now.stripe_requirements.disabledReason, now.payouts_state], ['account_closed', 'pending']);
 });
+
+test('Codex: a host stored before the watch who had finished sign-up still shows when Stripe un-marks it', async () => {
+  const stripe = await import('../src/sources/stripe.js');
+  const { applyAccountFacts } = await import('../src/routes/hostLanes.js');
+  const { household: h } = await aHousehold(query);
+  const host = await repo.insertHost(h.id, { name: 'Was Ready' });
+  // Stored before the watch: no everSubmitted, but payouts were ready.
+  await repo.updateHost(host.id, { stripeAccountId: 'acct_wasready', stripeAccountModel: 'v2', payoutsState: 'ready', stripeRequirements: { currentlyDue: [], disabledReason: null } });
+  const overdue = { id: 'acct_wasready', details_submitted: false, charges_enabled: false, payouts_enabled: false, settings: { payouts: { schedule: { interval: 'manual' } } }, capabilities: { card_payments: 'inactive', transfers: 'inactive' }, requirements: { currently_due: ['individual.id_number'], eventually_due: [], past_due: ['individual.id_number'], disabled_reason: 'requirements.past_due' } };
+  await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(overdue));
+  const now = await repo.hostById(host.id);
+  assert.equal(now.stripe_requirements.everSubmitted, true);
+  assert.equal(stripe.accountTrouble(now.stripe_requirements)?.reason, 'requirements.past_due');
+});

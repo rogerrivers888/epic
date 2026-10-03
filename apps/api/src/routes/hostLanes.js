@@ -1133,11 +1133,11 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
  * person (Safety › Stripe account trouble) and the payment problems log takes the history. Nothing goes to the host.
  */
 /**
- * A stamp for when a read of a host's account began: microseconds, and a counter so two reads in the same instant
- * still differ. A tie is treated as stale (Codex, 3 Oct 2026).
+ * A stamp for when a read of a host's account began: microseconds and a counter, as fixed-width text so it compares
+ * in order and never loses digits the way a number that large would (Codex, 3 Oct 2026). A tie is treated as stale.
  */
 let stampCount = 0;
-const readStamp = () => Math.round((performance.timeOrigin + performance.now()) * 1000) * 1000 + ((stampCount = (stampCount + 1) % 1000));
+const readStamp = () => `${String(Math.round((performance.timeOrigin + performance.now()) * 1000)).padStart(17, '0')}-${String((stampCount = (stampCount + 1) % 1_000_000)).padStart(6, '0')}`;
 
 export async function applyAccountFacts(hostId, patchOrRead) {
   // Given a read, Stripe is asked first — never while a database connection is held, since the read's own metering
@@ -1152,11 +1152,11 @@ export async function applyAccountFacts(hostId, patchOrRead) {
     const prev = was.stripe_requirements ?? {};
     // A read that began no later than what is stored is stale: dropped. A direct update (an account closed) is not a
     // read but is stamped all the same, so a read already under way can't put the account back (Codex, 3 Oct 2026).
-    if (typeof patchOrRead === 'function' && Number(prev.readAt ?? 0) >= readAt) return was;
+    if (typeof patchOrRead === 'function' && String(prev.readAt ?? '') >= readAt) return was;
     // Once sign-up was finished it stays finished for the trouble watch: Stripe un-marks it when new requirements go
     // overdue, which is exactly the account the watch must keep showing (Codex, 3 Oct 2026).
     const patch = read.stripeRequirements
-      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted), readAt: typeof patchOrRead === 'function' ? readAt : readStamp() } }
+      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted || prev.detailsSubmitted || was.payouts_state === 'ready' || was.stripe_charges_enabled), readAt: typeof patchOrRead === 'function' ? readAt : readStamp() } }
       : read;
     const before = stripe.accountTrouble(prev);
     const now = stripe.accountTrouble(patch.stripeRequirements ?? prev);
