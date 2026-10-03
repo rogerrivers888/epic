@@ -17,16 +17,21 @@ export type GuideBlock = {
   h2: string;
   /** The brief for the section's photo, drawn on the slot until one is licensed. */
   img?: string;
+  /** The section's photo — or two, side by side in the same frame — once it has one; the brief in `img` until then. */
+  photos?: GuideImage[];
   p?: string[];
   compare?: { t: string; line: string; pts: string[] }[];
   steps?: { t: string; d: string }[];
   list?: GuideListItem[];
   table?: { head: string[]; rows: string[][] };
-  tiles?: { t: string; d: string; where: string; want: string }[];
+  tiles?: { t: string; d: string; where: string; want: string; src?: string; alt?: string }[];
   p2?: string[];
   note?: { t: string; d: string };
 };
-export type GuidePhoto = { src?: string; alt?: string; want?: string; tag: string };
+/** A licensed photo: its JPEG under public/site/guides, with a WebP of the same name beside it. */
+export type GuideImage = { src: string; alt: string };
+/** A header photo, or the brief and its tag while it has none. */
+export type GuidePhoto = { src?: string; alt?: string; want?: string; tag?: string };
 export type GuidePlace = { n: string; where: string; what: string; src: string; confirm?: boolean };
 
 export type Guide = {

@@ -5,7 +5,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { GUIDE_SLUGS, GUIDE_TITLES, parseRoute, titleOf } from '../src/routes.ts';
 import { consentFor, reviewedWords, type Guide } from '../src/site/guides/index.ts';
 // @ts-ignore -- a plain .mjs helper shared with server.mjs, no types
@@ -83,4 +83,22 @@ test('the server writes the head from the same words: title, FAQPage = the FAQs,
   assert.deepEqual(guideSitemapEntries({ pottery: { ...all.pottery, published: false } }, ['en-gb']), []);
   assert.deepEqual(guideSitemapEntries({ pottery: { ...all.pottery, published: true } }, ['en-gb']), [{ path: '/en-gb/events/pottery', lastmod: all.pottery.reviewed }]);
   assert.equal(guideHead({ ...all.pottery, published: true }, { appUrl: 'https://epic.day', locale: 'en-gb', slug: 'pottery' }).robots, null);
+});
+
+test('every photo is on disk as a JPEG and a WebP, and says what it shows', () => {
+  const pub = (src: string) => new URL(`../public${src}`, import.meta.url);
+  for (const [slug, g] of Object.entries(GUIDES)) {
+    const all = [
+      ...g.photos.filter((p) => p.src).map((p) => ({ src: p.src!, alt: p.alt })),
+      ...g.blocks.flatMap((b) => b.photos ?? []),
+      ...g.blocks.flatMap((b) => (b.tiles ?? []).filter((t) => t.src).map((t) => ({ src: t.src!, alt: t.alt }))),
+    ];
+    assert.ok(all.length > 0, `${slug} has photos`);
+    for (const { src, alt } of all) {
+      assert.match(src, /^\/site\/guides\/[a-z0-9-]+\.jpg$/, src);
+      assert.ok(existsSync(pub(src)), `${src} is in public/`);
+      assert.ok(existsSync(pub(src.replace(/\.jpg$/, '.webp'))), `${src} has its WebP`);
+      assert.ok(alt && alt.length > 10, `${src} has alt text`);
+    }
+  }
 });

@@ -2,125 +2,396 @@
   "//": "The subcategory guides (Epic Events on the web › Subcategory guides, 3 Oct 2026). Every word is lifted verbatim from the design's `G` object (Supporting docs › Website & Registration › Landing pages › Pottery and jurassic coast › EpicGuide.dc.html). One file, read by the page (src/site/pages/GuidePage.tsx) and by the web server (guides.mjs: title, description, canonical, schema.org), so the FAQPage a crawler reads is the FAQs a person sees. `published` false keeps a guide out of the index and the sitemap and shows its 'Check before publishing' tags; flip it once the brief's 'Before go-live' list is done.",
   "pottery": {
     "published": false,
-    "category": { "name": "Culture", "slug": "culture" },
+    "category": {
+      "name": "Culture",
+      "slug": "culture"
+    },
     "name": "Pottery",
     "title": "Pottery classes: what to expect and how to start · Epic Events",
     "description": "Wheel or hand-building, what a first class is like, how many lessons before you can work alone, and how to do pottery at home.",
     "h1a": "Pottery",
     "h1b": "classes",
     "intro": "A pottery class is two or three hours with your hands in wet clay, learning to throw on the wheel or build by hand while a potter shows you how. Most beginners make two or three small pieces, which the studio fires and glazes for you to collect a few weeks later. It suits anyone who wants to make something real; no experience needed.",
-    "facts": [["2 to 3 hours", "a class"], ["No experience", "needed"], ["From age 3", "with a grown-up"]],
+    "facts": [
+      [
+        "2 to 3 hours",
+        "a class"
+      ],
+      [
+        "No experience",
+        "needed"
+      ],
+      [
+        "From age 3",
+        "with a grown-up"
+      ]
+    ],
     "photos": [
-      { "src": "/site/guides/pottery-stoneware-bottles-900.jpg", "alt": "Three speckled white stoneware bottles, one holding dried poppy heads", "tag": "Placeholder · Unsplash" },
-      { "want": "To license: hands building a coil pot on a table", "tag": "Photo to license" },
-      { "want": "To license: glazed bowls on a studio shelf", "tag": "Photo to license" }
+      {
+        "src": "/site/guides/pottery-header-hands-on-wheel-900.jpg",
+        "alt": "Clay-covered hands shaping a pot on a spinning potter's wheel"
+      },
+      {
+        "src": "/site/guides/pottery-header-cups-on-shelves-900.jpg",
+        "alt": "Rows of handmade cups on wooden studio shelves"
+      },
+      {
+        "src": "/site/guides/pottery-header-throwing-a-jar-900.jpg",
+        "alt": "Hands drawing up the wall of a grey clay jar on the wheel"
+      }
     ],
     "blocks": [
       {
-        "id": "wheel-or-hand-building", "img": "A wheel and a hand-building table side by side in a studio, mid-class", "h2": "Wheel or hand-building?",
-        "p": ["There are two ways to make a pot, and most studios teach both. Neither is the easy option: the wheel is quicker once it clicks, and hand-building gives you more control from the start."],
+        "id": "wheel-or-hand-building",
+        "img": "A wheel and a hand-building table side by side in a studio, mid-class",
+        "h2": "Wheel or hand-building?",
+        "p": [
+          "There are two ways to make a pot, and most studios teach both. Neither is the easy option: the wheel is quicker once it clicks, and hand-building gives you more control from the start."
+        ],
         "compare": [
-          { "t": "The wheel", "line": "Clay spins on a wheel head and you shape it with wet hands. This is called throwing.", "pts": ["Best for round things: bowls, mugs, cups, vases", "The hard part is centring the clay; it takes a few goes", "A first class usually gets you two or three small pieces", "Messier: expect to get wet up to the elbows"] },
-          { "t": "Hand-building", "line": "You shape clay on a table by pinching it, rolling coils or cutting slabs.", "pts": ["Best for anything that isn't round: plates, planters, tiles, sculpture", "Slower and calmer, and easier to fix as you go", "Good for children and anyone with weaker hands", "Needs no machine, so you can carry on at home"] }
+          {
+            "t": "The wheel",
+            "line": "Clay spins on a wheel head and you shape it with wet hands. This is called throwing.",
+            "pts": [
+              "Best for round things: bowls, mugs, cups, vases",
+              "The hard part is centring the clay; it takes a few goes",
+              "A first class usually gets you two or three small pieces",
+              "Messier: expect to get wet up to the elbows"
+            ]
+          },
+          {
+            "t": "Hand-building",
+            "line": "You shape clay on a table by pinching it, rolling coils or cutting slabs.",
+            "pts": [
+              "Best for anything that isn't round: plates, planters, tiles, sculpture",
+              "Slower and calmer, and easier to fix as you go",
+              "Good for children and anyone with weaker hands",
+              "Needs no machine, so you can carry on at home"
+            ]
+          }
         ],
-        "p2": ["If you can't choose, book a taster that does a bit of both. Most people know within an hour which one they want to go back to."]
-      },
-      {
-        "id": "first-class", "img": "Centring: wet hands pressing a spinning mound of clay, close up", "h2": "What your first class is like",
-        "p": ["A first class is usually two to three hours, with six to ten people and one potter. You don't need to bring anything. This is how most wheel tasters run:"],
-        "steps": [
-          { "t": "Aprons on, and a demonstration", "d": "Ten minutes watching the potter throw a pot from start to finish, so you know what you're aiming for." },
-          { "t": "Wedging the clay", "d": "You knead your clay like bread dough to push out air bubbles, which would crack the pot in the kiln." },
-          { "t": "Centring", "d": "The clay goes on the wheel and you press it into a smooth, even mound. It's the hardest step, and the potter will help." },
-          { "t": "Opening and pulling up the walls", "d": "You press a hole into the middle, then draw the clay upwards between your fingers to make the walls." },
-          { "t": "Keeping your best", "d": "Most beginners make three or four attempts and keep one or two. Those stay at the studio to dry." }
+        "p2": [
+          "If you can't choose, book a taster that does a bit of both. Most people know within an hour which one they want to go back to."
         ],
-        "p2": ["Trimming and glazing come later. Some studios book you back for a glazing session; others glaze your pieces in a colour you pick on the day."]
-      },
-      {
-        "id": "what-to-wear", "img": "A potter in a clay-smeared apron, sleeves rolled up, grinning", "h2": "What to wear",
-        "p": ["Aprons, clay and tools are provided. Wear things you won't mind marking."],
-        "list": [
-          { "t": "Old clothes", "d": "Clay washes out of cotton, but the wet clay (slip) splashes. Short or rolled-up sleeves." },
-          { "t": "Short nails", "d": "Long nails dig into the clay on the wheel and leave marks. Trim them if you can." },
-          { "t": "Rings and watches off", "d": "Clay gets into them and they scratch the pot. Tie long hair back." },
-          { "t": "Flat, closed shoes", "d": "You work a foot pedal on the wheel, and studio floors can be wet." }
-        ],
-        "note": { "t": "Clay dust.", "d": "Dry clay dust contains silica, which you shouldn't breathe. Good studios clean with water and sponges, never by sweeping." }
-      },
-      {
-        "id": "firing", "img": "Kiln door open on a shelf of pale bisque pots, next to the same pots glazed", "h2": "Firing, and when you get your pots back",
-        "p": ["Your pots aren't finished when you leave. They go through two firings in a kiln, which is why it takes weeks, not days."],
-        "table": {
-          "head": ["Stage", "What happens", "How long"],
-          "rows": [
-            ["Trimming", "The pot is turned upside down when leather-hard, and the base is shaped", "A few days after your class"],
-            ["Drying", "It dries slowly until bone-dry, or it cracks in the kiln", "1 to 2 weeks"],
-            ["Bisque firing", "The first firing, to about 1,000°C, turns clay into ceramic", "1 to 2 days, with cooling"],
-            ["Glazing", "Dipped or brushed with glaze, by you or the studio", "One session"],
-            ["Glaze firing", "Earthenware to about 1,100°C, stoneware to about 1,250°C", "1 to 2 days, with cooling"]
-          ]
-        },
-        "p2": ["All in, expect three to six weeks. Studios wait for a full kiln before firing, so busy months can take longer."]
-      },
-      {
-        "id": "working-on-your-own", "img": "A row of first attempts on a shelf, from wobbly to good", "h2": "How many classes before you can work on your own?",
-        "p": ["Most people make a simple pot in their first session, with help. Working alone takes longer, and the thing that holds people up is centring: pressing the clay into a steady, even mound on the wheel. Some get it in a few sessions and some take months. Both are normal."],
-        "steps": [
-          { "t": "A taster", "d": "One session to find out whether you like it, and whether you prefer the wheel or your hands." },
-          { "t": "A beginners' course, 6 to 8 weeks", "d": "Centring, a cylinder, a bowl, then trimming and glazing what you made." },
-          { "t": "A second term, or a few months of weekly practice", "d": "The point where pots start coming out the way you meant them to." },
-          { "t": "Working on your own", "d": "After about 15 to 20 sessions, most people throw reliably and are ready for an open-studio membership or a set-up at home." }
-        ],
-        "p2": ["Hand-building is quicker to take home: after one or two classes you can carry on by yourself, as long as you have somewhere to fire."],
-        "note": { "t": "Go weekly.", "d": "Going regularly matters more than going for long. Skills fade over long gaps." }
-      },
-      {
-        "id": "at-home", "img": "A small electric kiln and a work table in a tidy garage", "h2": "Doing pottery at home",
-        "p": ["You can make pots at home with or without a kiln. What you need depends on whether you want to fire them."],
-        "list": [
-          { "t": "Air-dry clay", "d": "Needs no firing. Good for models and practice, but it isn't waterproof or food-safe." },
-          { "t": "Firing services", "d": "Many studios and paint-your-own cafés will fire pieces you made at home, for a fee." },
-          { "t": "A small electric kiln", "d": "Plugs into a normal 13-amp socket, holds roughly 16 to 60 litres and reaches stoneware temperatures, about 1,300°C." },
-          { "t": "A bigger kiln", "d": "Needs its own electricity supply, fitted by an electrician." },
-          { "t": "Where it goes", "d": "A kiln needs space, ventilation and distance from anything that burns. Garages and sheds are common." },
-          { "t": "A wheel", "d": "Tabletop wheels exist, but a full-size wheel is easier to centre on. Many people throw at a studio and hand-build at home." },
-          { "t": "The sink", "d": "Never pour clay water down the drain: it sets and blocks pipes. Let it settle in a bucket and pour off the clear water." },
-          { "t": "Reclaiming clay", "d": "Dried-out clay can be soaked, dried back to the right firmness and used again." }
-        ],
-        "note": { "t": "Dust at home.", "d": "Dry clay dust contains silica. Clean with a damp sponge or mop, never sweep. Wear a fitted P2 mask for dusty jobs, and keep the workspace apart from where you live." }
-      },
-      {
-        "id": "social-side", "img": "A busy open-studio evening: several potters at their wheels, chatting", "h2": "The social side",
-        "p": ["Pottery is more sociable than it looks. Most people who stay with it do so for the people as much as the pots."],
-        "list": [
-          { "t": "Classes", "d": "Most run with six to ten people, and the same faces each week." },
-          { "t": "Open studios", "d": "After a course, many studios offer membership: wheel time, shelf space, firing, and a community of potters." },
-          { "t": "Guilds and associations", "d": "Many counties and towns have a potters' guild, with demonstrations, exhibitions and shared kilns. Search for your county's potters' guild." },
-          { "t": "Craft Potters Association", "d": "The UK's association for potters, founded in 1958. It runs the Contemporary Ceramics Centre in Bloomsbury, London, publishes Ceramic Review, and anyone can join as an Associate member." },
-          { "t": "Fairs and festivals", "d": "Ceramic Art London each spring, and the British Ceramics Biennial in Stoke-on-Trent.", "chk": true },
-          { "t": "On TV", "d": "The Great Pottery Throw Down has brought a wave of new beginners into studios." }
+        "photos": [
+          {
+            "src": "/site/guides/pottery-wheel-800.jpg",
+            "alt": "Wet fingers opening a small clay pot on a spinning wheel"
+          },
+          {
+            "src": "/site/guides/pottery-by-hand-800.jpg",
+            "alt": "Hands pinching a small pot out of clay on a table"
+          }
         ]
       },
       {
-        "id": "with-children", "img": "Children's clay-covered hands holding a pinch pot (hands only, no faces)", "h2": "Pottery with children",
-        "p": ["Clay is one of the best things to do with children: it's forgiving, it's messy in a good way, and they take something home. What works depends on age."],
+        "id": "first-class",
+        "img": "Centring: wet hands pressing a spinning mound of clay, close up",
+        "h2": "What your first class is like",
+        "p": [
+          "A first class is usually two to three hours, with six to ten people and one potter. You don't need to bring anything. This is how most wheel tasters run:"
+        ],
+        "steps": [
+          {
+            "t": "Aprons on, and a demonstration",
+            "d": "Ten minutes watching the potter throw a pot from start to finish, so you know what you're aiming for."
+          },
+          {
+            "t": "Wedging the clay",
+            "d": "You knead your clay like bread dough to push out air bubbles, which would crack the pot in the kiln."
+          },
+          {
+            "t": "Centring",
+            "d": "The clay goes on the wheel and you press it into a smooth, even mound. It's the hardest step, and the potter will help."
+          },
+          {
+            "t": "Opening and pulling up the walls",
+            "d": "You press a hole into the middle, then draw the clay upwards between your fingers to make the walls."
+          },
+          {
+            "t": "Keeping your best",
+            "d": "Most beginners make three or four attempts and keep one or two. Those stay at the studio to dry."
+          }
+        ],
+        "p2": [
+          "Trimming and glazing come later. Some studios book you back for a glazing session; others glaze your pieces in a colour you pick on the day."
+        ],
+        "photos": [
+          {
+            "src": "/site/guides/pottery-first-class-1400.jpg",
+            "alt": "A potter centring clay at the wheel in a busy studio"
+          }
+        ]
+      },
+      {
+        "id": "what-to-wear",
+        "img": "A potter in a clay-smeared apron, sleeves rolled up, grinning",
+        "h2": "What to wear",
+        "p": [
+          "Aprons, clay and tools are provided. Wear things you won't mind marking."
+        ],
+        "list": [
+          {
+            "t": "Old clothes",
+            "d": "Clay washes out of cotton, but the wet clay (slip) splashes. Short or rolled-up sleeves."
+          },
+          {
+            "t": "Short nails",
+            "d": "Long nails dig into the clay on the wheel and leave marks. Trim them if you can."
+          },
+          {
+            "t": "Rings and watches off",
+            "d": "Clay gets into them and they scratch the pot. Tie long hair back."
+          },
+          {
+            "t": "Flat, closed shoes",
+            "d": "You work a foot pedal on the wheel, and studio floors can be wet."
+          }
+        ],
+        "note": {
+          "t": "Clay dust.",
+          "d": "Dry clay dust contains silica, which you shouldn't breathe. Good studios clean with water and sponges, never by sweeping."
+        }
+      },
+      {
+        "id": "firing",
+        "img": "Kiln door open on a shelf of pale bisque pots, next to the same pots glazed",
+        "h2": "Firing, and when you get your pots back",
+        "p": [
+          "Your pots aren't finished when you leave. They go through two firings in a kiln, which is why it takes weeks, not days."
+        ],
         "table": {
-          "head": ["Age", "What works", "The wheel?"],
+          "head": [
+            "Stage",
+            "What happens",
+            "How long"
+          ],
           "rows": [
-            ["3 to 5", "Pinch pots, handprints and squashing clay, with a grown-up alongside", "Not yet"],
-            ["6 to 8", "Hand-building: coil pots, tiles, little animals", "Sometimes, with help"],
-            ["8 to 12", "A children's class or club", "Usually, once their feet reach the pedal"],
-            ["12 and up", "Many studios take them in adult beginners' classes", "Yes"]
+            [
+              "Trimming",
+              "The pot is turned upside down when leather-hard, and the base is shaped",
+              "A few days after your class"
+            ],
+            [
+              "Drying",
+              "It dries slowly until bone-dry, or it cracks in the kiln",
+              "1 to 2 weeks"
+            ],
+            [
+              "Bisque firing",
+              "The first firing, to about 1,000°C, turns clay into ceramic",
+              "1 to 2 days, with cooling"
+            ],
+            [
+              "Glazing",
+              "Dipped or brushed with glaze, by you or the studio",
+              "One session"
+            ],
+            [
+              "Glaze firing",
+              "Earthenware to about 1,100°C, stoneware to about 1,250°C",
+              "1 to 2 days, with cooling"
+            ]
           ]
         },
-        "note": { "t": "Drop off or stay?", "d": "Every children's event on Epic says who it's for. Drop-off sessions are run by a Checked host." }
+        "p2": [
+          "All in, expect three to six weeks. Studios wait for a full kiln before firing, so busy months can take longer."
+        ],
+        "photos": [
+          {
+            "src": "/site/guides/pottery-glazing-1400.jpg",
+            "alt": "Hands smoothing a clay pot with a sponge before firing"
+          }
+        ]
+      },
+      {
+        "id": "working-on-your-own",
+        "img": "A row of first attempts on a shelf, from wobbly to good",
+        "h2": "How many classes before you can work on your own?",
+        "p": [
+          "Most people make a simple pot in their first session, with help. Working alone takes longer, and the thing that holds people up is centring: pressing the clay into a steady, even mound on the wheel. Some get it in a few sessions and some take months. Both are normal."
+        ],
+        "steps": [
+          {
+            "t": "A taster",
+            "d": "One session to find out whether you like it, and whether you prefer the wheel or your hands."
+          },
+          {
+            "t": "A beginners' course, 6 to 8 weeks",
+            "d": "Centring, a cylinder, a bowl, then trimming and glazing what you made."
+          },
+          {
+            "t": "A second term, or a few months of weekly practice",
+            "d": "The point where pots start coming out the way you meant them to."
+          },
+          {
+            "t": "Working on your own",
+            "d": "After about 15 to 20 sessions, most people throw reliably and are ready for an open-studio membership or a set-up at home."
+          }
+        ],
+        "p2": [
+          "Hand-building is quicker to take home: after one or two classes you can carry on by yourself, as long as you have somewhere to fire."
+        ],
+        "note": {
+          "t": "Go weekly.",
+          "d": "Going regularly matters more than going for long. Skills fade over long gaps."
+        }
+      },
+      {
+        "id": "at-home",
+        "img": "A small electric kiln and a work table in a tidy garage",
+        "h2": "Doing pottery at home",
+        "p": [
+          "You can make pots at home with or without a kiln. What you need depends on whether you want to fire them."
+        ],
+        "list": [
+          {
+            "t": "Air-dry clay",
+            "d": "Needs no firing. Good for models and practice, but it isn't waterproof or food-safe."
+          },
+          {
+            "t": "Firing services",
+            "d": "Many studios and paint-your-own cafés will fire pieces you made at home, for a fee."
+          },
+          {
+            "t": "A small electric kiln",
+            "d": "Plugs into a normal 13-amp socket, holds roughly 16 to 60 litres and reaches stoneware temperatures, about 1,300°C."
+          },
+          {
+            "t": "A bigger kiln",
+            "d": "Needs its own electricity supply, fitted by an electrician."
+          },
+          {
+            "t": "Where it goes",
+            "d": "A kiln needs space, ventilation and distance from anything that burns. Garages and sheds are common."
+          },
+          {
+            "t": "A wheel",
+            "d": "Tabletop wheels exist, but a full-size wheel is easier to centre on. Many people throw at a studio and hand-build at home."
+          },
+          {
+            "t": "The sink",
+            "d": "Never pour clay water down the drain: it sets and blocks pipes. Let it settle in a bucket and pour off the clear water."
+          },
+          {
+            "t": "Reclaiming clay",
+            "d": "Dried-out clay can be soaked, dried back to the right firmness and used again."
+          }
+        ],
+        "note": {
+          "t": "Dust at home.",
+          "d": "Dry clay dust contains silica. Clean with a damp sponge or mop, never sweep. Wear a fitted P2 mask for dusty jobs, and keep the workspace apart from where you live."
+        },
+        "photos": [
+          {
+            "src": "/site/guides/pottery-at-home-1400.jpg",
+            "alt": "Handmade pots drying on a long workshop bench"
+          }
+        ]
+      },
+      {
+        "id": "social-side",
+        "img": "A busy open-studio evening: several potters at their wheels, chatting",
+        "h2": "The social side",
+        "p": [
+          "Pottery is more sociable than it looks. Most people who stay with it do so for the people as much as the pots."
+        ],
+        "list": [
+          {
+            "t": "Classes",
+            "d": "Most run with six to ten people, and the same faces each week."
+          },
+          {
+            "t": "Open studios",
+            "d": "After a course, many studios offer membership: wheel time, shelf space, firing, and a community of potters."
+          },
+          {
+            "t": "Guilds and associations",
+            "d": "Many counties and towns have a potters' guild, with demonstrations, exhibitions and shared kilns. Search for your county's potters' guild."
+          },
+          {
+            "t": "Craft Potters Association",
+            "d": "The UK's association for potters, founded in 1958. It runs the Contemporary Ceramics Centre in Bloomsbury, London, publishes Ceramic Review, and anyone can join as an Associate member."
+          },
+          {
+            "t": "Fairs and festivals",
+            "d": "Ceramic Art London each spring, and the British Ceramics Biennial in Stoke-on-Trent.",
+            "chk": true
+          },
+          {
+            "t": "On TV",
+            "d": "The Great Pottery Throw Down has brought a wave of new beginners into studios."
+          }
+        ],
+        "photos": [
+          {
+            "src": "/site/guides/pottery-social-1400.jpg",
+            "alt": "A pot taking shape on the wheel in warm studio light"
+          }
+        ]
+      },
+      {
+        "id": "with-children",
+        "img": "Children's clay-covered hands holding a pinch pot (hands only, no faces)",
+        "h2": "Pottery with children",
+        "p": [
+          "Clay is one of the best things to do with children: it's forgiving, it's messy in a good way, and they take something home. What works depends on age."
+        ],
+        "table": {
+          "head": [
+            "Age",
+            "What works",
+            "The wheel?"
+          ],
+          "rows": [
+            [
+              "3 to 5",
+              "Pinch pots, handprints and squashing clay, with a grown-up alongside",
+              "Not yet"
+            ],
+            [
+              "6 to 8",
+              "Hand-building: coil pots, tiles, little animals",
+              "Sometimes, with help"
+            ],
+            [
+              "8 to 12",
+              "A children's class or club",
+              "Usually, once their feet reach the pedal"
+            ],
+            [
+              "12 and up",
+              "Many studios take them in adult beginners' classes",
+              "Yes"
+            ]
+          ]
+        },
+        "note": {
+          "t": "Drop off or stay?",
+          "d": "Every children's event on Epic says who it's for. Drop-off sessions are run by a Checked host."
+        },
+        "photos": [
+          {
+            "src": "/site/guides/pottery-painting-a-bowl-1400.jpg",
+            "alt": "A hand painting a butterfly onto a pale bowl"
+          }
+        ]
       }
     ],
     "placesH2": "Places to see it made",
     "places": [
-      { "n": "Leach Pottery", "where": "St Ives, Cornwall", "what": "Bernard Leach's studio, working since 1920: a museum, a working pottery and courses", "src": "Wikidata" },
-      { "n": "Middleport Pottery", "where": "Burslem, Stoke-on-Trent", "what": "A Victorian pottery still making Burleigh ware, with factory tours", "src": "Historic England" }
+      {
+        "n": "Leach Pottery",
+        "where": "St Ives, Cornwall",
+        "what": "Bernard Leach's studio, working since 1920: a museum, a working pottery and courses",
+        "src": "Wikidata"
+      },
+      {
+        "n": "Middleport Pottery",
+        "where": "Burslem, Stoke-on-Trent",
+        "what": "A Victorian pottery still making Burleigh ware, with factory tours",
+        "src": "Historic England"
+      }
     ],
     "soonH2": "Pottery classes on Epic: coming soon",
     "soonLine": "Local potters are joining Epic. Tell us where you are and we'll let you know when classes start near you.",
@@ -129,120 +400,362 @@
     "hostP": "A taster, a weekly wheel night or a six-week course. Set your dates once; people book and pay through Epic.",
     "faqH2": "Pottery classes: questions",
     "faqs": [
-      ["Do I need any experience?", "No. Beginners' classes and tasters assume you've never touched clay. The potter shows you each step, and most people make something they're happy to keep on their first go."],
-      ["Is the wheel or hand-building better for beginners?", "Neither is easier, they're different. The wheel is faster once you can centre the clay, and it's the one most people want to try. Hand-building is calmer, needs no machine and is easier to carry on at home. A taster that does both is a good way to choose."],
-      ["How long until I get my pots back?", "Usually three to six weeks. Pots are trimmed, dried for a week or two, then fired twice. The studio tells you when they are ready to collect."],
-      ["How many lessons until I can throw on my own?", "Most people throw reliably after about 15 to 20 sessions: a beginners' course of 6 to 8 weeks, then a second term or a few months of weekly practice. Centring is the step that takes longest."],
-      ["Can I do pottery at home without a kiln?", "Yes. Air-dry clay needs no firing, though it isn't waterproof or food-safe. Or make pieces in real clay at home and pay a studio to fire them."],
-      ["Is pottery safe for children?", "Yes. Clay is non-toxic, and children's sessions use hand-building, with the wheel from about age 8. The one thing to avoid is dry clay dust, so good studios clean with water, never by sweeping."],
-      ["What should I wear?", "Old clothes with short or rolled-up sleeves, flat closed shoes, and no rings or watches. Short nails help on the wheel. Aprons and tools are provided."],
-      ["Is clay dust dangerous?", "Dry clay dust contains silica, which can damage your lungs if you breathe it over time. Clean with a damp sponge or mop, never sweep, and wear a fitted P2 mask for dusty jobs."]
+      [
+        "Do I need any experience?",
+        "No. Beginners' classes and tasters assume you've never touched clay. The potter shows you each step, and most people make something they're happy to keep on their first go."
+      ],
+      [
+        "Is the wheel or hand-building better for beginners?",
+        "Neither is easier, they're different. The wheel is faster once you can centre the clay, and it's the one most people want to try. Hand-building is calmer, needs no machine and is easier to carry on at home. A taster that does both is a good way to choose."
+      ],
+      [
+        "How long until I get my pots back?",
+        "Usually three to six weeks. Pots are trimmed, dried for a week or two, then fired twice. The studio tells you when they are ready to collect."
+      ],
+      [
+        "How many lessons until I can throw on my own?",
+        "Most people throw reliably after about 15 to 20 sessions: a beginners' course of 6 to 8 weeks, then a second term or a few months of weekly practice. Centring is the step that takes longest."
+      ],
+      [
+        "Can I do pottery at home without a kiln?",
+        "Yes. Air-dry clay needs no firing, though it isn't waterproof or food-safe. Or make pieces in real clay at home and pay a studio to fire them."
+      ],
+      [
+        "Is pottery safe for children?",
+        "Yes. Clay is non-toxic, and children's sessions use hand-building, with the wheel from about age 8. The one thing to avoid is dry clay dust, so good studios clean with water, never by sweeping."
+      ],
+      [
+        "What should I wear?",
+        "Old clothes with short or rolled-up sleeves, flat closed shoes, and no rings or watches. Short nails help on the wheel. Aprons and tools are provided."
+      ],
+      [
+        "Is clay dust dangerous?",
+        "Dry clay dust contains silica, which can damage your lungs if you breathe it over time. Clean with a damp sponge or mop, never sweep, and wear a fitted P2 mask for dusty jobs."
+      ]
     ],
     "reviewed": "2026-10-03"
   },
   "fossil-hunting": {
     "published": false,
-    "category": { "name": "Outdoors", "slug": "outdoors" },
+    "category": {
+      "name": "Outdoors",
+      "slug": "outdoors"
+    },
     "name": "Fossil hunting",
     "title": "Fossil hunting in the UK: where, when and how · Epic Events",
     "description": "The best UK beaches for fossils, when to go, what you'll find, how to stay safe with the tides, and the rules for collecting.",
     "h1a": "Fossil",
     "h1b": "hunting",
     "intro": "Fossil hunting is walking a beach where the cliffs are slowly crumbling, and looking for the remains of animals that lived millions of years ago. Most finds are loose on the beach, washed out by the sea. You need no experience, just the right beach, the right tide and a good eye.",
-    "facts": [["Best in winter", "after storms"], ["Falling tide", "always"], ["All ages", "with a grown-up"]],
+    "facts": [
+      [
+        "Best in winter",
+        "after storms"
+      ],
+      [
+        "Falling tide",
+        "always"
+      ],
+      [
+        "All ages",
+        "with a grown-up"
+      ]
+    ],
     "photos": [
-      { "want": "To license: an ammonite in an open hand, on shingle", "tag": "Photo to license" },
-      { "want": "To license: Charmouth beach and cliffs at low tide", "tag": "Photo to license" },
-      { "want": "To license: belemnites and crinoids on a pebble beach, close up", "tag": "Photo to license" }
+      {
+        "src": "/site/guides/fossil-header-old-harry-rocks-900.jpg",
+        "alt": "The chalk stacks of Old Harry Rocks on the Jurassic Coast, seen from above"
+      },
+      {
+        "src": "/site/guides/fossil-header-ammonite-900.jpg",
+        "alt": "A spiral ammonite set in reddish rock"
+      },
+      {
+        "src": "/site/guides/fossil-header-find-in-hand-900.jpg",
+        "alt": "A fossil shell held in an open hand on the beach"
+      }
     ],
     "blocks": [
       {
-        "id": "where-to-go", "img": "The Jurassic Coast at Charmouth: grey cliffs and a long beach at low tide", "h2": "Where to go",
-        "p": ["Fossils turn up where soft rock is wearing away into the sea. These are the best-known places in the UK."],
+        "id": "where-to-go",
+        "img": "The Jurassic Coast at Charmouth: grey cliffs and a long beach at low tide",
+        "h2": "Where to go",
+        "p": [
+          "Fossils turn up where soft rock is wearing away into the sea. These are the best-known places in the UK."
+        ],
         "list": [
-          { "t": "The Jurassic Coast, Dorset and East Devon", "d": "A UNESCO World Heritage Site. Charmouth and Lyme Regis are the best-known beaches for ammonites and belemnites." },
-          { "t": "The Yorkshire coast", "d": "Staithes, Runswick Bay, Robin Hood's Bay, Boggle Hole and Saltburn, for Jurassic fossils." },
-          { "t": "Isle of Wight", "d": "Compton Bay and Hanover Point for dinosaur footprints at low tide, and bone fragments at Brook and Compton." },
-          { "t": "Kent", "d": "Herne Bay, for shark teeth." },
-          { "t": "Norfolk", "d": "Hunstanton, with its striped cliffs and marine fossils." },
-          { "t": "East Sussex", "d": "Birling Gap, under the Seven Sisters chalk cliffs." },
-          { "t": "Northern Ireland", "d": "White Park Bay, County Antrim, for belemnites, ammonites and gryphaea." }
+          {
+            "t": "The Jurassic Coast, Dorset and East Devon",
+            "d": "A UNESCO World Heritage Site. Charmouth and Lyme Regis are the best-known beaches for ammonites and belemnites."
+          },
+          {
+            "t": "The Yorkshire coast",
+            "d": "Staithes, Runswick Bay, Robin Hood's Bay, Boggle Hole and Saltburn, for Jurassic fossils."
+          },
+          {
+            "t": "Isle of Wight",
+            "d": "Compton Bay and Hanover Point for dinosaur footprints at low tide, and bone fragments at Brook and Compton."
+          },
+          {
+            "t": "Kent",
+            "d": "Herne Bay, for shark teeth."
+          },
+          {
+            "t": "Norfolk",
+            "d": "Hunstanton, with its striped cliffs and marine fossils."
+          },
+          {
+            "t": "East Sussex",
+            "d": "Birling Gap, under the Seven Sisters chalk cliffs."
+          },
+          {
+            "t": "Northern Ireland",
+            "d": "White Park Bay, County Antrim, for belemnites, ammonites and gryphaea."
+          }
+        ],
+        "photos": [
+          {
+            "src": "/site/guides/fossil-lyme-regis-800.jpg",
+            "alt": "The shingle beach and wooded hills at Lyme Regis"
+          },
+          {
+            "src": "/site/guides/fossil-yorkshire-coast-800.jpg",
+            "alt": "Rock ledges at low tide below a Yorkshire coast village"
+          }
         ]
       },
       {
-        "id": "when-to-go", "img": "A winter beach after a storm, fresh cliff fall and a falling tide", "h2": "When to go",
-        "p": ["Timing matters more than the beach. The same stretch can be bare one day and full of finds the next."],
+        "id": "when-to-go",
+        "img": "A winter beach after a storm, fresh cliff fall and a falling tide",
+        "h2": "When to go",
+        "p": [
+          "Timing matters more than the beach. The same stretch can be bare one day and full of finds the next."
+        ],
         "list": [
-          { "t": "Winter", "d": "Storms and rough seas break down the cliffs and wash new fossils onto the beach." },
-          { "t": "On a falling tide", "d": "Set out as the tide goes out, so you have the most beach and the most time." },
-          { "t": "Check the tide before you leave", "d": "Some beaches, such as Monmouth Beach at Lyme Regis, are only safe around low tide." }
+          {
+            "t": "Winter",
+            "d": "Storms and rough seas break down the cliffs and wash new fossils onto the beach."
+          },
+          {
+            "t": "On a falling tide",
+            "d": "Set out as the tide goes out, so you have the most beach and the most time."
+          },
+          {
+            "t": "Check the tide before you leave",
+            "d": "Some beaches, such as Monmouth Beach at Lyme Regis, are only safe around low tide."
+          }
         ]
       },
       {
-        "id": "what-youll-find", "h2": "What you'll find",
-        "p": ["Most first finds are one of these."],
+        "id": "what-youll-find",
+        "h2": "What you'll find",
+        "p": [
+          "Most first finds are one of these."
+        ],
         "tiles": [
-          { "t": "Ammonite", "d": "A spiral shell.", "where": "Jurassic Coast, Yorkshire", "want": "A ribbed ammonite in a pebble" },
-          { "t": "Belemnite", "d": "The bullet-shaped part of a squid-like animal.", "where": "Jurassic Coast, Yorkshire, White Park Bay", "want": "Two amber belemnites on shingle" },
-          { "t": "Devil's toenail", "d": "Gryphaea: a curled ancient oyster.", "where": "Yorkshire, White Park Bay", "want": "A gryphaea in an open hand" },
-          { "t": "Crinoid", "d": "Star-shaped stem pieces of a \"sea lily\".", "where": "Jurassic Coast, Yorkshire", "want": "Crinoid stems, close up" },
-          { "t": "Shark tooth", "d": "Small, glossy and pointed.", "where": "Herne Bay, Kent", "want": "Shark teeth on a fingertip" },
-          { "t": "Dinosaur footprint", "d": "Prints set in the rock ledges; bone fragments too.", "where": "Isle of Wight", "want": "A three-toed print in a ledge at low tide" }
+          {
+            "t": "Ammonite",
+            "d": "A spiral shell.",
+            "where": "Jurassic Coast, Yorkshire",
+            "want": "A ribbed ammonite in a pebble",
+            "src": "/site/guides/fossil-tile-ammonites-700.jpg",
+            "alt": "A heap of ribbed ammonite fossils"
+          },
+          {
+            "t": "Belemnite",
+            "d": "The bullet-shaped part of a squid-like animal.",
+            "where": "Jurassic Coast, Yorkshire, White Park Bay",
+            "want": "Two amber belemnites on shingle"
+          },
+          {
+            "t": "Devil's toenail",
+            "d": "Gryphaea: a curled ancient oyster.",
+            "where": "Yorkshire, White Park Bay",
+            "want": "A gryphaea in an open hand"
+          },
+          {
+            "t": "Crinoid",
+            "d": "Star-shaped stem pieces of a \"sea lily\".",
+            "where": "Jurassic Coast, Yorkshire",
+            "want": "Crinoid stems, close up"
+          },
+          {
+            "t": "Shark tooth",
+            "d": "Small, glossy and pointed.",
+            "where": "Herne Bay, Kent",
+            "want": "Shark teeth on a fingertip",
+            "src": "/site/guides/fossil-tile-shark-teeth-700.jpg",
+            "alt": "Fossil shark teeth of many sizes laid out on a dark surface"
+          },
+          {
+            "t": "Dinosaur footprint",
+            "d": "Prints set in the rock ledges; bone fragments too.",
+            "where": "Isle of Wight",
+            "want": "A three-toed print in a ledge at low tide"
+          }
         ],
-        "p2": ["To spot them, walk the high-tide line, where finds collect, and look for stones with an odd shape, a ridge or a pattern. Many fossils sit inside rounded pebbles."]
+        "p2": [
+          "To spot them, walk the high-tide line, where finds collect, and look for stones with an odd shape, a ridge or a pattern. Many fossils sit inside rounded pebbles."
+        ]
       },
       {
-        "id": "staying-safe", "img": "A walker on the beach well back from the cliff base, tide going out", "h2": "Staying safe",
-        "p": ["The sea and the cliffs are the two dangers, and both are easy to avoid if you plan."],
+        "id": "staying-safe",
+        "img": "A walker on the beach well back from the cliff base, tide going out",
+        "h2": "Staying safe",
+        "p": [
+          "The sea and the cliffs are the two dangers, and both are easy to avoid if you plan."
+        ],
         "list": [
-          { "t": "Know when the tide turns", "d": "Go on a falling tide. The sea comes in fast and can cut you off." },
-          { "t": "Stay away from the cliffs", "d": "Keep well clear of the cliff base and of mudflows. Rockfalls and landslips happen without warning, especially after bad weather." },
-          { "t": "Tell someone", "d": "Say where you're going and when you'll be back. Phone signal is patchy on many beaches." },
-          { "t": "Protect your eyes", "d": "Wear safety glasses if you split stones with a hammer." }
+          {
+            "t": "Know when the tide turns",
+            "d": "Go on a falling tide. The sea comes in fast and can cut you off."
+          },
+          {
+            "t": "Stay away from the cliffs",
+            "d": "Keep well clear of the cliff base and of mudflows. Rockfalls and landslips happen without warning, especially after bad weather."
+          },
+          {
+            "t": "Tell someone",
+            "d": "Say where you're going and when you'll be back. Phone signal is patchy on many beaches."
+          },
+          {
+            "t": "Protect your eyes",
+            "d": "Wear safety glasses if you split stones with a hammer."
+          }
         ],
-        "note": { "t": "If someone is in trouble on the coast,", "d": "call 999 and ask for the Coastguard." }
+        "note": {
+          "t": "If someone is in trouble on the coast,",
+          "d": "call 999 and ask for the Coastguard."
+        },
+        "photos": [
+          {
+            "src": "/site/guides/fossil-durdle-door-1400.jpg",
+            "alt": "Durdle Door's limestone arch above a quiet beach on the Jurassic Coast"
+          }
+        ]
       },
       {
-        "id": "the-rules", "img": "Fossils lying loose on the shingle below the cliffs", "h2": "The rules",
-        "p": ["Collecting is allowed on most UK beaches, within a few rules."],
+        "id": "the-rules",
+        "img": "Fossils lying loose on the shingle below the cliffs",
+        "h2": "The rules",
+        "p": [
+          "Collecting is allowed on most UK beaches, within a few rules."
+        ],
         "steps": [
-          { "t": "Collect loose material from the beach", "d": "Not from the cliffs. Never dig or hammer into a cliff." },
-          { "t": "Check for protected sites", "d": "Some sites are Sites of Special Scientific Interest, where collecting is restricted. Check before you go." },
-          { "t": "In West Dorset, follow the Fossil Collecting Code", "d": "It applies between Lyme Regis and Burton Bradstock. Report important finds to the Charmouth Heritage Coast Centre, and offer important specimens to a UK museum before selling them." },
-          { "t": "In Scotland, follow the Scottish Fossil Code", "d": "Scotland has its own code for collecting." }
+          {
+            "t": "Collect loose material from the beach",
+            "d": "Not from the cliffs. Never dig or hammer into a cliff."
+          },
+          {
+            "t": "Check for protected sites",
+            "d": "Some sites are Sites of Special Scientific Interest, where collecting is restricted. Check before you go."
+          },
+          {
+            "t": "In West Dorset, follow the Fossil Collecting Code",
+            "d": "It applies between Lyme Regis and Burton Bradstock. Report important finds to the Charmouth Heritage Coast Centre, and offer important specimens to a UK museum before selling them."
+          },
+          {
+            "t": "In Scotland, follow the Scottish Fossil Code",
+            "d": "Scotland has its own code for collecting."
+          }
         ]
       },
       {
-        "id": "what-to-bring", "img": "Boots, a hand lens, a tide table and finds wrapped in kitchen paper, laid out", "h2": "What to bring",
-        "p": ["Nothing specialist, unless you want to split stones."],
+        "id": "what-to-bring",
+        "img": "Boots, a hand lens, a tide table and finds wrapped in kitchen paper, laid out",
+        "h2": "What to bring",
+        "p": [
+          "Nothing specialist, unless you want to split stones."
+        ],
         "list": [
-          { "t": "Sturdy boots", "d": "Shingle and weedy rock ledges are hard going in trainers." },
-          { "t": "A tide table or app", "d": "For that beach, checked before you set off." },
-          { "t": "A charged phone", "d": "For the tide, photos of finds, and emergencies." },
-          { "t": "A bag and kitchen paper", "d": "To wrap finds so they don't knock together." },
-          { "t": "A geological hammer and safety glasses", "d": "Only if you want to split stones, and only on loose pebbles." }
+          {
+            "t": "Sturdy boots",
+            "d": "Shingle and weedy rock ledges are hard going in trainers."
+          },
+          {
+            "t": "A tide table or app",
+            "d": "For that beach, checked before you set off."
+          },
+          {
+            "t": "A charged phone",
+            "d": "For the tide, photos of finds, and emergencies."
+          },
+          {
+            "t": "A bag and kitchen paper",
+            "d": "To wrap finds so they don't knock together."
+          },
+          {
+            "t": "A geological hammer and safety glasses",
+            "d": "Only if you want to split stones, and only on loose pebbles."
+          }
+        ],
+        "photos": [
+          {
+            "src": "/site/guides/fossil-tools-1400.jpg",
+            "alt": "Digging tools and a trowel lying on excavated ground"
+          }
         ]
       },
       {
-        "id": "with-children", "img": "An adult and a child from behind, crouched over the shingle (no faces)", "h2": "Fossil hunting with children",
-        "p": ["It's one of the best days out for children: free, outdoors, and every child can find something.", "On the Jurassic Coast, the guided walks run by Lyme Regis Museum and the Charmouth Heritage Coast Centre are the best way to start. The guides show you where to look and identify what you find."],
-        "note": { "t": "Two rules.", "d": "Keep children away from the bottom of the cliffs, and hold hands near the water's edge." }
+        "id": "with-children",
+        "img": "An adult and a child from behind, crouched over the shingle (no faces)",
+        "h2": "Fossil hunting with children",
+        "p": [
+          "It's one of the best days out for children: free, outdoors, and every child can find something.",
+          "On the Jurassic Coast, the guided walks run by Lyme Regis Museum and the Charmouth Heritage Coast Centre are the best way to start. The guides show you where to look and identify what you find."
+        ],
+        "note": {
+          "t": "Two rules.",
+          "d": "Keep children away from the bottom of the cliffs, and hold hands near the water's edge."
+        }
       },
       {
-        "id": "going-further", "img": "A heritage centre volunteer identifying a find for a visitor", "h2": "Going further",
-        "p": ["Once you've found a few, it's easy to go deeper."],
+        "id": "going-further",
+        "img": "A heritage centre volunteer identifying a find for a visitor",
+        "h2": "Going further",
+        "p": [
+          "Once you've found a few, it's easy to go deeper."
+        ],
         "list": [
-          { "t": "Get finds identified", "d": "At the Charmouth Heritage Coast Centre and local museums." },
-          { "t": "Clubs", "d": "Local geology groups, and the Geologists' Association, run field trips." },
-          { "t": "Festivals", "d": "Lyme Regis Fossil Festival.", "chk": true }
+          {
+            "t": "Get finds identified",
+            "d": "At the Charmouth Heritage Coast Centre and local museums."
+          },
+          {
+            "t": "Clubs",
+            "d": "Local geology groups, and the Geologists' Association, run field trips."
+          },
+          {
+            "t": "Festivals",
+            "d": "Lyme Regis Fossil Festival.",
+            "chk": true
+          }
         ]
       }
     ],
     "placesH2": "Places to see them",
     "places": [
-      { "n": "Lyme Regis Museum", "where": "Lyme Regis, Dorset", "what": "Fossils from the Jurassic Coast, and guided fossil walks", "src": "Wikidata", "confirm": true },
-      { "n": "Charmouth Heritage Coast Centre", "where": "Charmouth, Dorset", "what": "Fossil displays, help identifying finds, and guided walks", "src": "Wikidata", "confirm": true },
-      { "n": "Dinosaur Isle", "where": "Sandown, Isle of Wight", "what": "A museum of the island's dinosaurs and fossils", "src": "Wikidata", "confirm": true }
+      {
+        "n": "Lyme Regis Museum",
+        "where": "Lyme Regis, Dorset",
+        "what": "Fossils from the Jurassic Coast, and guided fossil walks",
+        "src": "Wikidata",
+        "confirm": true
+      },
+      {
+        "n": "Charmouth Heritage Coast Centre",
+        "where": "Charmouth, Dorset",
+        "what": "Fossil displays, help identifying finds, and guided walks",
+        "src": "Wikidata",
+        "confirm": true
+      },
+      {
+        "n": "Dinosaur Isle",
+        "where": "Sandown, Isle of Wight",
+        "what": "A museum of the island's dinosaurs and fossils",
+        "src": "Wikidata",
+        "confirm": true
+      }
     ],
     "soonH2": "Fossil hunting on Epic: coming soon",
     "soonLine": "Local guides are joining Epic. Tell us where you are and we'll let you know when walks start near you.",
@@ -251,13 +764,34 @@
     "hostP": "Lead a walk on one tide, every Saturday, or whenever a family asks. Set your dates and group size; people book through Epic.",
     "faqH2": "Fossil hunting: questions",
     "faqs": [
-      ["Where is the best place to find fossils in the UK?", "The Jurassic Coast in Dorset and East Devon, especially Charmouth and Lyme Regis. The Yorkshire coast around Robin Hood's Bay and the Isle of Wight are close behind."],
-      ["When is the best time to go fossil hunting?", "In winter, after storms, on a falling tide. Storms bring down the cliffs and wash new fossils onto the beach, and a falling tide gives you the most beach for the longest time."],
-      ["Can I keep what I find?", "On most UK beaches, yes, if it was lying loose. Some sites are protected and restrict collecting. In West Dorset, the Fossil Collecting Code asks you to report important finds."],
-      ["Do I need a hammer?", "No. Most finds are loose on the beach. If you split pebbles, use a geological hammer and safety glasses, and never hammer the cliffs."],
-      ["Is fossil hunting safe for children?", "Yes, if you check the tide, stay away from the bottom of the cliffs and hold hands near the water. A guided walk is an easy first trip."],
-      ["What does a fossil look like on a beach?", "Look for stones with an odd shape, a ridge or a pattern: a spiral, a bullet shape, a star. Walk the high-tide line, where finds collect. Many fossils sit inside rounded pebbles."],
-      ["What should I do if I find something big?", "Leave it where it is, take photos and note exactly where it is. On the Jurassic Coast, tell the Charmouth Heritage Coast Centre; elsewhere, a local museum."]
+      [
+        "Where is the best place to find fossils in the UK?",
+        "The Jurassic Coast in Dorset and East Devon, especially Charmouth and Lyme Regis. The Yorkshire coast around Robin Hood's Bay and the Isle of Wight are close behind."
+      ],
+      [
+        "When is the best time to go fossil hunting?",
+        "In winter, after storms, on a falling tide. Storms bring down the cliffs and wash new fossils onto the beach, and a falling tide gives you the most beach for the longest time."
+      ],
+      [
+        "Can I keep what I find?",
+        "On most UK beaches, yes, if it was lying loose. Some sites are protected and restrict collecting. In West Dorset, the Fossil Collecting Code asks you to report important finds."
+      ],
+      [
+        "Do I need a hammer?",
+        "No. Most finds are loose on the beach. If you split pebbles, use a geological hammer and safety glasses, and never hammer the cliffs."
+      ],
+      [
+        "Is fossil hunting safe for children?",
+        "Yes, if you check the tide, stay away from the bottom of the cliffs and hold hands near the water. A guided walk is an easy first trip."
+      ],
+      [
+        "What does a fossil look like on a beach?",
+        "Look for stones with an odd shape, a ridge or a pattern: a spiral, a bullet shape, a star. Walk the high-tide line, where finds collect. Many fossils sit inside rounded pebbles."
+      ],
+      [
+        "What should I do if I find something big?",
+        "Leave it where it is, take photos and note exactly where it is. On the Jurassic Coast, tell the Charmouth Heritage Coast Centre; elsewhere, a local museum."
+      ]
     ],
     "reviewed": "2026-10-03"
   }

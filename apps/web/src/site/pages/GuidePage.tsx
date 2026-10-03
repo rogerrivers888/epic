@@ -16,7 +16,8 @@
  * below is the same sum, so the page reflows between the two drawn widths.
  */
 import React, { useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, Text, View, type TextStyle, type ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, type TextStyle, type ViewStyle } from 'react-native';
+import { GuidePicture } from '../GuidePicture';
 import Svg, { Path } from 'react-native-svg';
 import { CREAM, HAIRLINE, INACTIVE, INK, INK_HOVER, INK_MUTED, LIME, LIME_TINT, MOSS, MUTED, ON_INK_MUTED, fonts } from '../../theme';
 import { useViewport } from '../../hooks/useViewport';
@@ -103,8 +104,8 @@ export function GuidePage({ locale, guide: slug }: { locale: SiteLocale; guide: 
           // The tag and the brief in the flow, not pinned: in a 127px phone cell the tag
           // wraps, and the cell grows rather than letting the two overlap.
           <View key={i} style={[s.stripCell, { minHeight: fluid(130, 22, 300) }]}>
-            {p.src ? <Image source={{ uri: p.src }} accessibilityLabel={p.alt} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
-            <Text style={s.stripTag}>{p.tag}</Text>
+            {p.src ? <GuidePicture src={p.src} alt={p.alt ?? ''} eager /> : null}
+            {p.tag && !p.src ? <Text style={s.stripTag}>{p.tag}</Text> : null}
             {p.src ? null : <Text style={[s.stripBrief, { fontSize: fluid(12, 1.2, 15), lineHeight: fluid(12, 1.2, 15) * 1.3 }]}>{p.want}</Text>}
           </View>
         ))}
@@ -211,7 +212,16 @@ function Section({ b, n, width, phone, fluid, published }: { b: GuideBlock; n: s
     <View nativeID={b.id} style={[s.block, { paddingTop: fluid(24, 2.6, 32), paddingBottom: fluid(40, 4.4, 56) }, web && ({ scrollMarginTop: 12 } as object)]}>
       <Text style={s.blockN}>{n}</Text>
       <SiteH2 style={[s.h2, { marginTop: -8, fontSize: h2, letterSpacing: -0.04 * h2, lineHeight: h2 }]}>{b.h2}</SiteH2>
-      {b.img ? (
+      {b.photos?.length ? (
+        // A licensed photo fills the frame the brief drew; two share it, 4px apart, as the strip does.
+        <View style={[s.slot, { height: fluid(220, 30, 380), flexDirection: 'row', gap: 4, backgroundColor: 'transparent' }]}>
+          {b.photos.map((ph) => (
+            <View key={ph.src} style={{ flex: 1, minWidth: 0, backgroundColor: SLOT, overflow: 'hidden', position: 'relative' }}>
+              <GuidePicture src={ph.src} alt={ph.alt} />
+            </View>
+          ))}
+        </View>
+      ) : b.img ? (
         <View style={[s.slot, { height: fluid(220, 30, 380) }]}>
           <Text style={[s.slotBrief, { fontSize: fluid(14, 1.3, 16), lineHeight: fluid(14, 1.3, 16) * 1.35, left: 16, right: 16, bottom: 16, maxWidth: chBold(52, fluid(14, 1.3, 16)) }]}>{b.img}</Text>
           <Text style={[s.slotTag, { left: 16, top: 16 }]}>Photo to license</Text>
@@ -224,8 +234,12 @@ function Section({ b, n, width, phone, fluid, published }: { b: GuideBlock; n: s
           {b.tiles.map((x) => (
             <View key={x.t} style={{ flexGrow: 1, backgroundColor: INACTIVE }}>
               <View style={[s.slot, { aspectRatio: 4 / 3 }]}>
-                <Text style={[s.slotBrief, { fontSize: 13, lineHeight: 13 * 1.3, left: 12, right: 12, bottom: 12 }]}>{x.want}</Text>
-                <Text style={[s.slotTag, { fontSize: 10.5, lineHeight: 10.5 * LH }]}>Photo to license</Text>
+                {x.src ? <GuidePicture src={x.src} alt={x.alt ?? ''} /> : (
+                  <>
+                    <Text style={[s.slotBrief, { fontSize: 13, lineHeight: 13 * 1.3, left: 12, right: 12, bottom: 12 }]}>{x.want}</Text>
+                    <Text style={[s.slotTag, { fontSize: 10.5, lineHeight: 10.5 * LH }]}>Photo to license</Text>
+                  </>
+                )}
               </View>
               <View style={s.tileText}>
                 <Text style={s.tileT} {...(web ? ({ role: 'heading', 'aria-level': 3 } as object) : {})}>{x.t}</Text>
