@@ -73,7 +73,8 @@ async function ask(path, fetchImpl) {
     return body?.result ?? null;
   } catch (err) {
     if (!written) {
-      noteFault(meter, err?.name === 'TimeoutError' ? 'timeout' : res ? 'bad_body' : 'network');
+      // The signal's expiry arrives as TimeoutError, or as AbortError once a body is being read.
+      noteFault(meter, err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : res ? 'bad_body' : 'network');
       await write();
     }
     throw err;
