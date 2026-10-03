@@ -80,8 +80,11 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
         if (!stripe.current || !card.current) { toast.show('Add your card'); return; }
         let out = await confirmWithCard(stripe.current, r.pay.clientSecret, card.current);
         if (out.state === 'bank') out = await finishWithBank(stripe.current, r.pay.clientSecret);
+        // Still with the bank: the booking page says where it stands, never "You're booked" before it is.
+        if (out.state === 'processing') { navigate(paths.booking(r.booking.id), { replace: true }); return; }
         if (out.state !== 'paid') { toast.show(out.state === 'bank' ? 'Approve it in your banking app, then try again' : out.message); return; }
-        await api.guestPaid(r.booking.id, out.paymentIntent).catch(() => null);
+        const paid = await api.guestPaid(r.booking.id, out.paymentIntent).catch(() => null);
+        if (!paid || paid.state !== 'confirmed') { navigate(paths.booking(r.booking.id), { replace: true }); return; }
       }
       if (r.booking) navigate(withQuery(paths.booking(r.booking.id), { done: '1' }), { replace: true });
       else toast.show(`${host} knows you’re coming`);
