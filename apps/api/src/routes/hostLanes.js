@@ -1133,14 +1133,24 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
  * person (Safety › Stripe account trouble) and the payment problems log takes the history. Nothing goes to the host.
  */
 export async function applyAccountFacts(hostId, patchOrRead) {
+  // Given a read, Stripe is asked first — never while a database connection is held, since the read's own metering
+  // needs one (Codex, 3 Oct 2026) — and the read is stamped with when it began. Under the host row's lock it is then
+  // stored only if no read that began later has been stored already, so overlapping deliveries can't put an older
+  // view back over a newer one.
+  const readAt = Date.now();
+  const read = typeof patchOrRead === 'function' ? await patchOrRead() : patchOrRead;
   return withTransaction(async (c) => {
     const { rows: [was] } = await c.query('select * from hosts where id = $1 for update', [hostId]);
     if (!was) return null;
-    // Given a read, Stripe is asked while the host's row is held, so two overlapping deliveries apply in the order
-    // they read and an older read can never land after a newer one (Codex, 3 Oct 2026).
-    const patch = typeof patchOrRead === 'function' ? await patchOrRead(was) : patchOrRead;
-    const before = stripe.accountTrouble(was.stripe_requirements);
-    const now = stripe.accountTrouble(patch.stripeRequirements ?? was.stripe_requirements);
+    const prev = was.stripe_requirements ?? {};
+    if (typeof patchOrRead === 'function' && Number(prev.readAt ?? 0) > readAt) return was;
+    // Once sign-up was finished it stays finished for the trouble watch: Stripe un-marks it when new requirements go
+    // overdue, which is exactly the account the watch must keep showing (Codex, 3 Oct 2026).
+    const patch = read.stripeRequirements
+      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted), ...(typeof patchOrRead === 'function' ? { readAt } : {}) } }
+      : read;
+    const before = stripe.accountTrouble(prev);
+    const now = stripe.accountTrouble(patch.stripeRequirements ?? prev);
     const updated = await repo.updateHost(hostId, patch, c);
     if ((before?.reason ?? null) !== (now?.reason ?? null)) {
       await hostingSettings.logChange({

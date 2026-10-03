@@ -777,3 +777,26 @@ test('L15: Stripe disabling or closing a host’s account is written down when i
   const after = await repo.hostById(host.id);
   assert.deepEqual([after.stripe_charges_enabled, after.stripe_payouts_enabled], [false, false]);
 });
+
+test('Codex: overlapping account reads apply in the order they began, and an account that finished sign-up stays watched', async () => {
+  const stripe = await import('../src/sources/stripe.js');
+  const { applyAccountFacts } = await import('../src/routes/hostLanes.js');
+  const { household: h } = await aHousehold(query);
+  const host = await repo.insertHost(h.id, { name: 'Overlap' });
+  await repo.updateHost(host.id, { stripeAccountId: 'acct_overlap', stripeAccountModel: 'v2' });
+  const acct = (reason) => ({ id: 'acct_overlap', details_submitted: true, charges_enabled: !reason, payouts_enabled: !reason, settings: { payouts: { schedule: { interval: 'manual' } } }, capabilities: { card_payments: reason ? 'inactive' : 'active', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: reason } });
+  // The first read begins, and is slow (an older view: under review); a second begins later and lands first (well).
+  const slow = applyAccountFacts(host.id, async () => { await new Promise((r) => setTimeout(r, 80)); return stripe.hostPatchFromAccount(acct('under_review')); });
+  await new Promise((r) => setTimeout(r, 10));
+  await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(acct(null)));
+  await slow;
+  const now = await repo.hostById(host.id);
+  assert.equal(now.stripe_requirements.disabledReason, null, 'the older view never lands over the newer');
+  assert.equal(stripe.accountTrouble(now.stripe_requirements), null);
+  // Stripe un-marks sign-up when new requirements go overdue: the account is still watched, and shows.
+  const overdue = { ...acct('requirements.past_due'), details_submitted: false };
+  await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(overdue));
+  const later = await repo.hostById(host.id);
+  assert.equal(later.stripe_requirements.everSubmitted, true);
+  assert.equal(stripe.accountTrouble(later.stripe_requirements)?.reason, 'requirements.past_due');
+});

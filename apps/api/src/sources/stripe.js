@@ -298,8 +298,9 @@ export function accountTrouble(facts) {
             : why === 'platform_paused' ? 'The account is paused.' : 'Stripe disabled the account.';
     return { reason: why, words };
   }
-  // Sign-up finished, and since then Stripe has turned something off.
-  if (r.detailsSubmitted) {
+  // Sign-up finished (now, or ever — Stripe un-marks it when new requirements go overdue), and since then Stripe has
+  // turned something off.
+  if (r.detailsSubmitted || r.everSubmitted) {
     const off = Object.entries(r.capabilities ?? {}).filter(([, v]) => v === 'inactive').map(([k]) => k);
     if (why || off.length) return { reason: why ?? `inactive:${off.join(',')}`, words: why ? `Stripe disabled the account (${why.replace(/[._]/g, ' ')}).` : `Stripe switched off ${off.map((k) => (k === 'card_payments' ? 'card payments' : 'transfers')).join(' and ')}.` };
   }
