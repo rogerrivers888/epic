@@ -44,7 +44,7 @@ import {
   opensPrivately, readsLikeCommentary, reviewPublishOn, seriesDates, standing, stepsFor, takingsAt, ymd,
   outstandingFrom,
 } from '../domain/hosting.js';
-import { feeForBooking, feesForPeriod, introState, LEVEL_RATE, LEVEL_LABEL, LINK_RATE, MIN_FEE_PENCE, TRUSTED_THRESHOLDS } from '../domain/hostFees.js';
+import { feesForPeriod, introState } from '../domain/hostFees.js';
 import * as skills from '../repositories/hostSkills.js';
 import { FACET_CAP, TAG_CAP, categoryForPassion, categoryFrom, credentialDisplay } from '../domain/hostSkills.js';
 import { pdfText } from '../sources/menuRead.js';
@@ -488,107 +488,8 @@ router.delete('/host', async (req, res, next) => {
 // The payout-account switch (POST /api/host/payout-accounts/:id/activate) is gone: a host never changes where or
 // when they are paid through Epic — Stripe holds their bank and Epic sets the timing (register L3; owner, 3 Oct 2026).
 
-/**
- * Every fee shown on the Money screen comes from one place (SX14): the host's
- * level, the 0% intro and the host's own links, through the fee engine. A
- * booking is resolved to its own `{ amountPence, level, viaHostLink, intro }`
- * and `feesForPeriod` groups the lines.
- *
- * Epic has no payment provider yet, so nothing has been *paid*: every booking
- * is `recorded`. The screen says so (SX9 next-payout, SX18 history) rather than
- * inventing a £0 payout — but the fee the host would pay is real arithmetic and
- * is shown, the same figure the publish estimate already shows.
- */
-router.get('/host/money', async (req, res, next) => {
-  try {
-    const { host } = await myHost();
-    if (!host) throw refuse(404, 'not_a_host', 'You are not hosting yet.');
-    const ready = paymentsConfig().ready;
-    const offers = await repo.offersOfHost(host.id);
-    const bookings = await repo.bookingsOfOffers(offers.map((o) => o.id));
-    // Only fee-bearing bookings: a waitlisted request holds no place and earns
-    // nothing, and a pending one is still undecided — neither belongs in the
-    // money totals nor consumes one of the first-ten intro positions (Codex).
-    const live = bookings.filter((b) => b.state === 'confirmed' || b.state === 'attended');
-    // Each booking is priced by the terms in force WHEN IT WAS MADE, not a single
-    // current snapshot — otherwise the intro ending (ten bookings or 90 days)
-    // retroactively re-charges the 0% bookings (Codex). So walk the host's
-    // bookings oldest-first: the i-th booking is intro iff it was inside the
-    // first 90 days AND among the first ten.
-    // The position in the ten is the booking's stamped `intro_ordinal` (migration
-    // 332), fixed when it first held a place and kept through a cancellation —
-    // so cancelling an early booking never slides a later one into the 0%
-    // (Codex, 2 Oct 2026).
-    const introById = new Map();
-    for (const b of live) {
-      introById.set(b.id, introState({ hostStartedAt: host.created_at, bookingsSoFar: introPositionsBefore(b, bookings), now: new Date(b.created_at) }));
-    }
-    // The level in force when the booking first held a place (fee_level,
-    // migration 356), so a host moving up never re-prices what they earned
-    // before (Codex, 2 Oct 2026); a row stamped before that column falls back
-    // to the host's level today.
-    const resolve = (b) => ({ amountPence: b.amount_pence ?? 0, level: b.fee_level ?? host.trust, viaHostLink: Boolean(b.via_host_link), intro: introById.get(b.id) ?? null });
-    // The host-wide figures the screen shows directly. The intro ladder counts
-    // bookings MADE (a confirmed booking consumes an intro position whenever
-    // its date is, matching the per-booking pricing above); the Trusted ladder
-    // counts experiences RUN — distinct past dates, because several guests on
-    // one future date are nobody's track record yet (Codex, 1 Oct 2026).
-    const bookingsSoFar = introPositionsUsed(bookings);
-    const intro = introState({ hostStartedAt: host.created_at, bookingsSoFar });
-    const today = ymd(new Date());
-    const done = live.filter((b) => (lastDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) < today);
-    const completed = new Set(done.map((b) => `${b.offer_id}|${JSON.stringify(b.occurrence ?? null)}`)).size;
-    const all = feesForPeriod(live.map(resolve));
-    // Per-offer money is PAST dates only: its one reader is the Past tab's
-    // money block, which must agree with the past-dates table beside it
-    // (Codex, 1 Oct 2026). The all-time figures live in `totals`.
-    // A whole-run booking on a series counts here once its first session has
-    // passed — the table beside it lists the elapsed sessions and attributes
-    // the booking's money to the first — not only after the last (Codex,
-    // 2 Oct 2026). The Trusted count above still waits for a run to finish.
-    const pastForMoney = live.filter((b) => (occurrenceDate(offers.find((o) => o.id === b.offer_id), b.occurrence) ?? today) < today);
-    const byOffer = {};
-    for (const o of offers) {
-      const mine = pastForMoney.filter((b) => b.offer_id === o.id);
-      byOffer[o.id] = feesForPeriod(mine.map(resolve));
-    }
-    const payoutAccounts = (await repo.payoutAccountsOf(host.id)).map(payoutAccountPayload);
-    const activeAccount = payoutAccounts.find((a) => a.isActive) ?? null;
-    const thisYear = new Date().getFullYear();
-
-    res.json({
-      paymentsReady: ready, note: paymentsConfig().note,
-      level: host.trust, levelLabel: LEVEL_LABEL[host.trust] ?? LEVEL_LABEL.verified,
-      feeRate: LEVEL_RATE[host.trust] ?? LEVEL_RATE.verified, linkRate: LINK_RATE, minFeePence: MIN_FEE_PENCE,
-      intro: { active: intro.active, bookingsLeft: intro.bookingsLeft, daysLeft: intro.daysLeft },
-      // SX9: a next payout only when there is a provider to pay it; otherwise the note.
-      nextPayout: null,
-      paySchedule: host.pay_schedule ?? 'weekly',
-      payoutAccounts, activeAccount,
-      // SX14 ladder: a line per level, "you are here" on the host's own.
-      ladder: ['verified', 'checked', 'trusted'].map((lvl) => ({ level: lvl, label: LEVEL_LABEL[lvl], feeRate: LEVEL_RATE[lvl], keep: 100 - LEVEL_RATE[lvl], here: host.trust === lvl })),
-      trusted: {
-        completed, completedNeeded: TRUSTED_THRESHOLDS.completedExperiences,
-        ratingAtLeast: TRUSTED_THRESHOLDS.ratingAtLeast, ratingWindow: TRUSTED_THRESHOLDS.ratingWindow,
-      },
-      // SX18: real payouts need paid bookings; there are none, so the list is empty and honest.
-      history: [],
-      // SX20: calendar years. The current one is "Ready in January"; earlier ones
-      // would carry a statement once a year has closed under a real provider.
-      statements: [{ year: thisYear, feeLabel: `${LEVEL_RATE[host.trust] ?? LEVEL_RATE.verified}% · ${LEVEL_LABEL[host.trust] ?? LEVEL_LABEL.verified}`, netPence: null, ready: false }],
-      tax: {
-        // The legal name and tax address fall back to the profile for DISPLAY
-        // only; an edit writes the dedicated columns, never the profile.
-        legalName: host.legal_name ?? host.name, address: host.tax_address ?? host.address ?? null,
-        taxReference: host.tax_reference ? `••••${String(host.tax_reference).slice(-3)}` : null,
-        dateOfBirth: host.date_of_birth ?? null, taxIsCompany: host.tax_is_company ?? false, companyNumber: host.company_number ?? null,
-      },
-      // SX9 totals and SX13b per-offer.
-      totals: { grossPence: all.grossPence, feePence: all.feePence, netPence: all.netPence, lines: all.lines },
-      byOffer,
-    });
-  } catch (err) { next(err); }
-});
+// The host's old Money summary (GET /api/host/money) is gone with the old dashboard it served (owner, 3 Oct 2026):
+// a host's earnings are the host desk's, and Epic's money view is the back office's (routes/hostingAdmin.js).
 
 /** A media id is only usable by the household that uploaded it, and only for what it is. */
 async function ownMedia(householdId, id, kind) {

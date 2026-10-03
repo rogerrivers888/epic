@@ -110,38 +110,6 @@ async function hostServer(household, account) {
   return { url: `http://127.0.0.1:${s.address().port}`, close: () => new Promise((r) => s.close(r)) };
 }
 
-test('GET /api/host/money returns the Money screen (intro state defined — not a 500)', async () => {
-  const { household } = await aHousehold(query, 'the money route');
-  const host = await repo.insertHost(household.id, { name: 'Roger', type: 'skill' });
-  // A one-off is dated by its offer: December's is still to come, June's has run.
-  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2026-12-01' });
-  const ran = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2025-06-01' });
-  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000, viaHostLink: true }, null);
-  // A waitlisted request holds no place and earns nothing: it must not appear
-  // in the money totals nor burn one of the first-ten intro positions (Codex).
-  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-03', party: [], heads: 1, state: 'waitlisted', amountPence: 77700 }, null);
-  // One date already run: the only thing the Trusted ladder may count, and the
-  // only money the Past tab's per-offer block may show (Codex, 1 Oct 2026).
-  await repo.insertBooking({ offerId: ran.id, hostId: host.id, householdId: household.id, occurrence: '2025-06-01', party: [], heads: 2, state: 'attended', amountPence: 5000 }, null);
-  const srv = await hostServer(household);
-  try {
-    const r = await fetch(`${srv.url}/api/host/money`);
-    assert.equal(r.status, 200, 'the Money screen must not 500 — the regression Codex caught');
-    const body = await r.json();
-    assert.equal(typeof body.intro?.active, 'boolean', 'host-wide intro state present');
-    assert.ok(Array.isArray(body.totals?.lines) && Array.isArray(body.ladder) && body.ladder.length === 3);
-    // A brand-new host's first booking is inside the 0% intro, which beats even
-    // the 5% link rate — so the line is 0%, proving per-booking intro resolution.
-    assert.ok(body.totals.lines.some((l) => l.rate === 0), 'the new host\'s booking is charged the 0% intro, not the level or link rate');
-    assert.equal(body.totals.grossPence, 15000, 'the waitlisted £777 request is not revenue');
-    // The confirmed December date is still to come: a booking made is not an
-    // experience run, so the ladder counts only the June date.
-    assert.equal(body.trusted.completed, 1, 'only the past date counts toward Epic Trusted');
-    assert.equal(body.byOffer[offer.id].grossPence, 0, "the December offer's Past money is nothing yet");
-    assert.equal(body.byOffer[ran.id].grossPence, 5000, "the Past tab's per-offer money is past dates only");
-  } finally { await srv.close(); }
-});
-
 test('a waitlisted request never blocks leaving: outstanding counts held places only', async () => {
   const offer = { id: 'o1', shape: 'oneoff' };
   const future = '2099-01-01';
@@ -154,51 +122,6 @@ test('a waitlisted request never blocks leaving: outstanding counts held places 
   ]);
   assert.equal(held.blocked, true, 'a confirmed place still blocks');
   assert.equal(held.guests, 2, 'and only the held places are the guests to tell');
-});
-
-test('cancelling an early booking never slides a later one into the 0% intro', async () => {
-  const { household } = await aHousehold(query, 'the fixed ten');
-  const host = await repo.insertHost(household.id, { name: 'Ivo', type: 'skill' });
-  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2099-03-01' });
-  const made = [];
-  for (let i = 0; i < 11; i += 1) {
-    made.push(await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-03-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null));
-  }
-  assert.deepEqual(made.map((b) => b.intro_ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 'each booking is stamped its place in turn as it is made');
-  const srv = await hostServer(household);
-  const money = async () => (await fetch(`${srv.url}/api/host/money`)).json();
-  try {
-    const before = await money();
-    const paidBefore = before.totals.lines.find((l) => l.rate > 0);
-    assert.equal(paidBefore?.count, 1, 'the eleventh pays the level rate');
-    // The second booking is called off. It used a place in the ten; the
-    // eleventh stays outside it, and the intro does not reopen.
-    await repo.updateBooking(made[1].id, { state: 'cancelled', cancelledAt: new Date(), cancelledBy: 'guest' });
-    const after = await money();
-    const paidAfter = after.totals.lines.find((l) => l.rate > 0);
-    assert.equal(paidAfter?.count, 1, 'the eleventh is still charged — never re-priced at 0%');
-    assert.equal(after.intro.bookingsLeft, 0, 'the ten are spent; a cancellation does not give one back');
-  } finally { await srv.close(); }
-  assert.equal(await repo.confirmedBookingsSoFar(host.id), 11, 'the host-wide count reads the stamps, cancelled one included');
-});
-
-test("a host moving up a level never re-prices what they already earned", async () => {
-  const { household } = await aHousehold(query, 'the frozen level');
-  const host = await repo.insertHost(household.id, { name: 'Lia', type: 'skill' });
-  // Past the intro, so the level rate is what applies.
-  await query("update hosts set created_at = now() - interval '200 days', trust = 'verified' where id = $1", [host.id]);
-  const offer = await repo.insertOffer(host.id, 'oneoff', { startsOn: '2099-04-01' });
-  const before = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-04-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
-  assert.equal(before.fee_level, 'verified', 'the level is stamped when the booking first holds a place');
-  await query("update hosts set trust = 'trusted' where id = $1", [host.id]);
-  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2099-04-01', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
-  const srv = await hostServer(household);
-  try {
-    const body = await (await fetch(`${srv.url}/api/host/money`)).json();
-    const rates = body.totals.lines.map((l) => [l.rate, l.count]).sort((a, b) => a[0] - b[0]);
-    assert.deepEqual(rates, [[LEVEL_RATE.trusted, 1], [LEVEL_RATE.verified, 1]],
-      'the earlier booking keeps the Verified rate; only the later one has the Trusted rate');
-  } finally { await srv.close(); }
 });
 
 test("migration 356's back-fill counts a paid-then-cancelled booking, so nobody after it slides into the 0%", async () => {
@@ -256,16 +179,3 @@ test('company reporting is never on without a Companies House number', async () 
   } finally { await srv.close(); }
 });
 
-test("a whole-run series under way shows its money on the Past tab, though the run has not finished", async () => {
-  const { household } = await aHousehold(query, 'the running series');
-  const host = await repo.insertHost(household.id, { name: 'Sam', type: 'skill' });
-  const started = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
-  const offer = await repo.insertOffer(host.id, 'series', { firstDate: started, sessions: 6 });
-  await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: 'whole', party: [], heads: 1, state: 'confirmed', amountPence: 6000 }, null);
-  const srv = await hostServer(household);
-  try {
-    const body = await (await fetch(`${srv.url}/api/host/money`)).json();
-    assert.equal(body.byOffer[offer.id].grossPence, 6000, 'the money sits beside the sessions already held');
-    assert.equal(body.trusted.completed, 0, 'but the run is not yet a completed experience');
-  } finally { await srv.close(); }
-});
