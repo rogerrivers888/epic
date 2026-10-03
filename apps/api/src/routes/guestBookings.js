@@ -228,6 +228,10 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
         totalPence: o.total_pence, nowEach: o.price_mode === 'by_numbers' ? perPersonAt(o.total_pence ?? 0, o.min_count ?? 1) : null,
         groups: { dropIn: o.drop_in_group_pct ? { pct: o.drop_in_group_pct, min: o.drop_in_group_min } : null, bookAhead: o.book_ahead_group_pct ? { pct: o.book_ahead_group_pct, min: o.book_ahead_group_min } : null },
         throughEpic: paidThroughEpic(o),
+        // Paid on the day (L10): said before they say they're coming — the organiser is paid, not Epic, and Epic's
+        // refund policy and guarantee don't cover it.
+        payOnTheDay: o.money === 'direct' && o.price_mode && o.price_mode !== 'free'
+          ? { words: 'You pay the organiser on the day. This isn’t covered by Epic’s refund policy or satisfaction guarantee.' } : null,
       },
       who: { ageMin: o.age_min, ageMax: o.age_max, partyMax: o.party_max, dropOff: o.parents === 'drop_off', adultsOnly: o.age_min != null && o.age_min >= cfg.adultAge },
       questions: o.guest_questions ?? {},

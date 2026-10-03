@@ -346,6 +346,11 @@ export async function moneyTick({ now = new Date() } = {}) {
   // Complaints the host left unanswered for 48 hours and worth no more than the limit are refunded, then sent below.
   await autoRefundComplaints({ now }).catch((err) => console.error(`epic-api: complaint refunds — ${err.message}`));
   await processRefunds();
+  // Pay on the day (L10): Epic's fee on the organiser's card, 24 hours before each session; refused ones again once a
+  // new card is saved.
+  const pod = await import('./payOnTheDay.js');
+  await pod.chargeUpfrontFees({ now }).catch((err) => console.error(`epic-api: pay-on-the-day fees — ${err.message}`));
+  await pod.retryOrganiserFees().catch((err) => console.error(`epic-api: pay-on-the-day retries — ${err.message}`));
   // A chargeback nobody has answered two days before its deadline gets Epic's evidence.
   await sendDueEvidence({ now }).catch((err) => console.error(`epic-api: chargeback evidence — ${err.message}`));
   await refreshAccountFacts().catch((err) => console.error(`epic-api: account facts refresh — ${err.message}`));

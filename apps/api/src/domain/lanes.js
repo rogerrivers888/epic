@@ -559,6 +559,8 @@ export function checklist(offer, { host, account } = {}, cfg = DEFAULT_CONFIG) {
   if (needsChecked(offer, cfg)) push('checked', 'live', checkedHolds(host), { submitted: host?.checked_state === 'submitted' });
   if (epic) push('payouts', 'send', host?.payouts_state === 'ready', { pending: host?.payouts_state === 'pending' });
   if (epic) push('tax', 'payout', has(host?.tax_reference));
+  // Paid on the day (L10): Epic's fee is charged to the organiser's own card, so one is saved before sending.
+  if (offer.money === 'direct' && offer.price_mode && offer.price_mode !== 'free') push('fee_card', 'send', Boolean(host?.fee_payment_method));
   if (pub) push('review', null, false, { info: true });
   return items;
 }
@@ -602,7 +604,7 @@ export function publishAction(offer, items, { isPro = false } = {}, cfg = DEFAUL
 export const CHECK_WORDS = {
   email: 'Add your email.', phone: 'Add your mobile number.', profile: 'Finish your host profile — your name, a photo and your date of birth.',
   verified: 'Verify your identity.', video: 'Add the offer video.', checked: 'Get Checked — DBS, insurance and two references.',
-  payouts: 'Set up payouts.', tax: 'Add your tax details.',
+  payouts: 'Set up payouts.', tax: 'Add your tax details.', fee_card: 'Add a card for Epic’s fee.',
 };
 
 /**

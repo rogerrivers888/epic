@@ -11,7 +11,7 @@
  * earned by rating, not by a count of events, and there is no Premium plan.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../../components/press';
 import { Icon, type IconName } from '../../../components/Icon';
@@ -23,9 +23,10 @@ import { CREAM, INACTIVE, INK, INK_MUTED, LIME_TINT } from '../../../theme';
 import { ActionBar, Field, Kicker, Labelled, Overlay, goToStripe, hx, pointer, tx, v } from './kit';
 import { gbp, type LaneHome, type LaneOffer } from './model';
 import { VideoSheet, pickFiles } from './VideoSheet';
+import { CardBox, confirmWithCard, finishWithBank, loadStripe } from '../../guest/pay';
 
-export type SheetKind = 'profile' | 'phone' | 'payouts' | 'tax' | 'checked' | 'video' | 'verify' | 'charges';
-export const SHEET_KINDS: SheetKind[] = ['profile', 'phone', 'payouts', 'tax', 'checked', 'video', 'verify', 'charges'];
+export type SheetKind = 'profile' | 'phone' | 'payouts' | 'tax' | 'checked' | 'video' | 'verify' | 'charges' | 'fee_card';
+export const SHEET_KINDS: SheetKind[] = ['profile', 'phone', 'payouts', 'tax', 'checked', 'video', 'verify', 'charges', 'fee_card'];
 
 type SheetProps = { offer: LaneOffer; home: LaneHome; onClose: () => void; onChanged: (next?: LaneOffer) => Promise<void> | void };
 
@@ -35,6 +36,7 @@ export function PublishSheet({ kind, ...props }: SheetProps & { kind: string | n
     case 'profile': return <ProfileSheet {...props} />;
     case 'phone': return <PhoneSheet {...props} />;
     case 'payouts': return <PayoutsSheet {...props} />;
+    case 'fee_card': return <FeeCardSheet {...props} />;
     case 'tax': return <TaxSheet {...props} />;
     case 'checked': return <CheckedSheet {...props} />;
     case 'video': return <VideoSheet {...props} />;
@@ -143,6 +145,38 @@ function PayoutsSheet({ offer, home, onClose }: SheetProps) {
     <Overlay title="Payouts" onClose={onClose} footer={<ActionBar label={pending ? 'Carry on with Stripe' : 'Continue to Stripe'} onPress={() => { void go(); }} busy={busy} />}>
       <Text style={tx(15, '700')}>{pending ? 'Stripe is finishing it' : 'Paid out by Stripe'}</Text>
       <GreyNote>Stripe asks for your bank details and keeps them. Epic never sees them.</GreyNote>
+    </Overlay>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A card for Epic's fee — pay on the day (register L10). TEMPORARY until Claude Design's sheet: the card field and
+// one button. A member's membership card is used without asking.
+// ---------------------------------------------------------------------------
+
+function FeeCardSheet({ onClose, onChanged }: SheetProps) {
+  const stripe = useRef<any>(null);
+  const card = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+  const { busy, run } = useSave();
+  useEffect(() => { void loadStripe().then((s) => { stripe.current = s; setReady(Boolean(s)); }); }, []);
+  const save = () => run(async () => {
+    const r = await api.laneFeeCard();
+    if (!r.saved) {
+      if (!stripe.current || !card.current || !r.clientSecret) { showToast('Add your card'); return; }
+      let out = await confirmWithCard(stripe.current, r.clientSecret, card.current);
+      if (out.state === 'bank') out = await finishWithBank(stripe.current, r.clientSecret);
+      if (out.state !== 'paid') { showToast(out.state === 'declined' || out.state === 'failed' ? out.message : 'Approve it in your banking app, then save again'); return; }
+      await api.laneFeeCardSaved();
+    }
+    await onChanged();
+    onClose();
+  });
+  return (
+    <Overlay title="A card for Epic’s fee" onClose={onClose} footer={<ActionBar label="Save card" onPress={() => { void save(); }} busy={busy} />}>
+      <Text style={tx(15, '700')}>Guests pay you on the day</Text>
+      <GreyNote>Epic’s fee goes on this card: up front on who says they’re coming, and topped up after if more came.</GreyNote>
+      {ready ? <CardBox stripe={stripe.current} onReady={(c) => { card.current = c; }} /> : null}
     </Overlay>
   );
 }

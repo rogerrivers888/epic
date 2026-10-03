@@ -46,6 +46,8 @@ export const KINDS = Object.freeze({
   new_review: { audience: 'host', email: false },
   new_tip: { audience: 'host', email: false },
   event_called_off: { audience: 'host', email: true },
+  // Pay on the day (L10): Epic's fee on the organiser's card didn't go through.
+  organiser_fee_failed: { audience: 'host', email: true },
 });
 
 /**

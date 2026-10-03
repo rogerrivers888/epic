@@ -678,6 +678,37 @@ export function acceptDispute(disputeId, { householdId = null } = {}) {
   return call('POST', `/disputes/${encodeURIComponent(disputeId)}/close`, {}, { householdId, purpose: 'dispute.accept', idempotencyKey: `dispute-close-${disputeId}` });
 }
 
+// ---------------------------------------------------------------------------
+// pay on the day (L10): Epic's own fee on the organiser's own card
+//
+// Epic's own revenue (L8), on Epic's own account: no destination, no Connect account — the guests' money never comes
+// near Stripe at all, it is paid to the organiser on the day.
+// ---------------------------------------------------------------------------
+
+/** The organiser's card saved for Epic's fee: a SetupIntent on Epic's account, off-session use agreed. */
+export function organiserCardSetup({ customerId, hostId, householdId }) {
+  if (!/^cus_/.test(String(customerId ?? ''))) throw Object.assign(new Error('There’s no customer to save the card for.'), { status: 500, code: 'no_customer' });
+  return call('POST', '/setup_intents', { customer: customerId, usage: 'off_session', payment_method_types: ['card'], metadata: { epic_kind: 'organiser_card', epic_host_id: hostId, epic_household_id: householdId } },
+    { householdId, purpose: 'pay_on_day.card', idempotencyKey: null });
+}
+
+export function retrieveCustomer(id, { householdId = null } = {}) {
+  return call('GET', `/customers/${encodeURIComponent(id)}`, null, { householdId, purpose: 'pay_on_day.customer.read' });
+}
+
+/** Epic's fee charged to the organiser, off-session, on Epic's own account — never a destination charge. */
+export function organiserFeeBody({ customerId, paymentMethod, amountPence, feeId, offerId, sessionId, kind, householdId }) {
+  return {
+    amount: amountPence, currency: 'gbp', customer: customerId, payment_method: paymentMethod, payment_method_types: ['card'],
+    off_session: true, confirm: true, statement_descriptor_suffix: 'EVENT FEE',
+    metadata: { epic_kind: 'organiser_fee', epic_fee_id: feeId, epic_offer_id: offerId, epic_session_id: sessionId, epic_fee_kind: kind, epic_household_id: householdId },
+  };
+}
+
+export function organiserFeeCharge(args) {
+  return call('POST', '/payment_intents', organiserFeeBody(args), { householdId: args.householdId, purpose: 'pay_on_day.fee', idempotencyKey: `organiser-fee-${args.feeId}` });
+}
+
 export function retrievePaymentIntent(id, { householdId } = {}) {
   return call('GET', `/payment_intents/${encodeURIComponent(id)}`, null, { householdId, purpose: 'booking.read' });
 }

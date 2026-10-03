@@ -149,6 +149,7 @@ export function Publish({ offerId }: { offerId: string }) {
       case 'checked': return it.done || it.submitted ? null : () => openSheet('checked');
       case 'payouts': return it.done ? null : () => openSheet('payouts');
       case 'tax': return () => openSheet('tax');
+      case 'fee_card': return it.done ? null : () => openSheet('fee_card');
       default: return null;
     }
   };

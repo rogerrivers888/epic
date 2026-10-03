@@ -141,7 +141,7 @@ export type GuestQuestions = {
   stay?: { on: boolean; nights: string[]; places: { id: string; name: string; note: string | null }[] };
 };
 export type Cohost = { id?: string; name: string; role: 'cohost' | 'helper'; accountId?: string | null; contactId?: string | null; canEdit: boolean; canMessage: boolean; shownOnPage: boolean; withPhoto: boolean; seesGuests: boolean };
-export type CheckItem = { key: 'email' | 'phone' | 'profile' | 'verified' | 'video' | 'checked' | 'payouts' | 'tax' | 'review'; blocks: 'send' | 'live' | 'payout' | null; done: boolean; optional?: boolean; info?: boolean; pending?: boolean; submitted?: boolean; t: string; s: string };
+export type CheckItem = { key: 'email' | 'phone' | 'profile' | 'verified' | 'video' | 'checked' | 'payouts' | 'tax' | 'review' | 'fee_card'; blocks: 'send' | 'live' | 'payout' | null; done: boolean; optional?: boolean; info?: boolean; pending?: boolean; submitted?: boolean; t: string; s: string };
 
 export type LaneOffer = {
   id: string; lane: HostLane; state: 'draft' | 'in_review' | 'approved' | 'live' | 'paused' | 'ended'; visibility: 'invite' | 'public' | null; money: 'free' | 'direct' | 'epic';

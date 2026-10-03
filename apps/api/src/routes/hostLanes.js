@@ -136,7 +136,7 @@ function hostSheet(host, account) {
     identity: host.identity_state ?? 'none', payouts: host.payouts_state ?? 'none', checked: host.checked_state ?? 'none',
     tax: host.tax_reference ? `••••${String(host.tax_reference).slice(-3)}` : null,
     referees: (host.referees ?? []).map((r) => ({ name: r.name, email: r.email })), dbs: host.dbs_number ? `••••${String(host.dbs_number).slice(-4)}` : null,
-    insurance: Boolean(host.insurance_media_id),
+    insurance: Boolean(host.insurance_media_id), feeCard: Boolean(host.fee_payment_method),
     email: account?.email ?? null, mobile: account?.mobile ?? null,
   };
 }
@@ -150,6 +150,7 @@ const ITEM_WORDS = {
   checked: (h) => ({ t: 'Checked', s: h.checked === 'submitted' ? 'Sent for checking' : 'DBS, insurance, references · for children' }),
   payouts: (h) => ({ t: 'Payouts', s: h.payouts === 'ready' ? 'Paid out by Stripe' : h.payouts === 'pending' ? 'Stripe is finishing it' : 'Bank details · through Stripe' }),
   tax: (h) => ({ t: 'Tax details', s: h.tax ? 'Added' : 'Before your first payout' }),
+  fee_card: (h) => ({ t: 'A card for Epic’s fee', s: h.feeCard ? 'Saved' : 'Guests pay you on the day; Epic’s fee goes on your card' }),
   review: () => ({ t: 'Review', s: 'We reply within 48 hours · sent when you publish' }),
 };
 
@@ -1114,6 +1115,41 @@ async function checkVideo(offer, householdId) {
 }
 
 // ---------------------------------------------------------------------------
+// Pay on the day (L10): the organiser's card for Epic's fee, and how many came
+// ---------------------------------------------------------------------------
+
+router.post('/host/lanes/fee-card', async (req, res, next) => {
+  try {
+    const { household, account, host } = await me();
+    if (!host) throw refuse(404, 'no_host', 'Set up as a host first.');
+    if (!account) throw refuse(401, 'sign_in', 'Sign in as yourself to save a card.');
+    const { startFeeCard } = await import('../sources/payOnTheDay.js');
+    res.json(await startFeeCard({ host, household, account }));
+  } catch (err) { next(err); }
+});
+
+// The browser confirmed the card: read it back from Stripe rather than take its word.
+router.post('/host/lanes/fee-card/saved', async (req, res, next) => {
+  try {
+    const { household, host } = await me();
+    if (!host?.fee_card_setup_intent) throw refuse(409, 'nothing_saved', 'There’s no card being saved.');
+    const { applyOrganiserSetup } = await import('../sources/payOnTheDay.js');
+    await applyOrganiserSetup(await stripe.retrieveSetupIntent(host.fee_card_setup_intent, { householdId: household.id }));
+    const again = await repo.hostById(host.id);
+    res.json({ saved: Boolean(again.fee_payment_method) });
+  } catch (err) { next(err); }
+});
+
+router.post('/host/lanes/sessions/:id/headcount', async (req, res, next) => {
+  try {
+    const { host } = await me();
+    if (!host || !UUID_RE.test(req.params.id)) throw refuse(404, 'not_found', 'That session isn’t yours.');
+    const { confirmHeadcount } = await import('../sources/payOnTheDay.js');
+    res.json(await confirmHeadcount({ sessionId: req.params.id, hostId: host.id, heads: req.body?.heads }));
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
 // Stripe's webhook: a second way to hear what the return trip already asked
 // ---------------------------------------------------------------------------
 
@@ -1255,9 +1291,15 @@ export async function applyStripeEvent(event) {
       // Pro cancelled or lapsed: it stops counting for hosting from now.
       await query("update hosting_payments set state = 'cancelled', updated_at = now() where household_id = $1 and kind = 'pro' and reason = $2 and state = 'succeeded'", [obj.metadata.epic_household_id, `sub:${obj.id}`]);
     } else if (event.type?.startsWith('setup_intent.') && obj.object === 'setup_intent' && obj.id) {
-      // A booking far ahead (L4): the card saved, or not. Read back from Stripe, as a payment is.
-      const { applySetupIntent } = await import('./guestBookings.js');
-      await applySetupIntent(await stripe.retrieveSetupIntent(obj.id, { householdId: obj.metadata?.epic_household_id ?? null }));
+      // A card saved: for a booking far ahead (L4), or an organiser's card for Epic's fee (L10). Read back from Stripe.
+      const si = await stripe.retrieveSetupIntent(obj.id, { householdId: obj.metadata?.epic_household_id ?? null });
+      if (si?.metadata?.epic_kind === 'organiser_card') {
+        const { applyOrganiserSetup } = await import('../sources/payOnTheDay.js');
+        await applyOrganiserSetup(si);
+      } else {
+        const { applySetupIntent } = await import('./guestBookings.js');
+        await applySetupIntent(si);
+      }
     } else if (event.type?.startsWith('payment_intent.') && obj.object === 'payment_intent' && obj.id) {
       // Hosting v4: a guest's booking or tip. Read back from Stripe rather than trusting the event body's state.
       const { applyPaymentIntent } = await import('./guestBookings.js');

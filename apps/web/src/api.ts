@@ -2910,6 +2910,11 @@ export const api = {
   laneTax: (reference: string) => post<{ host: HostSheet }>('/api/host/lanes/tax', { reference }),
   laneChecked: (body: { dbsNumber: string; insuranceMediaId?: string | null; referees: { name: string; email: string }[] }) => post<{ host: HostSheet }>('/api/host/lanes/checked', body),
   lanePayouts: (offerId: string) => post<{ url: string }>('/api/host/lanes/payouts', { offerId }),
+  /** Pay on the day (L10): save the card Epic's fee goes on — a member's membership card at once, otherwise a SetupIntent. */
+  laneFeeCard: () => post<{ saved: boolean; clientSecret?: string; setupIntent?: string }>('/api/host/lanes/fee-card', {}),
+  laneFeeCardSaved: () => post<{ saved: boolean }>('/api/host/lanes/fee-card/saved', {}),
+  /** Pay on the day: how many came, within 48 hours after the session. */
+  laneHeadcount: (sessionId: string, heads: number) => post<{ heads: number; topUpPence: number }>(`/api/host/lanes/sessions/${encodeURIComponent(sessionId)}/headcount`, { heads }),
   // `consent`: the host's yes to the selfie match, which is biometric data; the API refuses the check without it (L7).
   laneVerify: (offerId: string, consent: boolean) => post<{ url: string | null; verified?: boolean; processing?: boolean }>('/api/host/lanes/verify', { offerId, consent }),
   laneSync: (id: string) => post<{ offer: LaneOffer }>(`/api/host/lanes/offers/${id}/sync`, {}),
