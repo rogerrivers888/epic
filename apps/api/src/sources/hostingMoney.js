@@ -199,6 +199,34 @@ export async function reconcile({ days = 3, read = stripe.retrieveRef, status = 
 }
 
 /**
+ * Host accounts whose stored facts predate the account-trouble watch (L15) — no record of whether sign-up was
+ * finished or of each capability — are read back from Stripe, a few a tick, so a host already in trouble shows in
+ * the back office without waiting for Stripe's next word (Codex, 3 Oct 2026). Stops at the first sign Stripe is down.
+ */
+export async function refreshAccountFacts({ limit = 20, status = stripe.stripeStatus, read = stripe.retrieveAccount } = {}) {
+  if (!status().ready) return { skipped: 'stripe_not_ready' };
+  const { rows } = await query(
+    `select id, household_id, stripe_account_id from hosts
+      where stripe_account_model = 'v2' and stripe_account_id is not null
+        and (stripe_requirements is null or not (stripe_requirements ? 'detailsSubmitted'))
+      order by updated_at limit $1`, [limit],
+  );
+  const { applyAccountFacts } = await import('../routes/hostLanes.js');
+  let refreshed = 0;
+  for (const h of rows) {
+    try {
+      const a = await read(h.stripe_account_id, { householdId: h.household_id });
+      await applyAccountFacts(h.id, stripe.hostPatchFromAccount(a));
+      refreshed += 1;
+    } catch (err) {
+      if (err.code === 'stripe_unreachable') break;
+      console.error(`epic-api: account facts for host ${h.id} not refreshed — ${err.code ?? err.message}`);
+    }
+  }
+  return { refreshed };
+}
+
+/**
  * One tick of the hosting money loop: decides-by, refunds owed, payouts every
  * time; the reconciliation once a day; then queued e-mail.
  */
@@ -210,6 +238,7 @@ export async function moneyTick({ now = new Date() } = {}) {
   await warnUnderMinimum({ now });
   await decideDue({ now });
   await processRefunds();
+  await refreshAccountFacts().catch((err) => console.error(`epic-api: account facts refresh — ${err.message}`));
   await schedulePayouts({ now });
   const released = await releasePayouts({ now });
   const last = await ledger.lastReconciliation().catch(() => null);

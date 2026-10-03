@@ -520,3 +520,19 @@ test('Codex: a Payout Stripe made but Epic failed to write down is asked for aga
   assert.deepEqual(keys, [`payout-${p.id}`, `payout-${p.id}`, `payout-${p.id}`]);
   assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'paid');
 });
+
+test('Codex: host accounts stored before the trouble watch are read back from Stripe, so one already in trouble shows at once', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [h] } = await query(
+    `insert into hosts (household_id, name, stripe_account_id, stripe_account_model, stripe_requirements) values ($1, 'Old Facts', 'acct_oldfacts', 'v2', $2::jsonb) returning *`,
+    [household.id, JSON.stringify({ currentlyDue: [], eventuallyDue: [], pastDue: [], disabledReason: 'requirements.past_due' })],
+  );
+  const read = async (id) => ({ id, details_submitted: true, charges_enabled: false, payouts_enabled: false, capabilities: { card_payments: 'inactive', transfers: 'active' }, settings: { payouts: { schedule: { interval: 'manual' } } }, requirements: { currently_due: ['external_account'], eventually_due: [], past_due: ['external_account'], disabled_reason: 'requirements.past_due' } });
+  const out = await money.refreshAccountFacts({ limit: 1000, status: () => ({ ready: true }), read });
+  assert.ok(out.refreshed >= 1);
+  const now = (await query('select stripe_requirements from hosts where id = $1', [h.id])).rows[0].stripe_requirements;
+  assert.equal(now.detailsSubmitted, true);
+  assert.equal((await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'stripe_account_trouble'`, [h.id])).rows[0].after.reason, 'requirements.past_due', 'its trouble written down');
+  const again = await money.refreshAccountFacts({ limit: 1000, status: () => ({ ready: true }), read: async () => { throw new Error('should not be asked again'); } });
+  assert.equal(again.refreshed, 0, 'refreshed once: every account’s facts are whole now');
+});

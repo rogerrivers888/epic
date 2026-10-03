@@ -878,9 +878,7 @@ router.post('/host/lanes/offers/:id/sync', async (req, res, next) => {
         // Back from Stripe's form: transfers asked for too, for an account made before it was known to be needed.
         if (host.stripe_link_made_at) await stripe.ensureTransfers(host.stripe_account_id, { householdId: household.id }).catch(() => null);
         const a = await stripe.retrieveAccount(host.stripe_account_id, { householdId: household.id });
-        const patch = stripe.hostPatchFromAccount(a);
-        await noteAccountTrouble(host, patch.stripeRequirements);
-        host = await repo.updateHost(host.id, patch);
+        host = await applyAccountFacts(host.id, stripe.hostPatchFromAccount(a));
       }
       if (host.identity_session_id && host.identity_state !== 'verified') {
         const s = await stripe.retrieveIdentity(host.identity_session_id, { householdId: household.id });
@@ -1130,18 +1128,26 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
 });
 
 /**
- * Stripe disabling, restricting or closing a host's account (register L15): written to the hosting change log each
- * time it starts or ends, so the back office raises it for a person (Safety › Stripe account trouble) and the payment
- * problems log can take the history. Nothing is sent to the host.
+ * Store what Stripe says about a host's account and, when that starts or ends trouble (register L15), write it to the
+ * hosting change log — in one transaction under the host row's lock, so two deliveries of the same event log it once
+ * and a log that fails takes the update with it, to be retried (Codex, 3 Oct 2026). The back office raises it for a
+ * person (Safety › Stripe account trouble) and the payment problems log takes the history. Nothing goes to the host.
  */
-async function noteAccountTrouble(host, facts) {
-  const was = stripe.accountTrouble(host.stripe_requirements);
-  const now = stripe.accountTrouble(facts);
-  if ((was?.reason ?? null) === (now?.reason ?? null)) return;
-  await hostingSettings.logChange({
-    subjectKind: 'host', subjectId: host.id, field: 'stripe_account_trouble',
-    before: was ? { reason: was.reason } : null, after: now ? { reason: now.reason, words: now.words } : { cleared: true },
-    byLabel: 'stripe',
+export async function applyAccountFacts(hostId, patch) {
+  return withTransaction(async (c) => {
+    const { rows: [was] } = await c.query('select * from hosts where id = $1 for update', [hostId]);
+    if (!was) return null;
+    const before = stripe.accountTrouble(was.stripe_requirements);
+    const now = stripe.accountTrouble(patch.stripeRequirements ?? was.stripe_requirements);
+    const updated = await repo.updateHost(hostId, patch, c);
+    if ((before?.reason ?? null) !== (now?.reason ?? null)) {
+      await hostingSettings.logChange({
+        subjectKind: 'host', subjectId: hostId, field: 'stripe_account_trouble',
+        before: before ? { reason: before.reason } : null, after: now ? { reason: now.reason, words: now.words } : { cleared: true },
+        byLabel: 'stripe',
+      }, c);
+    }
+    return updated;
   });
 }
 
@@ -1151,9 +1157,7 @@ export async function applyStripeEvent(event) {
     if (event.type === 'account.updated' && obj.id) {
       const host = await repo.hostByStripeAccount(obj.id);
       if (host) {
-        const patch = stripe.hostPatchFromAccount(obj);
-        await repo.updateHost(host.id, patch);
-        await noteAccountTrouble(host, patch.stripeRequirements);
+        await applyAccountFacts(host.id, stripe.hostPatchFromAccount(obj));
         // Stripe asking for ID from a host whose check passed is never sent to the host (L7 point 4, owner, 3 Oct
         // 2026): the requirements just stored raise it in the back office for a person (hostingAdmin › host, Safety).
       }
@@ -1161,9 +1165,7 @@ export async function applyStripeEvent(event) {
       // The host's account was disconnected from Epic or closed: nothing more can be charged to it or paid from it (L15).
       const host = await repo.hostByStripeAccount(event.account);
       if (host) {
-        const facts = { ...(host.stripe_requirements ?? {}), disabledReason: 'account_closed' };
-        await repo.updateHost(host.id, { stripeRequirements: facts, stripeChargesEnabled: false, stripePayoutsEnabled: false, payoutsState: 'pending' });
-        await noteAccountTrouble(host, facts);
+        await applyAccountFacts(host.id, { stripeRequirements: { ...(host.stripe_requirements ?? {}), disabledReason: 'account_closed' }, stripeChargesEnabled: false, stripePayoutsEnabled: false, payoutsState: 'pending' });
       }
     } else if ((event.type === 'payout.paid' || event.type === 'payout.failed') && obj.id && typeof event.account === 'string') {
       // A released payout reaching the host's bank, or bouncing: the host's own account's event (Connect endpoint).

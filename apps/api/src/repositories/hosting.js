@@ -91,7 +91,7 @@ const HOST_COLUMNS = {
 const HOST_JSON = { credentials: 'credentials', languages: 'languages', childrenAges: 'children_ages', referees: 'referees', stripeRequirements: 'stripe_requirements' };
 
 /** A PATCH touches only what it names. */
-export async function updateHost(id, patch) {
+export async function updateHost(id, patch, client = null) {
   const sets = [];
   const params = [id];
   for (const [key, column] of Object.entries(HOST_COLUMNS)) {
@@ -100,9 +100,9 @@ export async function updateHost(id, patch) {
   for (const [key, column] of Object.entries(HOST_JSON)) {
     if (patch[key] !== undefined) { params.push(JSON.stringify(patch[key])); sets.push(`${column} = $${params.length}::jsonb`); }
   }
-  if (!sets.length) return hostById(id);
+  if (!sets.length) return client ? (await client.query('select * from hosts where id = $1', [id])).rows[0] : hostById(id);
   sets.push('updated_at = now()');
-  const { rows } = await query(`update hosts set ${sets.join(', ')} where id = $1 returning *`, params);
+  const { rows } = await on(client)(`update hosts set ${sets.join(', ')} where id = $1 returning *`, params);
   return rows[0];
 }
 
