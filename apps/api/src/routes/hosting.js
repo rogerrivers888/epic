@@ -29,7 +29,7 @@ import express, { Router } from 'express';
 import crypto from 'node:crypto';
 import * as repo from '../repositories/hosting.js';
 import * as accountsRepo from '../repositories/accounts.js';
-import { withTransaction } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { runOutsideRequest } from '../context.js';
 import { currentHousehold, loadMembers } from './household.js';
 import { currentAccount } from '../context.js';
@@ -1501,7 +1501,18 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
     await attachSkills([o]);
     const [bookings, rating, evidence] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id), shownEvidence(h.id)]);
     const others = (await repo.offersOfHost(h.id)).filter((x) => x.id !== o.id && x.state === 'live' && x.visibility === 'public').length;
-    res.json({ offer: publicOffer(o, bookings, { host: publicHost(h, rating, { otherOffers: others, credentialsShown: evidence }) }), payments: paymentsConfig() });
+    const offer = publicOffer(o, bookings, { host: publicHost(h, rating, { otherOffers: others, credentialsShown: evidence }) });
+    // A lane event's bookings live in booking_sessions (hosting v4): "Going ahead?" counts from there (Codex, 2 Oct 2026).
+    if (offer.goingAhead) {
+      const { rows: [n] } = await query(
+        `select coalesce(max(heads), 0)::int as booked from (
+           select (select coalesce(sum(b.heads), 0) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+                    where bs.session_id = s.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')) as heads
+             from offer_sessions s where s.offer_id = $1 and s.state = 'scheduled') x`, [o.id],
+      );
+      offer.goingAhead = { ...offer.goingAhead, booked: n.booked };
+    }
+    res.json({ offer, payments: paymentsConfig() });
   } catch (err) { next(err); }
 });
 

@@ -387,7 +387,8 @@ async function book({ offerId, body, household, account, invite = null }) {
 
 /** A booking is on: the guest and the host are told. */
 async function confirmed(b, o, host) {
-  await notifications.notify({ householdId: b.household_id, kind: 'booking_confirmed', title: `You’re booked: ${o.title ?? 'your event'}`, body: 'It’s in your Trips.', link: guestLink(b.id), dedupeKey: `confirmed:${b.id}` }).catch(() => null);
+  const own = await notifications.hostWords(host.id, 'confirmed');
+  await notifications.notify({ householdId: b.household_id, kind: 'booking_confirmed', title: `You’re booked: ${o.title ?? 'your event'}`, body: ['It’s in your Trips.', own].filter(Boolean).join('\n\n'), link: guestLink(b.id), dedupeKey: `confirmed:${b.id}` }).catch(() => null);
   await notifications.notify({ householdId: host.household_id, kind: 'new_booking', title: `New booking: ${o.title ?? 'your event'}`, body: `${b.heads} ${b.heads === 1 ? 'person' : 'people'}`, link: hostLink(o.id), dedupeKey: `new_booking:${b.id}` }).catch(() => null);
 }
 
@@ -974,9 +975,10 @@ router.post('/host/lanes/requests/:id/accept', async (req, res, next) => {
       const end = endMin == null ? null : `${String(Math.floor(endMin / 60) % 24).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
       // Ending at or after midnight ends the next day (Codex, 2 Oct 2026).
       const endsOn = endMin != null && endMin >= 1440 ? plusDays(ymd(b.requested_date), Math.floor(endMin / 1440)) : null;
-      // Never two at once: an accepted slot that overlaps a session already on is refused (Codex, 2 Oct 2026).
+      // Never two at once, across all the host's events, decided one acceptance at a time per host (Codex, 2 Oct 2026).
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${o.host_id}`]);
       const { rows: [clash] } = await c.query(
-        `select 1 from offer_sessions where offer_id = $1 and state = 'scheduled'
+        `select 1 from offer_sessions where offer_id in (select id from host_offers where host_id = (select host_id from host_offers where id = $1)) and state = 'scheduled'
             and (on_date + starts_at) < ($2::date + $3::time) + make_interval(mins => $4::int)
             and (coalesce(ends_on, on_date) + coalesce(ends_at, starts_at)) > ($2::date + $3::time)
           limit 1`,
@@ -1061,7 +1063,7 @@ export async function dropUnpaid({ now = new Date() } = {}) {
 /** The day before: a reminder. The morning after: did it happen, rate it, tip. Once each. */
 export async function guestPrompts({ now = new Date() } = {}) {
   const { rows } = await query(
-    `select b.id, b.household_id, o.title, o.time_zone, s.id as session_id, s.on_date, s.starts_at, s.ends_at, s.ends_on
+    `select b.id, b.household_id, o.title, o.time_zone, o.host_id, s.id as session_id, s.on_date, s.starts_at, s.ends_at, s.ends_on
        from booking_sessions bs join experience_bookings b on b.id = bs.booking_id join offer_sessions s on s.id = bs.session_id join host_offers o on o.id = b.offer_id
       where bs.state = 'booked' and b.state in ('confirmed', 'attended') and s.state in ('scheduled', 'done')
         and s.on_date between current_date - 2 and current_date + 2`,
@@ -1073,13 +1075,13 @@ export async function guestPrompts({ now = new Date() } = {}) {
     const end = endOf(r, o);
     const hours = (start - now) / 3_600_000;
     if (hours > 0 && hours <= 24) {
-      const n = await notifications.notify({ householdId: r.household_id, kind: 'reminder_24h', title: `Tomorrow: ${r.title ?? 'your event'}`, link: guestLink(r.id), dedupeKey: `reminder:${r.id}:${r.session_id}` }).catch(() => null);
+      const n = await notifications.notify({ householdId: r.household_id, kind: 'reminder_24h', title: `Tomorrow: ${r.title ?? 'your event'}`, body: await notifications.hostWords(r.host_id, 'reminder'), link: guestLink(r.id), dedupeKey: `reminder:${r.id}:${r.session_id}` }).catch(() => null);
       if (n) sent += 1;
     }
     // "The next morning": from 08:00 UK time on the day after it ended.
     const morning = localInstant(plusDays(localDay(end, r.time_zone ?? 'Europe/London'), 1), '08:00', r.time_zone ?? 'Europe/London');
     if (now >= morning && now - morning < 2 * 86_400_000) {
-      const n = await notifications.notify({ householdId: r.household_id, kind: 'after_event', title: `How was ${r.title ?? 'it'}?`, body: 'Did it happen, a rating, and a tip if you like.', link: guestLink(r.id), dedupeKey: `after:${r.id}` }).catch(() => null);
+      const n = await notifications.notify({ householdId: r.household_id, kind: 'after_event', title: `How was ${r.title ?? 'it'}?`, body: ['Did it happen, a rating, and a tip if you like.', await notifications.hostWords(r.host_id, 'thank_you')].filter(Boolean).join('\n\n'), link: guestLink(r.id), dedupeKey: `after:${r.id}` }).catch(() => null);
       if (n) sent += 1;
     }
   }

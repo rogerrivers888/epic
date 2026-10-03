@@ -253,12 +253,13 @@ export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = 
       [offerId, ymd(span.first), ymd(span.last), firstMoved, delta, toTime],
     );
     const bookings = await bookingsOn(c, moving.map((x) => x.id));
+    const ownMoved = await notifications.hostWords(offer.host_id, 'date_changed');
     const told = bookings.map((b) => {
       // The guest's own session that moved, not the first one in the run (Codex, 2 Oct 2026).
       const mine = moved.find((m) => (b.booked_sessions ?? []).includes(String(m.id))) ?? moved[0];
       return {
       householdId: b.household_id, kind: 'date_changed', title: `${offer.title ?? 'Your booking'} has moved`,
-      body: `New date: ${mine.to.date}${mine.to.time ? ` at ${mine.to.time}` : ''}. If it no longer works, cancel for a full refund.`,
+      body: [`New date: ${mine.to.date}${mine.to.time ? ` at ${mine.to.time}` : ''}. If it no longer works, cancel for a full refund.`, ownMoved].filter(Boolean).join('\n\n'),
       link: guestLink(), dedupeKey: `date_changed:${b.id}:${moved.map((m) => `${m.id}@${m.to.date}T${m.to.time ?? ''}`).join(',')}`,
       };
     });
@@ -319,6 +320,7 @@ async function decideOne(offerId, sessionId, now) {
     const bookings = await bookingsOn(c, [first.id]);
     const heads = bookings.reduce((n, b) => n + Number(b.heads ?? 1), 0);
     const told = [];
+    const ownOff = min && heads < min ? await notifications.hostWords(offer.host_id, 'called_off') : null;
     if (min && heads < min) {
       for (const x of group) await c.query(`update offer_sessions set state = 'called_off', called_off_at = now(), decided_outcome = 'called_off', decided_at = now() where id = $1`, [x.id]);
       for (const b of await bookingsOn(c, ids)) {
@@ -327,7 +329,7 @@ async function decideOne(offerId, sessionId, now) {
         const row = await owe(c, b, { amountPence: amount, cause: 'called_off', key: `called_off:${b.id}:${[...losing].sort().join(',')}`, wholeBooking: whole });
         await c.query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, losing]);
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'called_off' where id = $1`, [b.id]);
-        told.push({ householdId: b.household_id, kind: 'called_off', title: `${offer.title ?? 'Your booking'} isn’t going ahead`, body: `It needed ${min} and had ${heads}.${row ? ' You get a full refund.' : ''}`, link: guestLink(), dedupeKey: `called_off:${b.id}:${ids.join(',')}` });
+        told.push({ householdId: b.household_id, kind: 'called_off', title: `${offer.title ?? 'Your booking'} isn’t going ahead`, body: [`It needed ${min} and had ${heads}.${row ? ' You get a full refund.' : ''}`, ownOff].filter(Boolean).join('\n\n'), link: guestLink(), dedupeKey: `called_off:${b.id}:${ids.join(',')}` });
       }
       if (offer.lane !== 'weekly') await c.query('update host_offers set called_off_at = now() where id = $1', [offerId]);
       const { rows: [h] } = await c.query('select household_id from hosts where id = $1', [offer.host_id]);

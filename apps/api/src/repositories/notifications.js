@@ -141,3 +141,22 @@ export async function drainEmail({ batch = 20, send = sendMail, configured = mai
   }
   return { sent, failed, skipped };
 }
+
+/**
+ * A host's own automatic message (E4) for a moment — 'confirmed', 'reminder', 'date_changed', 'called_off',
+ * 'thank_you' — to go with Epic's notification to the guest: the host's words when the switch is on, nothing when
+ * it is off (Codex, 2 Oct 2026). A host who never touched it sends Epic's default words for it.
+ */
+export const AUTO_DEFAULTS = Object.freeze({
+  confirmed: 'Thanks for booking. See you there.',
+  reminder: 'See you tomorrow. Here is what to bring and where to meet.',
+  date_changed: 'I have had to move the date. If the new one doesn’t work, you can cancel for a full refund.',
+  called_off: 'Sorry — this one isn’t going ahead. You get a full refund.',
+  thank_you: 'Thank you for coming. If you have a minute, a review helps other people find this.',
+});
+export async function hostWords(hostId, kind) {
+  if (!hostId || !AUTO_DEFAULTS[kind]) return null;
+  const { rows: [r] } = await query('select is_on, body from host_auto_messages where host_id = $1 and kind = $2', [hostId, kind]);
+  if (r && r.is_on === false) return null;
+  return r?.body ?? AUTO_DEFAULTS[kind];
+}

@@ -358,3 +358,13 @@ test('a host’s switched-off notification sends no e-mail, wherever it comes fr
   const on = await notifications.notify({ householdId: household.id, kind: 'payout_sent', title: 'y', dedupeKey: `ps:${host.id}` });
   assert.deepEqual([off.email_state, on.email_state], ['none', 'queued'], 'still written; only the e-mail follows the switch');
 });
+
+test('Codex: a host’s automatic message goes with the guest’s notification, and switched off it doesn’t', async () => {
+  const notifications = await import('../src/repositories/notifications.js');
+  const { host } = await aHost();
+  assert.match(await notifications.hostWords(host.id, 'confirmed'), /Thanks for booking/);
+  await query(`insert into host_auto_messages (host_id, kind, is_on, body) values ($1, 'confirmed', true, 'Bring an apron!')`, [host.id]);
+  assert.equal(await notifications.hostWords(host.id, 'confirmed'), 'Bring an apron!');
+  await query(`update host_auto_messages set is_on = false where host_id = $1`, [host.id]);
+  assert.equal(await notifications.hostWords(host.id, 'confirmed'), null);
+});
