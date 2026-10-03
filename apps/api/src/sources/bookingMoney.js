@@ -162,7 +162,8 @@ export async function cancelSessions({ offerId, hostId, sessionIds = null, reaso
       if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'host', cancel_cause = 'host_cancelled' where id = $1`, [b.id]);
       told.push({ householdId: b.household_id, kind: 'cancelled', title: `${offer.title ?? 'Your booking'}: cancelled by the host`, body: row ? 'You get a full refund.' : null, link: guestLink(), dedupeKey: `cancelled:${b.id}:${[...losing].sort().join(',')}` });
     }
-    const whole = target.length === all.length;
+    // The whole event is over when nothing is left still to come — past rows never kept it live (Codex, 2 Oct 2026).
+    const whole = all.filter((x) => !ids.includes(x.id) && sessionStart(x, offer) > now).length === 0;
     if (whole) await c.query(`update host_offers set cancelled_at = now(), cancel_reason = $2, state = 'ended' where id = $1`, [offerId, why]);
     await logChange({ subjectKind: whole ? 'event' : 'session', subjectId: whole ? offerId : ids.join(','), field: 'state', before: { state: 'scheduled' }, after: { state: 'cancelled', late }, why, by, byLabel: 'host' }, c);
     return { cancelled: ids.length, refunds: refunds.length, late, told };
@@ -331,7 +332,8 @@ async function decideOne(offerId, sessionId, now) {
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'called_off' where id = $1`, [b.id]);
         told.push({ householdId: b.household_id, kind: 'called_off', title: `${offer.title ?? 'Your booking'} isn’t going ahead`, body: [`It needed ${min} and had ${heads}.${row ? ' You get a full refund.' : ''}`, ownOff].filter(Boolean).join('\n\n'), link: guestLink(), dedupeKey: `called_off:${b.id}:${ids.join(',')}` });
       }
-      if (offer.lane !== 'weekly') await c.query('update host_offers set called_off_at = now() where id = $1', [offerId]);
+      // Off the catalogue too: a called-off One-off or Course ends, and keeps saying why (Codex, 2 Oct 2026).
+      if (offer.lane !== 'weekly') await c.query(`update host_offers set called_off_at = now(), state = 'ended' where id = $1`, [offerId]);
       const { rows: [h] } = await c.query('select household_id from hosts where id = $1', [offer.host_id]);
       if (h) told.push({ householdId: h.household_id, kind: 'event_called_off', title: `${offer.title ?? 'Your event'} was called off`, body: `${heads} of ${min} booked by the decides-by day. Everyone booked gets a full refund.`, link: hostLink(offerId), dedupeKey: `event_called_off:${ids.join(',')}` });
       await logChange({ subjectKind: offer.lane === 'weekly' ? 'session' : 'event', subjectId: offer.lane === 'weekly' ? first.id : offerId, field: 'decided', after: { outcome: 'called_off', heads, min }, why: 'Under the minimum at decides-by', byLabel: 'epic' }, c);

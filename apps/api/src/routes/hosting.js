@@ -1502,6 +1502,11 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
     const [bookings, rating, evidence] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id), shownEvidence(h.id)]);
     const others = (await repo.offersOfHost(h.id)).filter((x) => x.id !== o.id && x.state === 'live' && x.visibility === 'public').length;
     const offer = publicOffer(o, bookings, { host: publicHost(h, rating, { otherOffers: others, credentialsShown: evidence }) });
+    // One view for the host's Insights (E12), by where it came from (Codex, 2 Oct 2026). Never holds the page up.
+    if (o.lane) {
+      const src = ['search', 'link', 'invite', 'profile', 'collection'].includes(String(req.query.src)) ? String(req.query.src) : req.query.l ? 'link' : req.query.i ? 'invite' : 'web';
+      void query(`insert into offer_views (offer_id, source, views) values ($1, $2, 1) on conflict (offer_id, day, source) do update set views = offer_views.views + 1`, [o.id, src]).catch(() => null);
+    }
     // A lane event's bookings live in booking_sessions (hosting v4): "Going ahead?" counts from there (Codex, 2 Oct 2026).
     if (offer.goingAhead) {
       const { rows: [n] } = await query(

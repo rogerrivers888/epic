@@ -559,7 +559,8 @@ function ageOn(dob, day) {
 router.post('/host/desk/events/:id/attendance', async (req, res, next) => {
   try {
     const { offer: o, view } = await eventFor(req.params.id);
-    if (!view.guests) throw refuse(403, 'not_yours', 'Only the host marks attendance.');
+    // Seeing the guest list is not changing it (Codex, 2 Oct 2026).
+    if (!view.owner) throw refuse(403, 'not_yours', 'Only the host marks attendance.');
     const { sessionId, marks } = req.body ?? {};
     const s = o.sessionsList.find((x) => x.id === sessionId);
     if (!s) throw refuse(404, 'session_not_found', 'That session is not on this event.');
@@ -1105,16 +1106,23 @@ router.post('/host/desk/cohosts', async (req, res, next) => {
     );
     if (!offers.length) throw refuse(409, 'no_events', 'There is no event to add them to yet.');
     const { rows: [existing] } = await query(`select id from accounts where lower(email) = lower($1) or mobile = $1 limit 1`, [contact]);
+    // The contact is kept, so somebody not on Epic yet can accept once they are — their address is how (Codex, 2 Oct 2026).
+    const { household } = await me();
+    const kept = await repo.rememberContact(household.id, { name, email: isEmail ? contact : null, mobile: isPhone ? contact : null }, { invited: true });
     await withTransaction(async (c) => {
       for (const o of offers) {
         await c.query(
-          `insert into offer_cohosts (offer_id, account_id, name, role, sees_guests, can_message, can_see_money)
-           values ($1, $2, $3, 'cohost', $4, $5, $6)`,
-          [o.id, existing?.id ?? null, name, b.guests === true, b.messages === true, b.money === true],
+          `insert into offer_cohosts (offer_id, account_id, contact_id, name, role, sees_guests, can_message, can_see_money)
+           values ($1, $2, $3, $4, 'cohost', $5, $6, $7)`,
+          [o.id, existing?.id ?? null, kept.id, name, b.guests === true, b.messages === true, b.money === true],
         );
       }
       await logChange({ subjectKind: 'host', subjectId: host.id, field: 'cohost_added', after: { name, events: offers.length, guests: b.guests === true, messages: b.messages === true, money: b.money === true }, by: account?.id ?? null, byLabel: 'host' }, c);
     });
+    if (isEmail) {
+      const { mailConfigured, sendMail } = await import('../sources/mail.js');
+      if (mailConfigured()) await sendMail({ to: contact, subject: `${host.name} asked you to co-host on Epic`, text: `${host.name} asked you to co-host. Sign in to Epic with this address and accept it on the Host tab:\n\n${appUrl()}/host`, purpose: 'cohost_invite' }).catch(() => null);
+    }
     res.status(201).json({ added: offers.length });
   } catch (err) { next(err); }
 });
@@ -1187,7 +1195,10 @@ router.get('/host/desk/cohost-invites', async (_req, res, next) => {
     const { rows } = await query(
       `select c.id, c.offer_id, o.title, h.name as host, c.sees_guests, c.can_message, c.can_see_money
          from offer_cohosts c join host_offers o on o.id = c.offer_id join hosts h on h.id = o.host_id
-        where c.account_id = $1 and c.accepted_at is null and o.state <> 'ended'`, [account.id],
+         left join host_contacts hc on hc.id = c.contact_id
+        where c.accepted_at is null and o.state <> 'ended'
+          and (c.account_id = $1 or (c.account_id is null and ((hc.email is not null and lower(hc.email) = lower($2)) or (hc.mobile is not null and hc.mobile = $3))))`,
+      [account.id, account.email ?? '', account.mobile ?? ''],
     );
     res.json({ invites: rows.map((r) => ({ id: r.id, offerId: r.offer_id, title: r.title, host: r.host, guests: r.sees_guests, messages: r.can_message, money: r.can_see_money })) });
   } catch (err) { next(err); }
@@ -1197,7 +1208,14 @@ router.post('/host/desk/cohost-invites/:id/accept', async (req, res, next) => {
   try {
     const { account } = await me({ hostOptional: true });
     if (!account || !UUID.test(String(req.params.id))) throw refuse(404, 'not_found', 'That invitation isn’t yours.');
-    const { rows: [r] } = await query(`update offer_cohosts set accepted_at = now() where id = $1 and account_id = $2 and accepted_at is null returning offer_id`, [req.params.id, account.id]);
+    const { rows: [r] } = await query(
+      `update offer_cohosts c set accepted_at = now(), account_id = $2
+         from (select c2.id from offer_cohosts c2 left join host_contacts hc on hc.id = c2.contact_id
+                where c2.id = $1 and c2.accepted_at is null
+                  and (c2.account_id = $2 or (c2.account_id is null and ((hc.email is not null and lower(hc.email) = lower($3)) or (hc.mobile is not null and hc.mobile = $4))))) ok
+        where c.id = ok.id returning c.offer_id`,
+      [req.params.id, account.id, account.email ?? '', account.mobile ?? ''],
+    );
     if (!r) throw refuse(404, 'not_found', 'That invitation isn’t yours.');
     res.json({ accepted: true, offerId: r.offer_id });
   } catch (err) { next(err); }
