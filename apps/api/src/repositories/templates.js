@@ -252,7 +252,7 @@ async function addressFor(to = {}) {
  * list of a sign-up on epic.day (interest_signups). An account has no
  * marketing consent of its own yet, and SMS has none at all.
  */
-export async function hasMarketingConsent(email, trigger = 'interest.signed_up', { alertId = null } = {}) {
+export async function hasMarketingConsent(email, trigger = 'interest.signed_up', { alertId = null, source = null } = {}) {
   if (!email) return false;
   // A "Tell me when" message is about one alert, and only that alert's yes counts: unsubscribing from it
   // stops it even while the address keeps other alerts (Codex, 3 Oct 2026).
@@ -261,8 +261,10 @@ export async function hasMarketingConsent(email, trigger = 'interest.signed_up',
     const { rows: [r] } = await query('select 1 as yes from guide_alerts where id::text = $2 and lower(email) = lower($1) and unsubscribed_at is null', [String(email), String(alertId)]);
     return Boolean(r);
   }
+  // The launch list is two lists — the homepage's and the hosts' — each with its own words; a yes to one is not a yes to the other.
   if (trigger === 'interest.signed_up') {
-    const { rows: [r] } = await query('select 1 as yes from interest_signups where lower(email) = lower($1) limit 1', [String(email)]);
+    if (!source) return false;
+    const { rows: [r] } = await query('select 1 as yes from interest_signups where lower(email) = lower($1) and source = $2 limit 1', [String(email), String(source)]);
     return Boolean(r);
   }
   return false;
@@ -290,8 +292,13 @@ async function claim(t, channel, dedupeKey, toKind, toRef, by) {
   );
   return rows.length > 0;
 }
-/** Write what became of a claimed send onto its claim. */
+/** Write what became of a claimed send onto its claim; a send that did not go gives its claim back, so a retry can (Codex, 3 Oct 2026). */
 async function settle(t, channel, dedupeKey, result) {
+  if (!result?.sent) {
+    await query(`delete from message_sends where template_key = $1 and channel = $2 and dedupe_key = $3 and purpose = 'deliver'`, [t.key, channel, dedupeKey])
+      .catch((err) => console.error(`epic-api: message log — ${err.message}`));
+    return;
+  }
   await query(
     `update message_sends set result = $4::jsonb where template_key = $1 and channel = $2 and dedupe_key = $3 and purpose = 'deliver'`,
     [t.key, channel, dedupeKey, JSON.stringify(result ?? {})],
@@ -355,7 +362,7 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
     if (want.some((c) => c !== 'email')) throw refuse(403, 'no_consent', 'A marketing message goes by e-mail only: nobody has said yes to it anywhere else.');
     if (!fieldsOf(parse(t.channels.email.body)).has(UNSUBSCRIBE_FIELD)) throw refuse(409, 'needs_unsubscribe', `“${t.name}” is marketing and its e-mail has no unsubscribe link yet, so it cannot be sent from here.`);
     if (empty(values[UNSUBSCRIBE_FIELD])) throw refuse(400, 'needs_unsubscribe', 'A marketing e-mail needs its unsubscribe link filled in.');
-    if (!(await hasMarketingConsent(addr.email, t.trigger, { alertId: consent?.alertId ?? null }))) throw refuse(403, 'no_consent', 'That address has not said yes to marketing from Epic.');
+    if (!(await hasMarketingConsent(addr.email, t.trigger, { alertId: consent?.alertId ?? null, source: consent?.source ?? null }))) throw refuse(403, 'no_consent', 'That address has not said yes to marketing from Epic.');
   }
   const out = renderChannels(t.channels, values, want);
   // A part a channel cannot go without that rendered to nothing is not sent as "null" or a blank (Codex, 3 Oct 2026).

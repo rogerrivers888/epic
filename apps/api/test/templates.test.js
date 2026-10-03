@@ -211,3 +211,20 @@ test('half a tag is refused, a host message is never sent to an address beside i
   const { rows: [acct] } = await query("insert into accounts (email, role, status, name) values ('parts-test@example.com', 'customer', 'active', 'Sam') returning id, email");
   await assert.rejects(templates.sendTest('rating_dropped', { account: { id: acct.id, email: acct.email }, channels: ['email'], channelsDraft: { email: { subject: '{{#if link}}{{/if}}', body: 'x' } } }), { code: 'empty_part' });
 });
+
+test('a failed send gives its once-only key back, and a launch-list yes is to that list only (Codex, 3 Oct 2026)', async () => {
+  const was = { ...templates.senders };
+  let ok = false;
+  templates.senders.mail = async () => (ok ? { sent: true } : { sent: false, reason: 'provider_down' });
+  try {
+    const go = () => templates.deliver({ templateKey: 'renewal_failed', fields: { plan: 'Solo', amount: '5.99', retryOn: 'x', updateUrl: 'y' }, to: { email: 'retry@example.com' }, dedupeKey: 'renewal:retry' });
+    assert.equal((await go()).channels.email.sent, false);
+    ok = true;
+    assert.equal((await go()).channels.email.sent, true, 'the retry goes');
+    assert.equal((await go()).channels.email.reason, 'already_sent');
+  } finally { Object.assign(templates.senders, was); }
+  await query(`insert into interest_signups (email, source, locale, consent_wording) values ('lists@example.com', 'host', 'en-gb', 'Yes')`);
+  assert.equal(await templates.hasMarketingConsent('lists@example.com', 'interest.signed_up', { source: 'host' }), true);
+  assert.equal(await templates.hasMarketingConsent('lists@example.com', 'interest.signed_up', { source: 'home' }), false);
+  assert.equal(await templates.hasMarketingConsent('lists@example.com', 'interest.signed_up'), false);
+});
