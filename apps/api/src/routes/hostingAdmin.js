@@ -516,8 +516,13 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
     ];
     const total = { epicPence: streams.reduce((t, x) => t + x.epicPence, 0), toHostsPence: streams.reduce((t, x) => t + x.toHostsPence, 0), count: streams.reduce((t, x) => t + x.count, 0) };
     const s = await settingsRepo.current();
-    const { rows: [back] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_payments where kind = 'refund' and state = 'succeeded' and created_at >= $1 and created_at < $2`, [from, to]);
-    const { rows: [claims] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_complaints where kind = 'guarantee_claim' and state = 'paid' and resolved_at >= $1 and resolved_at < $2`, [from, to]);
+    // Filtered by Kind as the streams are, through each row's event (Codex, 3 Oct 2026).
+    const { rows: [back] } = await query(
+      `select count(*)::int as n, coalesce(sum(p.amount_pence), 0)::int as pence from hosting_payments p left join host_offers o on o.id = p.offer_id
+        where p.kind = 'refund' and p.state = 'succeeded' and p.created_at >= $1 and p.created_at < $2 and ($3::text is null or o.lane = $3)`, [from, to, kind]);
+    const { rows: [claims] } = await query(
+      `select count(*)::int as n, coalesce(sum(k.amount_pence), 0)::int as pence from hosting_complaints k left join host_offers o on o.id = k.offer_id
+        where k.kind = 'guarantee_claim' and k.state = 'paid' and k.resolved_at >= $1 and k.resolved_at < $2 and ($3::text is null or o.lane = $3)`, [from, to, kind]);
     const { rows: [rec] } = await query('select ran_at, checked, mismatched from stripe_reconciliations order by ran_at desc limit 1');
     res.json({ period: label, streams, total, refunded: { count: back.n, pence: back.pence }, guaranteeClaims: { count: claims.n, pence: claims.pence }, guaranteePool: s.guarantee_pool == null ? null : { pence: s.guarantee_pool }, reconciliation: rec ? { ranAt: rec.ran_at, checked: rec.checked, mismatched: rec.mismatched } : null });
   } catch (err) { next(err); }
@@ -652,23 +657,27 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
     const th = ratingThresholds(t);
     if (th) {
       const { rows } = await query(
-        `select h.id, h.name, round(avg(r.stars)::numeric, 2)::float as avg, count(*)::int as n
-           from host_reviews r join hosts h on h.id = r.host_id where r.side = 'guest' and not coalesce(r.hidden, false)
-          group by h.id, h.name having avg(r.stars) < $1 and count(*) >= $2`, [th.avgBelow, th.minRated],
+        // Rated events counted as hostRating and Standing count them: one an event or session, however many reviews (Codex, 3 Oct 2026).
+      `select h.id, h.name, round(avg(r.stars)::numeric, 2)::float as avg, count(*)::int as n,
+              count(distinct (r.offer_id, coalesce(b.session_id::text, b.occurrence, '')))::int as rated
+           from host_reviews r join hosts h on h.id = r.host_id left join experience_bookings b on b.id = r.booking_id
+          where r.side = 'guest' and not coalesce(r.hidden, false) and r.publish_on <= current_date
+          group by h.id, h.name
+         having avg(r.stars) < $1 and count(distinct (r.offer_id, coalesce(b.session_id::text, b.occurrence, ''))) >= $2`, [th.avgBelow, th.minRated],
       );
       ratings.push(...rows);
     }
     const { rows: complaints } = await query(
       `select k.*, h.name as host, o.title, hh.name as household from hosting_complaints k left join hosts h on h.id = k.host_id
          left join host_offers o on o.id = k.offer_id left join households hh on hh.id = k.household_id
-        where k.state = 'open' or k.created_at > now() - interval '90 days' order by (k.state = 'open') desc, k.created_at`,
+        where k.state = 'open' order by k.created_at`,
     );
     const { rows: incidents } = await query(
       `select i.*, h.name as host, o.title from session_incidents i left join hosts h on h.id = i.host_id left join host_offers o on o.id = i.offer_id order by i.created_at desc limit 200`,
     );
     res.json({
       checked: checked.map((h) => ({ hostId: h.id, host: h.name, state: h.checked_state, on: ymd(h.checked_on), insuranceExpires: ymd(h.insurance_expires), dropOffEvents: h.drop_off_events })),
-      ratings: th ? ratings.map((r) => ({ hostId: r.id, host: r.name, avg: r.avg, reviews: r.n })) : null,
+      ratings: th ? ratings.map((r) => ({ hostId: r.id, host: r.name, avg: r.avg, reviews: r.n, ratedEvents: r.rated })) : null,
       ratingsReason: th ? null : t ? 'The rating thresholds are set without an average to measure against' : 'Rating escalation thresholds are not set yet',
       complaints: complaints.filter((k) => k.kind !== 'host_no_show').map((k) => ({ id: k.id, kind: k.kind, host: k.host, event: k.title, household: k.household, booking: k.booking_id ? k.booking_id.slice(0, 8) : null, reason: k.reason, amountPence: k.amount_pence, state: k.state, at: k.created_at, autoPayLimit: s.claim_auto_pay_limit ?? null })),
       noShows: complaints.filter((k) => k.kind === 'host_no_show').map((k) => ({ id: k.id, host: k.host, event: k.title, household: k.household, state: k.state, at: k.created_at })),

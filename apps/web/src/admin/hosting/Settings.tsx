@@ -37,7 +37,7 @@ type Setting = {
   changedAt: string | null;
   changedBy: string | null;
   approvalId: string | null;
-  pending?: { approvalId: string; value: unknown; isOn?: boolean; why: string | null; at: string } | null;
+  pending?: { approvalId: string; state?: string; value: unknown; isOn?: boolean; why: string | null; at: string } | null;
 };
 
 type LadderStep = { pct: number; ratedEvents?: number; avgAtLeast?: number };
@@ -96,8 +96,8 @@ export function SettingsTab() {
             ? <Text style={[s.word, { color: amber, fontWeight: '700' }]}>— To set</Text>
             : <Text style={[s.word, r.isOn === false && { color: colors.inkMuted }]}>{r.words}</Text>}
           {r.pending ? (
-            <Explain tip={['Waiting approval', `Filed ${when(r.pending.at)}${r.pending.why ? `: ${r.pending.why}` : ''}. It changes only when the owner approves it in Approvals.`]}>
-              <Text style={[s.word, { color: amber, fontWeight: '700' }]}>· Waiting approval</Text>
+            <Explain tip={['Waiting approval', `Filed ${when(r.pending.at)}${r.pending.why ? `: ${r.pending.why}` : ''}. ${r.pending.state === 'failed' ? 'Approved, and it did not run: retry or decline it in Approvals.' : r.pending.state === 'unknown' ? 'Approved, and whether it ran is unknown: check before retrying.' : 'It changes only when the owner approves it in Approvals.'}`]}>
+              <Text style={[s.word, { color: amber, fontWeight: '700' }]}>{r.pending.state === 'failed' ? '· Approval failed' : r.pending.state === 'unknown' ? '· Approval unclear' : '· Waiting approval'}</Text>
             </Explain>
           ) : null}
         </View>

@@ -43,15 +43,15 @@ export const settingPayload = (r) => ({
 
 adminRouter.get('/settings', requires('view_hosting'), async (_req, res, next) => {
   try {
-    // Changes filed for the owner and not yet decided: shown against their setting as "Waiting approval" (BO8l).
+    // Changes filed for the owner and still open — waiting, or approved and failed to run, or unknown: shown against their setting (BO8l).
     const { rows: pending } = await query(
-      `select id, request, payload, created_at from approvals
-        where state = 'pending' and request like 'PUT /api/admin/hosting/settings/%' order by created_at`,
+      `select id, request, payload, state, created_at from approvals
+        where state in ('pending', 'failed', 'unknown') and request like 'PUT /api/admin/hosting/settings/%' order by created_at`,
     );
     const waiting = new Map();
     for (const a of pending) {
       const key = decodeURIComponent(a.request.slice('PUT /api/admin/hosting/settings/'.length).split('?')[0]);
-      waiting.set(key, { approvalId: a.id, value: a.payload?.value, isOn: a.payload?.isOn, why: a.payload?.why ?? null, at: a.created_at });
+      waiting.set(key, { approvalId: a.id, state: a.state, value: a.payload?.value, isOn: a.payload?.isOn, why: a.payload?.why ?? null, at: a.created_at });
     }
     res.json({ settings: (await settings.list()).map((r) => ({ ...settingPayload(r), pending: waiting.get(r.key) ?? null })), waitingApproval: pending.length });
   } catch (err) { next(err); }
