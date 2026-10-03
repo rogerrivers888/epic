@@ -230,6 +230,9 @@ test('the place lookup: counties from the list, postcodes from ONS, names only o
     { name_1: 'Newport', local_type: 'Village', county_unitary: 'Essex' },
   ];
   assert.equal(await placeOf('Newport', { fetchImpl: fake({ '/places?q=Newport': newports }) }), null, 'two towns of one name is no answer');
+  const ledger = async () => (await query(`select count(*)::int as n from provider_calls where purpose = 'guide-alert.place'`)).rows[0].n;
+  const before = await ledger();
   assert.equal(await placeOf('Reading', { fetchImpl: async () => { throw new Error('down'); } }), null, 'a failed lookup is no answer, never a throw');
+  assert.equal(await ledger(), before + 1, 'a call that never came back is still on the ledger');
   assert.equal(await placeOf('   '), null);
 });

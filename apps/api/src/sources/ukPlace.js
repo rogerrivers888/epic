@@ -52,9 +52,14 @@ const KIND_RANK = ['City', 'Town', 'Village', 'Hamlet', 'Suburban Area', 'Other 
 export const keyOf = (s) => String(s ?? '').toLowerCase().replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
 
 async function ask(path, fetchImpl) {
-  const res = await fetchImpl(`${API}${path}`, { signal: AbortSignal.timeout(4000), headers: { 'user-agent': UA, accept: 'application/json' } });
-  // Written down whether it answered or not: it is a call we made (CLAUDE.md › provider_calls).
-  await providerCalls.record(null, 'postcodes', 'guide-alert.place', { requests: 1 }).catch(() => null);
+  let res;
+  try {
+    res = await fetchImpl(`${API}${path}`, { signal: AbortSignal.timeout(4000), headers: { 'user-agent': UA, accept: 'application/json' } });
+  } finally {
+    // Written down whether it answered, refused or never came back: it is a call we
+    // made (CLAUDE.md › provider_calls), and a timeout is the one most worth seeing (Codex).
+    await providerCalls.record(null, 'postcodes', 'guide-alert.place', { requests: 1 }).catch(() => null);
+  }
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`postcodes.io ${res.status}`);
   return (await res.json())?.result ?? null;
