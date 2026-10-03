@@ -340,8 +340,10 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   }
   // A host's message is sent to a household or an account, never to a bare address: the host's own
   // e-mail switches are kept by household, and a bare address would step round them (Codex, 3 Oct 2026).
-  // Read from the trigger, which every template has, not from a notification kind that may not be registered yet.
-  if (/\bhost\b/.test(TRIGGERS[t.trigger]?.audience ?? '') && !to.householdId && !to.accountId) {
+  // Whose message it is: the template's own notification kind where that is registered (a trigger like
+  // booking.confirmed is shared by a guest's template and a host's), else its trigger's audience.
+  const audience = notifications.KINDS[t.notificationKind]?.audience ?? TRIGGERS[t.trigger]?.audience ?? '';
+  if (/\bhost\b/.test(audience) && !to.householdId && !to.accountId) {
     throw refuse(400, 'no_recipient', `“${t.name}” goes to a host: say which household or account, so their e-mail settings are kept.`);
   }
   const values = await valuesFor(t.trigger, fields);
@@ -353,6 +355,12 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
     if (!(await hasMarketingConsent(addr.email, t.trigger, { alertId: consent?.alertId ?? null }))) throw refuse(403, 'no_consent', 'That address has not said yes to marketing from Epic.');
   }
   const out = renderChannels(t.channels, values, want);
+  // A part a channel cannot go without that rendered to nothing is not sent as "null" or a blank (Codex, 3 Oct 2026).
+  for (const c of want) {
+    for (const part of CHANNELS[c].required) {
+      if (empty(out[c]?.[part]) || !String(out[c][part]).trim()) throw refuse(400, 'empty_part', `“${t.name}” would go out with no ${part} on ${CHANNELS[c].label}: a field it needs is empty.`);
+    }
+  }
   const sent = {};
   const toRef = to.accountId ?? to.householdId ?? null;
   if (want.includes('in_app')) {

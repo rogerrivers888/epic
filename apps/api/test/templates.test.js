@@ -175,3 +175,16 @@ test('a host template needs its household even before its notification kind is r
     assert.equal(log.draft, true);
   } finally { Object.assign(templates.senders, was); }
 });
+
+test('a guest’s template on a shared trigger may go to a bare address; a message with an empty required part is refused (Codex, 3 Oct 2026)', async () => {
+  const was = { ...templates.senders };
+  templates.senders.mail = async () => ({ sent: true });
+  try {
+    const ok = await templates.deliver({ templateKey: 'booking_confirmed', channels: ['email'], fields: { title: 'Clay', link: 'https://epic.day/b/1' }, to: { email: 'guest@example.com' } });
+    assert.equal(ok.channels.email.sent, true);
+    await assert.rejects(templates.deliver({ templateKey: 'new_booking', channels: ['email'], fields: { title: 'Clay', heads: 2, link: 'x' }, to: { email: 'host@example.com' } }), { code: 'no_recipient' });
+    const t = await templates.getTemplate('renewal_failed');
+    await templates.saveVersion('renewal_failed', { channels: { email: { subject: '{{plan}}', body: t.channels.email.body } } }, { who: 'Roger' });
+    await assert.rejects(templates.deliver({ templateKey: 'renewal_failed', fields: { plan: '', amount: '1', retryOn: 'x', updateUrl: 'y' }, to: { email: 'm2@example.com' } }), { code: 'empty_part' });
+  } finally { Object.assign(templates.senders, was); }
+});
