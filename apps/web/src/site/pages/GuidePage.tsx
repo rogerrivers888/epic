@@ -33,6 +33,8 @@ const web = Platform.OS === 'web';
  * the type: one `ch` of Archivo is 0.5727em (measured, 739.9px for 68ch at 19px).
  */
 const ch = (n: number, fontSize: number) => n * 0.5727 * fontSize;
+/** The same for bold text, whose `0` is wider (9.52px at 16px against 9.16): the photo captions. */
+const chBold = (n: number, fontSize: number) => n * 0.595 * fontSize;
 /** The line height the design's text inherits wherever it sets none (its body rule). */
 const LH = 1.55;
 /** The placeholder grey of an unfilled photo slot, and the ink of its brief (the design's #3a3735). */
@@ -211,7 +213,7 @@ function Section({ b, n, width, phone, fluid, published }: { b: GuideBlock; n: s
       <SiteH2 style={[s.h2, { marginTop: -8, fontSize: h2, letterSpacing: -0.04 * h2, lineHeight: h2 }]}>{b.h2}</SiteH2>
       {b.img ? (
         <View style={[s.slot, { height: fluid(220, 30, 380) }]}>
-          <Text style={[s.slotBrief, { fontSize: fluid(14, 1.3, 16), lineHeight: fluid(14, 1.3, 16) * 1.35, left: 16, right: 16, bottom: 16, maxWidth: ch(52, fluid(14, 1.3, 16)) }]}>{b.img}</Text>
+          <Text style={[s.slotBrief, { fontSize: fluid(14, 1.3, 16), lineHeight: fluid(14, 1.3, 16) * 1.35, left: 16, right: 16, bottom: 16, maxWidth: chBold(52, fluid(14, 1.3, 16)) }]}>{b.img}</Text>
           <Text style={[s.slotTag, { left: 16, top: 16 }]}>Photo to license</Text>
         </View>
       ) : null}
@@ -222,7 +224,7 @@ function Section({ b, n, width, phone, fluid, published }: { b: GuideBlock; n: s
           {b.tiles.map((x) => (
             <View key={x.t} style={{ flexGrow: 1, backgroundColor: INACTIVE }}>
               <View style={[s.slot, { aspectRatio: 4 / 3 }]}>
-                <Text style={[s.slotBrief, { fontSize: 13, lineHeight: 17, left: 12, right: 12, bottom: 12 }]}>{x.want}</Text>
+                <Text style={[s.slotBrief, { fontSize: 13, lineHeight: 13 * 1.3, left: 12, right: 12, bottom: 12 }]}>{x.want}</Text>
                 <Text style={[s.slotTag, { fontSize: 10.5, lineHeight: 10.5 * LH }]}>Photo to license</Text>
               </View>
               <View style={s.tileText}>
@@ -433,8 +435,8 @@ const s = StyleSheet.create({
   guideRow: { ...row, flexWrap: 'wrap', alignItems: 'flex-start' },
   kicker: { fontFamily: fonts.heading, fontSize: 13, lineHeight: 13 * LH, fontWeight: '700', letterSpacing: 0.78, textTransform: 'uppercase', color: INK },
   tocRow: { ...row, gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
-  tocN: { width: 26, fontFamily: fonts.heading, fontSize: 16, fontWeight: '700', color: INK_MUTED, lineHeight: 21 },
-  tocH: { flex: 1, fontFamily: fonts.heading, fontSize: 16, fontWeight: '700', color: INK, lineHeight: 21 },
+  tocN: { width: 26, fontFamily: fonts.heading, fontSize: 16, fontWeight: '700', color: INK_MUTED, lineHeight: 16 * 1.3 },
+  tocH: { flex: 1, fontFamily: fonts.heading, fontSize: 16, fontWeight: '700', color: INK, lineHeight: 16 * 1.3 },
 
   block: { gap: 20, borderTopWidth: 1, borderTopColor: HAIRLINE },
   blockN: { ...head, fontSize: 16, lineHeight: 16 * LH, color: MOSS },
@@ -444,30 +446,30 @@ const s = StyleSheet.create({
 
   tileText: { paddingTop: 14, paddingHorizontal: 16, paddingBottom: 16, gap: 5 },
   tileT: { ...head, fontSize: 20, letterSpacing: -0.4, lineHeight: 22 },
-  tileD: { ...body, fontSize: 15, lineHeight: 22 },
-  tileWhere: { ...body, fontSize: 14, color: INK_MUTED, lineHeight: 20 },
+  tileD: { ...body, fontSize: 15, lineHeight: 15 * 1.45 },
+  tileWhere: { ...body, fontSize: 14, color: INK_MUTED, lineHeight: 14 * 1.4 },
 
   compare: { flexGrow: 1, backgroundColor: INACTIVE, paddingTop: 22, paddingHorizontal: 22, paddingBottom: 12, gap: 10 },
   compareT: { ...head, fontSize: 28, letterSpacing: -0.98, lineHeight: 28 },
   compareLine: { ...body, fontSize: 16, lineHeight: 24 },
-  comparePt: { ...body, fontSize: 16, lineHeight: 23, paddingVertical: 11, borderTopWidth: 1, borderTopColor: HAIRLINE },
+  comparePt: { ...body, fontSize: 16, lineHeight: 16 * 1.45, paddingVertical: 11, borderTopWidth: 1, borderTopColor: HAIRLINE },
 
   step: { ...row, gap: 12, paddingVertical: 16, borderTopWidth: 1, borderTopColor: HAIRLINE },
-  stepN: { ...head, width: 48, fontSize: 22, letterSpacing: -0.44, lineHeight: 24 },
-  stepT: { ...head, fontSize: 19, letterSpacing: -0.29, lineHeight: 23 },
+  stepN: { ...head, width: 48, fontSize: 22, letterSpacing: -0.44, lineHeight: 22 * 1.1 },
+  stepT: { ...head, fontSize: 19, letterSpacing: -0.29, lineHeight: 19 * 1.2 },
   stepD: { ...body, fontSize: 16, lineHeight: 24, maxWidth: ch(62, 16) },
 
   listRow: { ...row, flexGrow: 1, gap: 14, paddingVertical: 16, borderTopWidth: 1, borderTopColor: HAIRLINE },
   bullet: { width: 10, height: 10, backgroundColor: LIME, marginTop: 7 },
-  listT: { ...head, fontSize: 18, letterSpacing: -0.27, lineHeight: 22 },
+  listT: { ...head, fontSize: 18, letterSpacing: -0.27, lineHeight: 18 * 1.2 },
   listD: { ...body, fontSize: 16, lineHeight: 24 },
   check: { marginTop: 4, borderWidth: 1, borderColor: HAIRLINE, fontFamily: fonts.heading, fontSize: 11, lineHeight: 11 * LH, fontWeight: '700', letterSpacing: 0.66, textTransform: 'uppercase', paddingVertical: 3, paddingHorizontal: 7, color: INK_MUTED },
 
   tableRow: { ...row, gap: 24, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
   tableCol: { flex: 1, minWidth: 0 },
-  tableCell: { ...body, fontSize: 16, lineHeight: 23 },
+  tableCell: { ...body, fontSize: 16, lineHeight: 16 * 1.45 },
   tableMobRow: { gap: 8, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
-  tableMobA: { ...head, fontSize: 18, lineHeight: 22 },
+  tableMobA: { ...head, fontSize: 18, lineHeight: 18 * 1.25 },
   tableMobH: { fontFamily: fonts.heading, fontSize: 12, lineHeight: 12 * LH, fontWeight: '700', letterSpacing: 0.72, textTransform: 'uppercase', color: INK_MUTED },
 
   note: { backgroundColor: LIME_TINT, paddingVertical: 18, paddingHorizontal: 20, ...body, fontSize: 17, lineHeight: 25.5, maxWidth: ch(68, 17) },
