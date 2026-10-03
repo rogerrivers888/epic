@@ -226,6 +226,48 @@ export async function processRecoveries({ status = stripe.stripeStatus, balance 
   return out;
 }
 
+/**
+ * The 90-day limit (register L4; brief §5): Stripe must pay a UK host within 90 days of a charge. Every booking whose
+ * host's share is still not paid out 80 days after its charge — within ten days of the limit — is a problem in the
+ * log and an e-mail to the owner, once each; put right when its payouts have all been made.
+ */
+export const NINETY_WARN_DAYS = 80;
+export async function watchNinetyDays({ now = new Date(), send = null } = {}) {
+  const { rows } = await query(
+    `select b.id, b.host_id, b.offer_id, b.household_id, b.host_pence, o.title, h.name as host_name, min(p.created_at) as charged_at
+       from experience_bookings b join hosting_payments p on p.booking_id = b.id and p.kind = 'charge' and p.state = 'succeeded' and p.voided_at is null
+       join host_offers o on o.id = b.offer_id join hosts h on h.id = b.host_id
+      where b.payment_state in ('charged', 'partially_refunded') and b.charge_model = 'destination' and b.money_voided_at is null
+        and exists (select 1 from booking_sessions bs where bs.booking_id = b.id and bs.state in ('booked', 'forfeited')
+                     and not exists (select 1 from host_payouts hp where hp.session_id = bs.session_id and hp.host_id = b.host_id and hp.state = 'paid'))
+      group by b.id, o.title, h.name
+     having min(p.created_at) <= $1::timestamptz - make_interval(days => $2)`,
+    [now, NINETY_WARN_DAYS]);
+  const fresh = [];
+  for (const b of rows) {
+    const key = `near_90:${b.id}`;
+    const { rows: [had] } = await query('select 1 from payment_problems where dedupe_key = $1', [key]);
+    const limit = new Date(new Date(b.charged_at).getTime() + 90 * 86_400_000);
+    await problems.record({ kind: 'near_90_day_limit', dedupeKey: key, amountPence: b.host_pence, bookingId: b.id, hostId: b.host_id, offerId: b.offer_id, householdId: b.household_id, detail: { chargedAt: b.charged_at, limit: limit.toISOString() } });
+    if (!had) fresh.push({ ...b, limit });
+  }
+  // Paid out since: put right.
+  const { rows: open } = await query(`select booking_id, dedupe_key from payment_problems where kind = 'near_90_day_limit' and status = 'open'`);
+  const still = new Set(rows.map((r) => r.id));
+  for (const p of open) if (!still.has(p.booking_id)) await problems.resolve({ dedupeKey: p.dedupe_key, resolution: 'Paid out', by: 'epic' });
+  if (fresh.length) {
+    const mail = send ?? (await import('./mail.js')).sendMail;
+    const day = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'Europe/London' });
+    await mail({
+      to: String(process.env.EPIC_MONEY_ALERTS_TO || 'roger@epic.day'),
+      subject: `${fresh.length === 1 ? 'A host payout is' : `${fresh.length} host payouts are`} within ten days of Stripe’s 90-day limit`,
+      text: [...fresh.map((b) => `${b.title ?? 'An event'} · ${b.host_name ?? 'a host'} · £${(Number(b.host_pence ?? 0) / 100).toFixed(2)} · must be paid out by ${day(b.limit)}`), '', 'Back office › Money › Payment problems.'].join('\n'),
+      purpose: 'money_alert',
+    }).catch((err) => console.error(`epic-api: 90-day alert not sent — ${err.message}`));
+  }
+  return { near: rows.length, alerted: fresh.length };
+}
+
 /** Compare one ledger row with Stripe's view of it: 'matched', 'mismatch' or 'not_checked'. */
 export function compareRow(row, view) {
   if (!view) return 'not_checked';
@@ -358,6 +400,8 @@ export async function moneyTick({ now = new Date() } = {}) {
   await processRecoveries().catch((err) => console.error(`epic-api: host recoveries — ${err.message}`));
   await schedulePayouts({ now });
   const released = await releasePayouts({ now });
+  // Anything still not paid out ten days from Stripe's 90-day limit: the log, and an e-mail to the owner.
+  await watchNinetyDays({ now }).catch((err) => console.error(`epic-api: 90-day watch — ${err.message}`));
   const last = await ledger.lastReconciliation().catch(() => null);
   let reconciled = null;
   if (!last || now.getTime() - new Date(last.ran_at).getTime() > 24 * 3_600_000) reconciled = await reconcile();

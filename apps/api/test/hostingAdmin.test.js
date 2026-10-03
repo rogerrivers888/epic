@@ -147,7 +147,9 @@ test('hosts, events, money, safety and reports answer, and a judgement with noth
     const ev = await srv.get('/api/admin/hosting/events');
     assert.ok(ev.body.draftsByStep.course.length === 9, 'drafts counted by step, never by who');
     const money = await srv.get('/api/admin/hosting/money/streams');
-    assert.deepEqual(money.body.streams.map((x) => x.key), ['public', 'host_link', 'intro', 'private_payment', 'private_fee', 'pro', 'tips', 'host_recovery']);
+    assert.deepEqual(money.body.streams.map((x) => x.key), ['public', 'host_link', 'intro', 'private_payment', 'private_fee', 'pro', 'tips', 'host_recovery', 'cancellation_fees', 'pay_on_the_day']);
+    assert.deepEqual(Object.keys(money.body.chargebacks).sort(), ['lost', 'open', 'openPence', 'won']);
+    assert.ok('near90Days' in money.body);
     assert.equal(money.body.guaranteePool, null, 'still to set: a dash');
     assert.ok(Array.isArray((await srv.get('/api/admin/hosting/money/ledger')).body.rows));
     assert.ok(Array.isArray((await srv.get('/api/admin/hosting/money/payouts')).body.waitingForConfirmation));

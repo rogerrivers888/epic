@@ -555,6 +555,12 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
          from hosting_payments where state = 'succeeded' and voided_at is null and kind in ('private_fee', 'pro', 'tip', 'host_recovery') and created_at >= $1 and created_at < $2 group by 1`,
       [from, to],
     );
+    const { rows: [kept] } = await query(
+      `select count(*)::int as n, coalesce(sum(p.fee_kept_pence), 0)::int as pence from hosting_payments p left join host_offers o on o.id = p.offer_id
+        where p.kind = 'refund' and p.fee_kept_pence > 0 and p.state in ('pending', 'succeeded') and p.voided_at is null and p.created_at >= $1 and p.created_at < $2 and ($3::text is null or o.lane = $3)`, [from, to, kind]);
+    const { rows: [onDay] } = await query(
+      `select count(*)::int as n, coalesce(sum(f.fee_pence), 0)::int as pence, coalesce(sum(f.base_pence), 0)::int as base from organiser_fees f join host_offers o on o.id = f.offer_id
+        where f.state = 'paid' and f.paid_at >= $1 and f.paid_at < $2 and ($3::text is null or o.lane = $3)`, [from, to, kind]);
     const pub = b.filter((x) => x.visibility === 'public');
     const sum = (rows, k) => rows.reduce((t, x) => t + x[k], 0);
     const rateOf = (rows) => { const v = sum(rows, 'value'); return v ? Math.round((sum(rows, 'epic') / v) * 1000) / 10 : null; };
@@ -569,6 +575,9 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
       { key: 'tips', stream: 'Tip admin fees', bookingValuePence: p.find((x) => x.kind === 'tip')?.value ?? null, ratePct: null, count: p.find((x) => x.kind === 'tip')?.n ?? 0, epicPence: p.find((x) => x.kind === 'tip')?.epic ?? 0, toHostsPence: p.find((x) => x.kind === 'tip')?.host ?? 0 },
       // Cancellation fees recovered from hosts who cancelled or moved a date (register L5): Epic's, taken from the host.
       { key: 'host_recovery', stream: 'Cancellation fees from hosts', bookingValuePence: null, ratePct: null, count: p.find((x) => x.kind === 'host_recovery')?.n ?? 0, epicPence: p.find((x) => x.kind === 'host_recovery')?.value ?? 0, toHostsPence: 0 },
+      // The 5% Epic keeps when a guest cancels inside a full refund (L5), and Epic's fee on events paid on the day (L10).
+      { key: 'cancellation_fees', stream: 'Cancellation fees kept', bookingValuePence: null, ratePct: null, count: kept.n, epicPence: kept.pence, toHostsPence: 0 },
+      { key: 'pay_on_the_day', stream: 'Pay-on-the-day fees', bookingValuePence: onDay.base, ratePct: null, count: onDay.n, epicPence: onDay.pence, toHostsPence: 0 },
     ];
     const total = { epicPence: streams.reduce((t, x) => t + x.epicPence, 0), toHostsPence: streams.reduce((t, x) => t + x.toHostsPence, 0), count: streams.reduce((t, x) => t + x.count, 0) };
     const s = await settingsRepo.current();
@@ -580,7 +589,15 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
       `select count(*)::int as n, coalesce(sum(k.amount_pence), 0)::int as pence from hosting_complaints k left join host_offers o on o.id = k.offer_id
         where k.kind = 'guarantee_claim' and k.state = 'paid' and k.resolved_at >= $1 and k.resolved_at < $2 and ($3::text is null or o.lane = $3)`, [from, to, kind]);
     const { rows: [rec] } = await query('select ran_at, checked, mismatched from stripe_reconciliations order by ran_at desc limit 1');
-    res.json({ period: label, streams, total, refunded: { count: back.n, pence: back.pence }, guaranteeClaims: { count: claims.n, pence: claims.pence }, guaranteePool: s.guarantee_pool == null ? null : { pence: s.guarantee_pool }, reconciliation: rec ? { ranAt: rec.ran_at, checked: rec.checked, mismatched: rec.mismatched } : null });
+    // Chargebacks and the 90-day watch, so Money shows them beside the streams (brief §8).
+    const { rows: [disputes] } = await query(
+      `select count(*) filter (where closed_at is null)::int as open, count(*) filter (where status = 'lost')::int as lost, count(*) filter (where status = 'won')::int as won,
+              coalesce(sum(amount_pence) filter (where closed_at is null), 0)::int as open_pence
+         from chargebacks where mode = $1`, [stripeMode() ?? 'test']);
+    const { rows: [near] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from payment_problems where kind = 'near_90_day_limit' and status = 'open'`);
+    res.json({ period: label, streams, total, refunded: { count: back.n, pence: back.pence },
+      chargebacks: { open: disputes.open, openPence: disputes.open_pence, won: disputes.won, lost: disputes.lost },
+      near90Days: { count: near.n, pence: near.pence }, guaranteeClaims: { count: claims.n, pence: claims.pence }, guaranteePool: s.guarantee_pool == null ? null : { pence: s.guarantee_pool }, reconciliation: rec ? { ranAt: rec.ran_at, checked: rec.checked, mismatched: rec.mismatched, red: rec.mismatched > 0 } : null });
   } catch (err) { next(err); }
 });
 

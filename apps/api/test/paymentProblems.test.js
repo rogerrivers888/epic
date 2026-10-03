@@ -139,3 +139,24 @@ test('a reconciliation row that doesn’t match Stripe is a problem until it doe
   [row] = (await query(`select status, resolved_by from payment_problems where dedupe_key = $1`, [`reconcile:${line.id}`])).rows;
   assert.deepEqual([row.status, row.resolved_by], ['resolved', 'epic']);
 });
+
+test('within ten days of the 90-day limit: a problem and one e-mail to the owner; paid out, put right', async () => {
+  const { booking, host, offer } = await aBooking();
+  const { rows: [s] } = await query(`insert into offer_sessions (offer_id, n, on_date, starts_at) values ($1, 1, current_date - 2, '10:00') returning *`, [offer.id]);
+  await query(`insert into booking_sessions (booking_id, session_id) values ($1, $2)`, [booking.id, s.id]);
+  await query(`update experience_bookings set host_pence = 3200 where id = $1`, [booking.id]);
+  await query(`insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, state, stripe_ref, mode, created_at)
+               values ('charge', $1, $2, $3, $4, 4000, 'succeeded', $5, 'test', now() - interval '85 days')`, [booking.id, offer.id, host.id, booking.household_id, `pi_old_${booking.id.slice(0, 8)}`]);
+  const money = await import('../src/sources/hostingMoney.js');
+  const sent = [];
+  const send = async (m) => { sent.push(m); return { sent: true }; };
+  await money.watchNinetyDays({ send });
+  await money.watchNinetyDays({ send });
+  const [p] = (await query(`select status, amount_pence from payment_problems where dedupe_key = $1`, [`near_90:${booking.id}`])).rows;
+  assert.deepEqual([p.status, p.amount_pence], ['open', 3200]);
+  assert.equal(sent.filter((m) => m.text.includes('Pottery')).length, 1, 'one e-mail, however often it runs');
+  assert.match(sent[0].subject, /90-day limit/);
+  await query(`insert into host_payouts (host_id, offer_id, session_id, amount_pence, state, release_at) values ($1, $2, $3, 3200, 'paid', now())`, [host.id, offer.id, s.id]);
+  await money.watchNinetyDays({ send });
+  assert.equal((await query(`select status from payment_problems where dedupe_key = $1`, [`near_90:${booking.id}`])).rows[0].status, 'resolved');
+});
