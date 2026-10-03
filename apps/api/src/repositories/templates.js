@@ -343,6 +343,9 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   // Whose message it is: the template's own notification kind where that is registered (a trigger like
   // booking.confirmed is shared by a guest's template and a host's), else its trigger's audience.
   const audience = notifications.KINDS[t.notificationKind]?.audience ?? TRIGGERS[t.trigger]?.audience ?? '';
+  if (/\bhost\b/.test(audience) && (to.email || to.mobile) && (to.householdId || to.accountId)) {
+    throw refuse(400, 'mixed_recipient', `“${t.name}” goes to a host: it is sent to their own address, so give the household or account and no address.`);
+  }
   if (/\bhost\b/.test(audience) && !to.householdId && !to.accountId) {
     throw refuse(400, 'no_recipient', `“${t.name}” goes to a host: say which household or account, so their e-mail settings are kept.`);
   }
@@ -412,6 +415,12 @@ export async function sendTest(key, { account, channels = null, channelsDraft = 
   if (bad.length) throw refuse(400, 'bad_channel', 'A test is sent by e-mail or SMS.');
   const usable = want.filter((c) => p.channels[c]);
   if (!usable.length) throw refuse(400, 'nothing_to_send', 'This template says nothing by e-mail or SMS.');
+  // The same check a delivery makes: nothing goes out with an empty subject or body (Codex, 3 Oct 2026).
+  for (const c of usable) {
+    for (const part of CHANNELS[c].required) {
+      if (empty(p.channels[c]?.[part]) || !String(p.channels[c][part]).trim()) throw refuse(400, 'empty_part', `With the sample fields this would go out with no ${part} on ${CHANNELS[c].label}.`);
+    }
+  }
   const sent = {};
   for (const c of usable) {
     const r = p.channels[c];

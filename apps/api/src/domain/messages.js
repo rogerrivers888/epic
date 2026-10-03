@@ -215,8 +215,13 @@ export function parse(src) {
   const here = () => { const top = stack[stack.length - 1]; return top.node[top.branch]; };
   const tag = /\{\{([\s\S]*?)\}\}/g;
   let last = 0; let m;
+  /** Plain text between tags may not hold half a tag: a typo is refused, not sent as it stands (Codex, 3 Oct 2026). */
+  const plain = (t) => {
+    if (t.includes('{{') || t.includes('}}')) throw bad(`“${t.trim().slice(0, 40)}” has a “{{” or “}}” that does not make a whole tag.`);
+    return t;
+  };
   while ((m = tag.exec(text))) {
-    if (m.index > last) here().push({ type: 'text', value: text.slice(last, m.index) });
+    if (m.index > last) here().push({ type: 'text', value: plain(text.slice(last, m.index)) });
     last = m.index + m[0].length;
     const inner = m[1].trim();
     let x;
@@ -242,7 +247,7 @@ export function parse(src) {
     }
   }
   if (stack.length > 1) throw bad('An “{{#if …}}” is never closed with “{{/if}}”.');
-  if (last < text.length) here().push({ type: 'text', value: text.slice(last) });
+  if (last < text.length) here().push({ type: 'text', value: plain(text.slice(last)) });
   return root;
 }
 

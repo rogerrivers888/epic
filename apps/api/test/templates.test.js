@@ -203,3 +203,11 @@ test('“Send me a test” is a real send, so it needs the owner signed in perso
     assert.equal(r.status, 403);
   } finally { await new Promise((r) => s.close(r)); }
 });
+
+test('half a tag is refused, a host message is never sent to an address beside its household, and a test checks its parts too (Codex, 3 Oct 2026)', async () => {
+  assert.throws(() => parse('Hello {{name'), /does not make a whole tag/);
+  assert.throws(() => parse('Done }} now'), /does not make a whole tag/);
+  await assert.rejects(templates.deliver({ templateKey: 'new_tip', fields: { amount: '5.00', link: 'x' }, to: { householdId: '00000000-0000-0000-0000-000000000000', email: 'other@example.com' } }), { code: 'mixed_recipient' });
+  const { rows: [acct] } = await query("insert into accounts (email, role, status, name) values ('parts-test@example.com', 'customer', 'active', 'Sam') returning id, email");
+  await assert.rejects(templates.sendTest('rating_dropped', { account: { id: acct.id, email: acct.email }, channels: ['email'], channelsDraft: { email: { subject: '{{#if link}}{{/if}}', body: 'x' } } }), { code: 'empty_part' });
+});
