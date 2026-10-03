@@ -475,21 +475,30 @@ export function retrieveSubscription(id, { householdId = null } = {}) {
  * A second membership Stripe made for a household that already had one (two Checkouts finished): cancelled at
  * once, and anything it took refunded in full. Keyed on the subscription, so a retry never refunds twice.
  */
-export async function cancelSecondMembership(subscriptionId, { householdId = null } = {}) {
-  // Marked first, so its own cancellation event is recognised and never written down as a membership.
-  // Not caught: unmarked, its cancellation would be written down as a membership — the event fails and is retried.
-  await call('POST', `/subscriptions/${encodeURIComponent(subscriptionId)}`, { metadata: { epic_duplicate: 'true' } },
-    { householdId, purpose: 'membership.duplicate.mark' });
-  const sub = await call('DELETE', `/subscriptions/${encodeURIComponent(subscriptionId)}`, { prorate: 'false', invoice_now: 'false' },
-    { householdId, purpose: 'membership.duplicate.cancel', idempotencyKey: `dup-cancel-${subscriptionId}` })
-    .catch(async (err) => { if (err.httpStatus === 404 || err.detail === 'resource_missing') return retrieveSubscription(subscriptionId, { householdId }); throw err; });
-  const invoiceId = typeof sub?.latest_invoice === 'string' ? sub.latest_invoice : sub?.latest_invoice?.id;
+export async function cancelSecondMembership(subscriptionId, { householdId = null, sub = null } = {}) {
+  // Resumable: each step is skipped when already done, so a retry after a failure part-way finishes the job
+  // (Codex, 3 Oct 2026). Marked first — not caught: unmarked, its cancellation would be written down as a membership.
+  let now = sub ?? await retrieveSubscription(subscriptionId, { householdId });
+  if (now?.metadata?.epic_duplicate !== 'true') {
+    now = await call('POST', `/subscriptions/${encodeURIComponent(subscriptionId)}`, { metadata: { epic_duplicate: 'true' } },
+      { householdId, purpose: 'membership.duplicate.mark' });
+  }
+  if (!['canceled', 'incomplete_expired'].includes(now?.status)) {
+    now = await call('DELETE', `/subscriptions/${encodeURIComponent(subscriptionId)}`, { prorate: 'false', invoice_now: 'false' },
+      { householdId, purpose: 'membership.duplicate.cancel', idempotencyKey: `dup-cancel-${subscriptionId}` });
+  }
+  const invoiceId = typeof now?.latest_invoice === 'string' ? now.latest_invoice : now?.latest_invoice?.id;
   if (!invoiceId) return { cancelled: true, refunded: 0 };
   const inv = await call('GET', `/invoices/${encodeURIComponent(invoiceId)}`, null, { householdId, purpose: 'membership.duplicate.read' });
   const pi = typeof inv?.payment_intent === 'string' ? inv.payment_intent : inv?.payment_intent?.id;
   if (inv?.status !== 'paid' || !(inv.amount_paid > 0) || !pi) return { cancelled: true, refunded: 0 };
-  await call('POST', '/refunds', { payment_intent: pi, reason: 'duplicate', metadata: { epic_kind: 'membership_duplicate', epic_subscription: subscriptionId } },
-    { householdId, purpose: 'membership.duplicate.refund', idempotencyKey: `dup-refund-${subscriptionId}` });
+  try {
+    await call('POST', '/refunds', { payment_intent: pi, reason: 'duplicate', metadata: { epic_kind: 'membership_duplicate', epic_subscription: subscriptionId } },
+      { householdId, purpose: 'membership.duplicate.refund', idempotencyKey: `dup-refund-${subscriptionId}` });
+  } catch (err) {
+    // Refunded already (a retry after the idempotency window): done.
+    if (err.detail !== 'charge_already_refunded') throw err;
+  }
   return { cancelled: true, refunded: inv.amount_paid };
 }
 

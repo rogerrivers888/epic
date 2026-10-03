@@ -199,6 +199,11 @@ export const HOUSEHOLD_PLAN_CAP = Number(process.env.EPIC_HOUSEHOLD_PLAN_CAP || 
  */
 export async function planCapFor(householdId, client) {
   const run = client ? (t, p) => client.query(t, p) : query;
+  // A membership bought through Stripe decides first, running or paused (L8; Codex, 3 Oct 2026): Solo is one person,
+  // Household and Pro are the household. With none running, the account's plan as before.
+  const { rows: [bought] } = await run(
+    "select plan_key from memberships where household_id = $1 and status <> 'cancelled' order by started_at desc limit 1", [householdId]);
+  if (bought) return bought.plan_key === 'solo' ? { cap: 1, plan: 'solo' } : { cap: HOUSEHOLD_PLAN_CAP, plan: bought.plan_key === 'pro' ? 'pro' : 'household' };
   const { rows } = await run(
     `select plan from accounts where household_id = $1 order by (role = 'owner') desc, created_at, id limit 1`,
     [householdId],

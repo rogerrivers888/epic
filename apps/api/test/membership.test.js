@@ -42,7 +42,7 @@ const fake = http.createServer((req, res) => {
     if (req.url.endsWith('/expire')) return json({ id: req.url.split('/')[4], status: 'expired' });
     if (req.url.startsWith('/v1/checkout/sessions/')) return json({ id: req.url.split('/')[4], ...checkoutRead });
     if (req.url.startsWith('/v1/subscriptions/') && req.method === 'DELETE') { const s = subs.get(req.url.split('/')[3].split('?')[0]); return json({ ...s, status: 'canceled', latest_invoice: null }); }
-    if (req.url.startsWith('/v1/subscriptions/') && req.method === 'POST') return json(subs.get(req.url.split('/')[3]) ?? {});
+    if (req.url.startsWith('/v1/subscriptions/') && req.method === 'POST') { const s = subs.get(req.url.split('/')[3]); if (s && body.includes('epic_duplicate')) s.metadata = { ...s.metadata, epic_duplicate: 'true' }; return json(s ?? {}); }
     if (req.url.startsWith('/v1/subscriptions/')) { const s = subs.get(req.url.split('/')[3]); return s ? json(s) : json({ error: { code: 'resource_missing' } }, 404); }
     return json({ error: { code: 'not_found' } }, 404);
   });
@@ -460,4 +460,28 @@ test('a press that outlived its slot writes nothing over the press after it', as
   await billing.releaseCheckout(household.id, aged);
   assert.equal((await query('select membership_checkout_id, membership_checkout_at is not null as held from households where id = $1', [household.id])).rows[0].held, true);
   assert.ok(first.claimed);
+});
+
+test('a duplicate marked on a failed try is still cancelled when Stripe retries the event', async () => {
+  const { household } = await aMember();
+  await applyStripeEvent(event('customer.subscription.created', aSub(household.id)));
+  const second = aSub(household.id);
+  // Marked by an earlier try that then failed: still running at Stripe.
+  second.metadata.epic_duplicate = 'true';
+  calls.length = 0;
+  await applyStripeEvent(event('customer.subscription.created', second));
+  assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.startsWith(`/v1/subscriptions/${second.id}`)), 'the cancel resumed');
+  assert.equal(calls.some((c) => c.method === 'POST' && c.url === `/v1/subscriptions/${second.id}`), false, 'not marked twice');
+  assert.equal(await billing.membershipBySubscription(second.id), null);
+});
+
+test('the membership bought decides how many people a household can hold', async () => {
+  const { planCapFor } = await import('../src/repositories/households.js');
+  const { household } = await aMember();
+  const sub = aSub(household.id, { plan: 'solo' });
+  await applyStripeEvent(event('customer.subscription.created', sub));
+  assert.equal((await planCapFor(household.id)).cap, 1);
+  sub.items.data[0].price.metadata.epic_plan = 'household';
+  await applyStripeEvent(event('customer.subscription.updated', sub));
+  assert.ok((await planCapFor(household.id)).cap > 1);
 });

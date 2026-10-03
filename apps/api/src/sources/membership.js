@@ -136,8 +136,10 @@ export function membershipPayload(m) {
 // Stripe's events
 // ---------------------------------------------------------------------------
 
+// Epic's membership subscriptions — a duplicate among them too, whose clean-up the read-back below finishes.
+const isMembership = (o) => o?.metadata?.epic_kind === 'membership';
 // A second subscription cancelled as a duplicate is not a membership, and never becomes a row.
-const isMembership = (o) => o?.metadata?.epic_kind === 'membership' && o?.metadata?.epic_duplicate !== 'true';
+const isDuplicate = (o) => o?.metadata?.epic_duplicate === 'true';
 
 /** The subscription an invoice is for, across API versions. */
 const invoiceSubscription = (inv) => (typeof inv?.subscription === 'string' ? inv.subscription : inv?.subscription?.id)
@@ -152,6 +154,9 @@ async function sync(subscriptionId, { pauseReason = null } = {}) {
   const customer = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
   const householdId = sub.metadata?.epic_household_id ?? (customer ? await billing.householdByCustomer(customer) : null);
   if (!householdId) return null;
+  // Marked a duplicate on an earlier try: its clean-up is finished here — cancelled, refunded — every time, so a
+  // retry after a failure part-way never leaves it running or its money kept (Codex, 3 Oct 2026). Never a row.
+  if (isDuplicate(sub)) { await stripe.cancelSecondMembership(sub.id, { householdId, sub }); return null; }
   // The subscription's customer is the household's, however the household came to have it.
   if (customer) await billing.setCustomer(householdId, customer);
   const facts = stripe.membershipFromSubscription(sub);
@@ -162,7 +167,7 @@ async function sync(subscriptionId, { pauseReason = null } = {}) {
     // The backstop for two Checkouts finished at once: the household keeps the membership it had, and the second is
     // cancelled and refunded in full. Nothing is written for it; its own cancellation event is then a cancelled row.
     if (err.running?.stripe_subscription_id === sub.id) return err.running;
-    await stripe.cancelSecondMembership(sub.id, { householdId });
+    await stripe.cancelSecondMembership(sub.id, { householdId, sub });
     return null;
   }
 }
