@@ -188,3 +188,18 @@ test('a guest’s template on a shared trigger may go to a bare address; a messa
     await assert.rejects(templates.deliver({ templateKey: 'renewal_failed', fields: { plan: '', amount: '1', retryOn: 'x', updateUrl: 'y' }, to: { email: 'm2@example.com' } }), { code: 'empty_part' });
   } finally { Object.assign(templates.senders, was); }
 });
+
+test('“Send me a test” is a real send, so it needs the owner signed in personally (Codex, 3 Oct 2026)', async () => {
+  const express = (await import('express')).default;
+  const routes = await import('../src/routes/templates.js');
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { req.access = { doors: ['admin'], capabilities: new Set(['view_audit', 'manage_settings']), isOwner: false, role: null, elevated: false }; next(); });
+  app.use('/t', routes.default);
+  const s = app.listen(0, '127.0.0.1');
+  await new Promise((r) => s.once('listening', r));
+  try {
+    const r = await fetch(`http://127.0.0.1:${s.address().port}/t/rating_dropped/send-test`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(r.status, 403);
+  } finally { await new Promise((r) => s.close(r)); }
+});

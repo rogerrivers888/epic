@@ -83,7 +83,8 @@ router.post('/:key/restore', requires('manage_settings'), requireOwnerSignedIn('
   } catch (err) { send(res, err, next); }
 });
 
-router.post('/:key/send-test', requires('manage_settings'), async (req, res, next) => {
+// A test is a real send, and a send is spend: the owner, signed in personally (G7/G11; Codex, 3 Oct 2026).
+router.post('/:key/send-test', requires('manage_settings'), requireOwnerSignedIn('send a test message'), async (req, res, next) => {
   try {
     const b = req.body ?? {};
     const channels = Array.isArray(b.channels) ? b.channels.map(String) : null;
