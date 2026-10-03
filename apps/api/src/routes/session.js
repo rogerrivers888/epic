@@ -16,7 +16,7 @@ import {
 } from '../repositories/accounts.js';
 import { loginLinkEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
 import { sendSms, smsStatus } from '../sources/sms.js';
-import { accessFor } from '../access.js';
+import { accessFor, isPersonalSession } from '../access.js';
 import { signInLockedOut, noteSignInFailure } from '../signInGuard.js';
 import { sessionBlockedByGate, siteGateOn } from '../siteGate.js';
 
@@ -88,7 +88,9 @@ router.get('/session', async (req, res, next) => {
       // (access.js). The app draws only the doors it is told it holds — and the
       // API refuses the rest whatever the app draws.
       // …and whose session it is, so the back office can say "Roger · Owner" rather than a role alone (Roger, 3 Oct 2026).
-      access: session ? { ...summariseAccess(access), name: account?.name ?? null } : null,
+      // A shared passcode carries the owner's account once it is claimed, but it is not the owner: the name is
+      // shown for a personal sign-in only (Codex, 3 Oct 2026).
+      access: session ? { ...summariseAccess(access), name: isPersonalSession(session) ? account?.name ?? null : null } : null,
     });
   } catch (err) { next(err); }
 });
