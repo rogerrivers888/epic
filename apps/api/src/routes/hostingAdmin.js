@@ -529,6 +529,10 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
         where p.state in ('scheduled', 'held', 'failed') order by p.release_at limit 500`,
     );
     const { rows: refunds } = await query(`select cause, state, count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_payments where kind = 'refund' and created_at > now() - interval '30 days' group by 1, 2 order by 1`);
+    const { rows: stuck } = await query(
+      `select p.id, p.amount_pence, p.cause, p.reason, p.created_at, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id
+        where p.kind in ('refund', 'release') and p.state = 'failed' order by p.created_at`,
+    );
     const { rows: holds } = await query(
       `select b.id, b.held_pence, b.respond_by, o.title, h.name as host, hh.name as household
          from experience_bookings b join host_offers o on o.id = b.offer_id join hosts h on h.id = b.host_id join households hh on hh.id = b.household_id
@@ -540,8 +544,20 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
       held: payouts.filter((p) => p.state === 'held').map(pay),
       failed: payouts.filter((p) => p.state === 'failed').map(pay),
       refundsByCause: refunds.map((r) => ({ cause: r.cause, state: r.state, count: r.n, pence: r.pence })),
+      refundsNeedingAPerson: stuck.map((r) => ({ id: r.id, event: r.title, pence: r.amount_pence, cause: r.cause, stripe: r.reason, at: r.created_at })),
       cardHolds: holds.map((h) => ({ bookingId: h.id, event: h.title, host: h.host, household: h.household, pence: h.held_pence, replyBy: h.respond_by })),
     });
+  } catch (err) { next(err); }
+});
+
+/** A refund Stripe refused, sent again with the same key once a person has looked (Codex, 2 Oct 2026). */
+router.post('/money/refunds/:id/retry', requires('manage_hosting'), async (req, res, next) => {
+  try {
+    if (!UUID.test(String(req.params.id))) throw refuse(404, 'not_found', 'No such refund.');
+    const { rows: [r] } = await query(`update hosting_payments set state = 'pending', updated_at = now() where id = $1 and kind in ('refund', 'release') and state = 'failed' returning id`, [req.params.id]);
+    if (!r) throw refuse(404, 'not_found', 'That refund isn’t waiting on a person.');
+    await logChange({ subjectKind: 'booking', subjectId: r.id, field: 'refund_retry', after: { state: 'pending' }, why: typeof req.body?.why === 'string' ? req.body.why.slice(0, 500) : null, by: by(), byLabel: 'staff' });
+    res.json({ retried: true });
   } catch (err) { next(err); }
 });
 

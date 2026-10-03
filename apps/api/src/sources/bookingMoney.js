@@ -429,6 +429,8 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
       out.sent += 1;
     } catch (err) {
       if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
+      // Stripe refused it outright: still owed, so the amount stays reserved against the booking and the row waits in the
+      // back office (Money › Payouts, refunds) for a person to retry or settle it — never quietly given back to the host (Codex, 2 Oct 2026).
       await query(`update hosting_payments set state = 'failed', reason = $2, updated_at = now() where id = $1 and state = 'pending'`, [p.id, String(err.detail ?? err.code ?? 'failed').slice(0, 80)]);
       console.error(`epic-api: refund ${p.id} failed — ${err.detail ?? err.code ?? err.message}`);
       out.failed += 1;

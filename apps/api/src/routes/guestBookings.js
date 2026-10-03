@@ -203,7 +203,9 @@ function parseWhen(o, sessionsAhead, body) {
     const date = String(body?.date ?? '');
     const time = String(body?.time ?? '');
     const length = Number(body?.lengthMin ?? o.duration_min ?? 60);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) throw refuse(400, 'bad_slot', 'Pick a day and a time.');
+    // A real day and a real time, or no slot (Codex, 2 Oct 2026).
+    const realDay = /^\d{4}-\d{2}-\d{2}$/.test(date) && new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) === date;
+    if (!realDay || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw refuse(400, 'bad_slot', 'Pick a day and a time.');
     const lengths = o.session_lengths?.length ? o.session_lengths : [o.duration_min ?? 60];
     if (!lengths.includes(length)) throw refuse(400, 'bad_length', 'Pick one of the host’s session lengths.');
     const cfg = hostingConfig();
@@ -244,7 +246,12 @@ function parseParty(body) {
 router.post('/experiences/:id/booking/quote', async (req, res, next) => {
   try {
     const e = await eventWithSessions(req.params.id);
-    if (!e) throw refuse(404, 'not_found', 'That event isn’t open.');
+    // Priced only for an event that is open to this caller — live, and for a private one its link or invitation (Codex, 2 Oct 2026).
+    if (!e || e.offer.state !== 'live') throw refuse(404, 'not_found', 'That event isn’t open.');
+    if (e.offer.visibility !== 'public') {
+      const invite = typeof req.body?.inviteToken === 'string' ? await repo.inviteByToken(req.body.inviteToken.slice(0, 64)) : null;
+      if (!opensPrivately(e.offer, { linkToken: typeof req.body?.linkToken === 'string' ? req.body.linkToken.slice(0, 64) : null, invite })) throw refuse(404, 'not_found', 'This one is invitation only.');
+    }
     const when = parseWhen(e.offer, ahead(e.sessions, e.offer), req.body?.when);
     const party = parseParty(req.body?.party);
     const p = priceFor(e.offer, when.kind, { adults: party.adults, children: party.children.length }, when.sessionIds.length);

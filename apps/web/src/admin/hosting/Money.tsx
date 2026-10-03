@@ -151,6 +151,7 @@ type Payouts = {
   waitingForConfirmation: Payout[]; held: Payout[]; failed: Payout[];
   refundsByCause: { cause: string | null; state: string; count: number; pence: number }[];
   cardHolds: { bookingId: string; event: string | null; host: string; household: string; pence: number | null; replyBy: string | null }[];
+  refundsNeedingAPerson?: { id: string; event: string | null; pence: number; cause: string | null; stripe: string | null; at: string }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -517,6 +518,20 @@ function PayoutsView() {
         <Ladder columns={refundCols} rows={data.refundsByCause.length ? [...refunds, refundTotal] : []} keyOf={(x, i) => (x.total ? 'total' : `${x.cause}:${x.state}:${i}`)}
                 sort={r.sort} desc={r.desc} onSort={r.onSort} empty={<Blank />} />
       </View>
+      {data.refundsNeedingAPerson?.length ? (
+        <View>
+          <TableHead tip={tip('Refunds needing a person', 'Stripe refused these. The money stays owed to the guest until someone retries or settles it.')}>Refunds needing a person</TableHead>
+          <Ladder<NonNullable<Payouts['refundsNeedingAPerson']>[number]>
+            columns={[
+              { key: 'event', label: 'Event', grow: true, tip: tip('Event', 'Whose booking the refund is for.'), cell: (x) => <Word>{x.event ?? '—'}</Word> },
+              { key: 'amount', label: 'Amount', align: 'right', tip: tip('Amount', 'Owed back to the guest.'), cell: (x) => <Word>{gbp(x.pence)}</Word> },
+              { key: 'stripe', label: 'Stripe said', tip: tip('Stripe said', 'Stripe’s own code for the refusal.'), cell: (x) => <Word>{x.stripe ?? '—'}</Word> },
+              { key: 'when', label: 'When', tip: tip('When', 'When the refund was owed.'), cell: (x) => <Word>{when(x.at)}</Word> },
+              { key: 'retry', label: '', cell: (x) => <TextAction label="Retry" onPress={() => { void api.hostingAdminPost(`/money/refunds/${x.id}/retry`, {}).then(reload).catch(() => null); }} /> },
+            ]}
+            rows={data.refundsNeedingAPerson} keyOf={(x) => x.id} />
+        </View>
+      ) : null}
       <View>
         <TableHead tip={tip('Card holds · Ask to book', 'On request bookings: the card is held, not charged, until the host answers.')}>Card holds · Ask to book</TableHead>
         <Ladder columns={holdCols} rows={holds} keyOf={(x) => x.bookingId} sort={c.sort} desc={c.desc} onSort={c.onSort} empty={<Blank />} />
