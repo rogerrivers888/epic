@@ -31,6 +31,9 @@ import { sendRemindersDue as membershipReminders } from './sources/membership.js
 import hostDeskRoutes from './routes/hostDesk.js';
 import * as hostingSettingsRepo from './repositories/hostingSettings.js';
 import hostingAdminV4Routes from './routes/hostingAdmin.js';
+import templatesAdminRoutes from './routes/templates.js';
+import automationsAdminRoutes from './routes/automations.js';
+import { ensureSeeded as seedTemplates } from './repositories/templates.js';
 import guestBookingRoutes, { publicRouter as guestBookingPublicRoutes } from './routes/guestBookings.js';
 import publicPagesRoutes from './routes/publicPages.js';
 import hostingMoneyRoutes, { adminRouter as hostingMoneyAdminRoutes, startHostingMoneyLoop } from './routes/hostingMoney.js';
@@ -383,6 +386,9 @@ app.use('/api/postmark', postmarkRoutes);
 app.use('/api/admin/hosting', requireDoor('admin'), hostingMoneyAdminRoutes);
 // Hosting v4's back office, BO8a–BO8r (routes/hostingAdmin.js).
 app.use('/api/admin/hosting', requireDoor('admin'), hostingAdminV4Routes);
+// Messages and automations as records (K16): the template editor and the automations list, log and Undo.
+app.use('/api/admin/templates', requireDoor('admin'), templatesAdminRoutes);
+app.use('/api/admin/automations', requireDoor('admin'), automationsAdminRoutes);
 app.use('/api/admin/hosting', requireDoor('admin'), hostingAdminRoutes);
 // The one ID check in Casual meet ups: nobody clears their own (routes/openTo.js).
 app.use('/api/admin/open', requireDoor('admin'), openToAdminRoutes);
@@ -1196,6 +1202,8 @@ setInterval(() => { void checkGround(); }, GROUND_EVERY_MS).unref?.();
 setInterval(() => { void tryResume(false); }, RESUME_EVERY_MS).unref?.();
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`epic-api listening on 0.0.0.0:${port}`);
+  // The message templates, written where absent (K16). Nothing sends from them yet, so a failure here stops nothing.
+  seedTemplates().catch((err) => console.error(`epic-api: message templates — ${err.message}`));
 });
 
 for (const signal of ['SIGTERM', 'SIGINT']) {

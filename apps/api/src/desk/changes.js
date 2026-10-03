@@ -9,7 +9,8 @@
 
 import { query } from '../db.js';
 
-export const AREAS = ['Categories', 'Subcategories', 'Facts', 'Mapping', 'Defaults', 'Collections', 'Fact automations', 'Markets'];
+// Messages and Automations: template edits and restores, and automation switches, locks and rules (K16, migration 374).
+export const AREAS = ['Categories', 'Subcategories', 'Facts', 'Mapping', 'Defaults', 'Collections', 'Fact automations', 'Markets', 'Messages', 'Automations'];
 
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });
 const text = (v) => (v == null ? null : String(v));
