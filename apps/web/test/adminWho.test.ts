@@ -29,3 +29,9 @@ test('staff read as their own name and role; a session with nothing to say says 
   assert.equal(proposes({ role: { key: 'support', label: 'Support' }, elevated: false }), false);
   assert.equal(whoLine(null), '—');
 });
+
+test('an agent session proposes too, and says so (Codex, 3 Oct 2026)', () => {
+  const access = { name: null, role: { key: 'agent', label: 'Agent — read & propose' }, elevated: false };
+  assert.equal(proposes(access), true);
+  assert.equal(whoLine(access), 'Agent — read & propose');
+});

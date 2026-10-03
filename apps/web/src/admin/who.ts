@@ -22,5 +22,6 @@ export function whoLine(access: Pick<Access, 'name' | 'role' | 'elevated'> | nul
  * signal, not a name, since an owner may have none (Codex, 3 Oct 2026).
  */
 export function proposes(access: Pick<Access, 'role' | 'elevated'> | null | undefined): boolean {
-  return access?.role?.key === 'owner' && !access?.elevated;
+  if (access?.elevated) return false;
+  return access?.role?.key === 'owner' || access?.role?.key === 'agent';
 }
