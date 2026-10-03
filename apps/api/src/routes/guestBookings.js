@@ -615,6 +615,13 @@ export async function applyPaymentIntent(pi) {
         await owe(c, charged, { amountPence: charged.charged_pence, cause: 'paid_after_cancel', key: `paid_after_cancel:${b.id}`, wholeBooking: true, triggeredBy: 'epic' });
         return 'refunded';
       }
+      // A part cancelled while the later charge was on its way (Codex, 3 Oct 2026): it was charged for, so it comes
+      // back now — what is due is the value less everything taken off, never what the charge carried.
+      if (later) {
+        const due = Math.max(0, Number(charged.value_pence ?? 0) - Number(charged.later_off_pence ?? 0));
+        const over = Number(charged.charged_pence) - due;
+        if (over > 0) await owe(c, charged, { amountPence: over, cause: 'guest_cancelled', key: `later_adjust:${b.id}:${pi.id}`, triggeredBy: 'guest' });
+      }
       // The later charge of a booking already confirmed when its card was saved: nobody is told it is on again.
       return later ? 'later' : 'confirmed';
     });

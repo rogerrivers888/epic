@@ -1122,3 +1122,30 @@ test('L4: part of a booking far ahead cancelled before its charge comes off it; 
     assert.deepEqual([after.charged_pence, after.fee_pence, after.host_pence], [3000, 600, 2400]);
   } finally { await srv.close(); }
 });
+
+test('L4: two parts cancelled separately come off the same whole; a part cancelled during the charge comes back', async () => {
+  settings.forget();
+  const { o, sessions } = await anEvent({ lane: 'weekly', price: 1000, priceMode: 'same_each', sessions: 3, firstIn: 100 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'book_ahead', sessionIds: sessions.map((s) => s.id) }, party: { adults: 2 } });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    Object.assign(setups.get(r.body.pay.setupIntent), { status: 'succeeded', payment_method: 'pm_saved_5' });
+    await srv.send('POST', `/api/booked/${r.body.booking.id}/payment`, {});
+    // £10 × 2 × 3 = £60. Cancel the third, then the second: £20 each, leaving £20.
+    assert.equal((await srv.send('POST', `/api/booked/${r.body.booking.id}/cancel`, { sessionIds: [sessions[2].id] })).status, 200);
+    assert.equal((await srv.send('POST', `/api/booked/${r.body.booking.id}/cancel`, { sessionIds: [sessions[1].id] })).status, 200);
+    assert.equal((await query('select later_off_pence from experience_bookings where id = $1', [r.body.booking.id])).rows[0].later_off_pence, 4000);
+
+    // The charge was made for £20 — and Stripe's answer lands after a cancellation that took £20 more off:
+    // charged, then the part cancelled comes straight back.
+    const { rows: [b] } = await query('select * from experience_bookings where id = $1', [r.body.booking.id]);
+    await query('update experience_bookings set later_off_pence = 6000 where id = $1', [b.id]);
+    const pi = { id: `pi_race_${b.id.slice(0, 6)}`, object: 'payment_intent', status: 'succeeded', amount: 2000, amount_received: 2000, metadata: { epic_kind: 'booking', epic_booking_id: b.id } };
+    await query('update experience_bookings set stripe_payment_intent = $2 where id = $1', [b.id, pi.id]);
+    await guest.applyPaymentIntent(pi);
+    const { rows: [line] } = await query(`select amount_pence, cause from hosting_payments where booking_id = $1 and kind = 'refund'`, [b.id]);
+    assert.deepEqual([line.amount_pence, line.cause], [2000, 'guest_cancelled']);
+  } finally { await srv.close(); }
+});

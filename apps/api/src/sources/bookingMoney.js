@@ -72,7 +72,9 @@ async function bookingsOn(c, sessionIds) {
  */
 export function chargeBasis(b) {
   if (!b || !['card_saved', 'charge_failed'].includes(b.payment_state)) return b;
-  return { ...b, charged_pence: Math.max(0, Number(b.value_pence ?? 0) - Number(b.later_off_pence ?? 0)), refunded_pence: 0, cancellation_fee_pence: 0 };
+  // The whole value stays the basis and what is already taken off counts as given back, so a second part cancelled
+  // is shared out of the same whole as the first (Codex, 3 Oct 2026: two of three sessions are two thirds, not 1/3 + 2/9).
+  return { ...b, charged_pence: Number(b.value_pence ?? 0), refunded_pence: Math.min(Number(b.value_pence ?? 0), Number(b.later_off_pence ?? 0)), cancellation_fee_pence: 0 };
 }
 
 /**
