@@ -220,6 +220,13 @@ export async function refreshAccountFacts({ limit = 20, status = stripe.stripeSt
       refreshed += 1;
     } catch (err) {
       if (err.code === 'stripe_unreachable') break;
+      // Only Stripe's account-specific refusal — no access to that account, or it does not exist — means it was deleted
+      // or disconnected. Anything else (a key without permission, a platform-wide refusal) says nothing about the
+      // account: the run stops with every row untouched, and says so (Codex, 3 Oct 2026).
+      if (err.code === 'stripe_refused' && err.detail !== 'account_invalid') {
+        console.error(`epic-api: account facts refresh stopped — Stripe refused (${err.detail ?? err.httpStatus ?? 'no code'}), not about one account`);
+        break;
+      }
       if (err.code === 'stripe_refused') {
         // Stripe won't let Epic read it: deleted, or disconnected from Epic. That is trouble for a person (Safety), and
         // the row is now whole, so it is not asked again and never holds up the accounts behind it (Codex, 3 Oct 2026).

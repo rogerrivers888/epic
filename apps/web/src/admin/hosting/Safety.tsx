@@ -252,7 +252,8 @@ function SafetyTables({ canManage }: { canManage: boolean }) {
 
       <View>
         <TableHead tip={tip('Stripe account trouble', 'Host accounts Stripe has disabled, restricted or closed. The row goes when Stripe says the account is well again.')}>Stripe account trouble</TableHead>
-        <Ladder columns={troubleCols} rows={trouble} keyOf={(r) => r.hostId} sort={at.sort} desc={at.desc} onSort={at.onSort} empty={<Blank />} />
+        <Ladder columns={troubleCols} rows={trouble} keyOf={(r) => r.hostId} onRow={(r) => open(paths.hostingRecord('host', r.hostId))} label={(r) => `Open ${r.host}`}
+                sort={at.sort} desc={at.desc} onSort={at.onSort} empty={<Blank />} />
       </View>
 
       <View>

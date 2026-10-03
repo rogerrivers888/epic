@@ -543,7 +543,12 @@ test('Codex: an older account Stripe won’t let Epic read is marked closed for 
     `insert into hosts (household_id, name, stripe_account_id, stripe_account_model, stripe_requirements) values ($1, 'Gone Away', 'acct_gone', 'v2', $2::jsonb) returning *`,
     [household.id, JSON.stringify({ currentlyDue: [], eventuallyDue: [], pastDue: [], disabledReason: null })],
   );
-  const read = async (id) => { if (id === 'acct_gone') throw Object.assign(new Error('no'), { code: 'stripe_refused' }); return { id, details_submitted: true, charges_enabled: true, payouts_enabled: true, capabilities: {}, settings: { payouts: { schedule: { interval: 'manual' } } }, requirements: {} }; };
+  // A refusal that says nothing about one account (a key without permission) closes nothing and stops the run.
+  const before = (await query('select stripe_requirements from hosts where id = $1', [h.id])).rows[0].stripe_requirements;
+  const platformWide = await money.refreshAccountFacts({ limit: 1000, status: () => ({ ready: true }), read: async () => { throw Object.assign(new Error('no'), { code: 'stripe_refused', detail: 'permission_error', httpStatus: 403 }); } });
+  assert.equal(platformWide.refreshed, 0);
+  assert.deepEqual((await query('select stripe_requirements from hosts where id = $1', [h.id])).rows[0].stripe_requirements, before, 'untouched');
+  const read = async (id) => { if (id === 'acct_gone') throw Object.assign(new Error('no'), { code: 'stripe_refused', detail: 'account_invalid', httpStatus: 403 }); return { id, details_submitted: true, charges_enabled: true, payouts_enabled: true, capabilities: {}, settings: { payouts: { schedule: { interval: 'manual' } } }, requirements: {} }; };
   await money.refreshAccountFacts({ limit: 1000, status: () => ({ ready: true }), read });
   const facts = (await query('select stripe_requirements from hosts where id = $1', [h.id])).rows[0].stripe_requirements;
   assert.equal(facts.disabledReason, 'account_closed');
