@@ -380,7 +380,7 @@ async function book({ offerId, body, household, account, invite = null }) {
       await query(`update offer_waitlist set state = 'offered' where offer_id = $1 and household_id = $2 and state = 'taken' and offer_expires_at > now()`, [o.id, b.household_id]);
       throw err;
     }
-    await query('update experience_bookings set stripe_payment_intent = $2 where id = $1', [b.id, pi.id]);
+    await query('update experience_bookings set stripe_payment_intent = $2 where id = $1 and stripe_payment_intent is null', [b.id, pi.id]);
     await ledger.record({ kind: asked ? 'hold' : 'charge', bookingId: b.id, offerId: o.id, hostId: host.id, householdId: b.household_id, amountPence: b.value_pence, epicPence: b.fee_pence, hostPence: b.host_pence, bookingValuePence: b.value_pence, ratePct: b.fee_rate_pct, state: 'pending', stripeRef: pi.id, mode: 'test', reason: b.fee_reason });
     return { booking: { id: b.id, state: 'pending_payment' }, pay: { clientSecret: pi.client_secret ?? null, paymentIntent: pi.id, amountPence: b.value_pence, hold: asked } };
 }
@@ -400,6 +400,9 @@ export async function applyPaymentIntent(pi) {
   const bookingId = pi?.metadata?.epic_booking_id;
   if (pi?.metadata?.epic_kind === 'tip') return applyTipIntent(pi);
   if (!bookingId || !UUID.test(bookingId)) return null;
+  // The PaymentIntent was read back from Stripe, so its metadata is Stripe's word. Stripe can answer before our own
+  // write of the intent's id has landed: a booking with no intent yet takes this one (Codex, 2 Oct 2026).
+  await query('update experience_bookings set stripe_payment_intent = $2 where id = $1 and stripe_payment_intent is null', [bookingId, pi.id]);
   const { rows: [b] } = await query('select * from experience_bookings where id = $1 and stripe_payment_intent = $2', [bookingId, pi.id]);
   if (!b) return null;
   const o = await repo.offerById(b.offer_id);
@@ -457,6 +460,8 @@ export async function applyPaymentIntent(pi) {
 async function applyTipIntent(pi) {
   const tipId = pi?.metadata?.epic_tip_id;
   if (!tipId || !UUID.test(tipId)) return null;
+  // As for a booking: Stripe may answer before our write of the tip's reference (Codex, 2 Oct 2026).
+  await query('update booking_tips set stripe_ref = $2 where id = $1 and stripe_ref is null', [tipId, pi.id]);
   // A tip whose payment failed or was abandoned frees the booking for another try (Codex, 2 Oct 2026).
   if (pi.status === 'canceled' || (pi.status === 'requires_payment_method' && pi.last_payment_error)) {
     await query(`update booking_tips set state = 'failed' where id = $1 and stripe_ref = $2 and state = 'pending'`, [tipId, pi.id]);
@@ -887,7 +892,7 @@ router.post('/booked/:id/tip', async (req, res, next) => {
       await query(`update booking_tips set state = 'failed' where id = $1 and stripe_ref is null`, [t.id]);
       throw err;
     }
-    await query('update booking_tips set stripe_ref = $2 where id = $1', [t.id, pi.id]);
+    await query('update booking_tips set stripe_ref = $2 where id = $1 and stripe_ref is null', [t.id, pi.id]);
     res.status(201).json({ tip: { id: t.id, amountPence: amount, feePence: fee, totalPence: amount + fee }, pay: { clientSecret: pi.client_secret ?? null, paymentIntent: pi.id } });
   } catch (err) { next(err); }
 });

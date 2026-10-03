@@ -253,11 +253,15 @@ export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = 
       [offerId, ymd(span.first), ymd(span.last), firstMoved, delta, toTime],
     );
     const bookings = await bookingsOn(c, moving.map((x) => x.id));
-    const told = bookings.map((b) => ({
+    const told = bookings.map((b) => {
+      // The guest's own session that moved, not the first one in the run (Codex, 2 Oct 2026).
+      const mine = moved.find((m) => (b.booked_sessions ?? []).includes(String(m.id))) ?? moved[0];
+      return {
       householdId: b.household_id, kind: 'date_changed', title: `${offer.title ?? 'Your booking'} has moved`,
-      body: `New date: ${moved[0].to.date}${moved[0].to.time ? ` at ${moved[0].to.time}` : ''}. If it no longer works, cancel for a full refund.`,
+      body: `New date: ${mine.to.date}${mine.to.time ? ` at ${mine.to.time}` : ''}. If it no longer works, cancel for a full refund.`,
       link: guestLink(), dedupeKey: `date_changed:${b.id}:${moved.map((m) => `${m.id}@${m.to.date}T${m.to.time ?? ''}`).join(',')}`,
-    }));
+      };
+    });
     await logChange({ subjectKind: 'session', subjectId: moved.map((m) => m.id).join(','), field: 'date', before: moved.map((m) => m.from), after: moved.map((m) => m.to), why: scope === 'this' ? 'This session only' : 'This and all after it', by, byLabel: 'host' }, c);
     return { moved, late: moved.some((m) => m.late), guests: bookings.length, told };
   });
