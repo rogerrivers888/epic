@@ -75,7 +75,7 @@ export class SecondMembership extends Error {
  * Stripe says it is paid again; a cancelled membership keeps its end; and when
  * it first became paid is kept for good, whatever it is now.
  */
-export async function upsertFromSubscription({ householdId, subscriptionId, facts, mode = 'test', pauseReason = null, stamp = null }) {
+export async function upsertFromSubscription({ householdId, subscriptionId, facts, mode = 'test', pauseReason = null, stamp = null, changedAt = null }) {
   if (!facts.status) return null;
   // First paid: the trial's end, or the start when there was none — once Stripe says it is active, i.e. paid. A pause
   // keeps a date already set but never makes one: a first payment that fails is not revenue (Codex, 3 Oct 2026).
@@ -87,13 +87,13 @@ export async function upsertFromSubscription({ householdId, subscriptionId, fact
                                 trial_end, current_period_end, cancel_at_period_end, started_at, ended_at, paused_at, pause_reason, mode,
                                 paid_from, read_stamp)
        values ($1, $2, $3, $4, $5, $6, $17, $7, $8, $9, $10, coalesce($11, now()), case when $3 = 'cancelled' then coalesce($12::timestamptz, now()) end,
-               case when $3 = 'paused' then now() end, case when $3 = 'paused' then $13 end, $14, $15, $16)
+               case when $3 = 'paused' then coalesce($18::timestamptz, now()) end, case when $3 = 'paused' then $13 end, $14, $15, $16)
        on conflict (stripe_subscription_id) do update set
          plan_key = excluded.plan_key,
          status = excluded.status,
          stripe_price_id = excluded.stripe_price_id,
          price_history = case when memberships.monthly_pence is distinct from excluded.monthly_pence
-                              then memberships.price_history || jsonb_build_array(jsonb_build_object('until', now(), 'monthlyPence', memberships.monthly_pence))
+                              then memberships.price_history || jsonb_build_array(jsonb_build_object('until', coalesce($19::timestamptz, now()), 'monthlyPence', memberships.monthly_pence))
                               else memberships.price_history end,
          monthly_pence = excluded.monthly_pence,
          amount_pence = excluded.amount_pence,
@@ -103,7 +103,8 @@ export async function upsertFromSubscription({ householdId, subscriptionId, fact
          cancel_at_period_end = excluded.cancel_at_period_end,
          ended_at = case when excluded.status = 'cancelled' then coalesce(memberships.ended_at, excluded.ended_at, now()) else null end,
          -- Kept when it is cancelled while paused: its paid months end where its payments stopped (Codex, 3 Oct 2026).
-         paused_at = case when excluded.status = 'paused' then coalesce(memberships.paused_at, now())
+         -- Dated by Stripe — the unpaid period's start — not by when the event got here (Codex, 3 Oct 2026).
+         paused_at = case when excluded.status = 'paused' then coalesce(memberships.paused_at, excluded.paused_at, now())
                           when excluded.status = 'cancelled' then memberships.paused_at else null end,
          pause_reason = case when excluded.status = 'paused' then coalesce($13, memberships.pause_reason) else null end,
          paid_from = coalesce(memberships.paid_from, excluded.paid_from),
@@ -113,7 +114,7 @@ export async function upsertFromSubscription({ householdId, subscriptionId, fact
        returning *`,
       [householdId, facts.planKey ?? 'unknown', facts.status, subscriptionId, facts.priceId, facts.monthlyPence ?? 0, facts.interval ?? 'month',
         facts.trialEnd, facts.currentPeriodEnd, facts.cancelAtPeriodEnd ?? false, facts.startedAt, facts.endedAt, pauseReason, mode,
-        paidFrom, stamp ?? await readStamp(), facts.amountPence ?? facts.monthlyPence ?? 0],
+        paidFrom, stamp ?? await readStamp(), facts.amountPence ?? facts.monthlyPence ?? 0, facts.currentPeriodStart ?? null, changedAt],
     ));
   } catch (err) {
     // The household is a member already under another subscription: Stripe has made a second (two Checkouts finished).

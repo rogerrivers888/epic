@@ -75,6 +75,11 @@ export async function startCheckout({ householdId, email, name, planKey }) {
       if (prev?.status === 'open') await stripe.expireCheckout(slot.previous, { householdId });
     }
     const customerId = await ensureCustomer({ householdId, email, name });
+    // Every session still open for this customer is closed first — the recorded one, and any whose answer was lost on
+    // the way back from Stripe and so was never written down (Codex, 3 Oct 2026). Only one is ever payable.
+    for (const open of await stripe.openCheckouts(customerId, { householdId })) {
+      if (open?.metadata?.epic_kind === 'membership') await stripe.expireCheckout(open.id, { householdId });
+    }
     const { priceId } = await priceFor(planKey);
     // One trial a household: a household that has had a membership before pays from the first day.
     const before = await billing.latestMembership(householdId);
@@ -146,7 +151,7 @@ const invoiceSubscription = (inv) => (typeof inv?.subscription === 'string' ? in
   ?? inv?.parent?.subscription_details?.subscription ?? null;
 
 /** Read the subscription back and write it down. Returns the stored row, or null when it is not one of ours. */
-async function sync(subscriptionId, { pauseReason = null } = {}) {
+async function sync(subscriptionId, { pauseReason = null, changedAt = null } = {}) {
   // Stamped before the read, so an older read finishing later is dropped rather than written over a newer one.
   const stamp = await billing.readStamp();
   const sub = await stripe.retrieveSubscription(subscriptionId);
@@ -161,7 +166,7 @@ async function sync(subscriptionId, { pauseReason = null } = {}) {
   if (customer) await billing.setCustomer(householdId, customer);
   const facts = stripe.membershipFromSubscription(sub);
   try {
-    return await billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason, stamp });
+    return await billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason, stamp, changedAt });
   } catch (err) {
     if (err.code !== 'second_membership') throw err;
     // The backstop for two Checkouts finished at once: the household keeps the membership it had, and the second is
@@ -179,19 +184,21 @@ async function sync(subscriptionId, { pauseReason = null } = {}) {
 export async function applyMembershipEvent(event) {
   const obj = event?.data?.object ?? {};
   const type = String(event?.type ?? '');
+  // When Stripe says it happened — what a price change is dated by, never when Epic got round to it.
+  const at = event?.created ? new Date(event.created * 1000) : null;
   if (type === 'checkout.session.completed' && isMembership(obj)) {
-    if (obj.subscription) await sync(typeof obj.subscription === 'string' ? obj.subscription : obj.subscription.id);
+    if (obj.subscription) await sync(typeof obj.subscription === 'string' ? obj.subscription : obj.subscription.id, { changedAt: at });
     return true;
   }
   if (type.startsWith('customer.subscription.') && isMembership(obj)) {
-    const row = await sync(obj.id);
+    const row = await sync(obj.id, { changedAt: at });
     // Stripe's three-day warning: the backstop for the seven-day reminder, sent only if that one never went.
     if (type === 'customer.subscription.trial_will_end' && row) await remind(await billing.claimReminderFor(row.id));
     return true;
   }
   if ((type === 'invoice.paid' || type === 'invoice.payment_failed' || type === 'invoice.payment_succeeded') && invoiceSubscription(obj)) {
     const failed = type === 'invoice.payment_failed';
-    const row = await sync(invoiceSubscription(obj), { pauseReason: failed ? `payment_failed:${obj.billing_reason ?? 'invoice'}:${obj.id}` : null });
+    const row = await sync(invoiceSubscription(obj), { pauseReason: failed ? `payment_failed:${obj.billing_reason ?? 'invoice'}:${obj.id}` : null, changedAt: at });
     return Boolean(row);
   }
   return false;

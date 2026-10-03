@@ -25,6 +25,8 @@ const subs = new Map();
 let priceMade = 0;
 /** What a Checkout session reads back as. */
 let checkoutRead = { status: 'open' };
+/** Sessions Stripe lists as open for a customer. */
+let openSessions = [];
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -39,6 +41,7 @@ const fake = http.createServer((req, res) => {
     if (req.url === '/v1/prices' && req.method === 'POST') { priceMade += 1; return json({ id: 'price_solo_599', product: 'epic_membership_solo' }); }
     if (req.url === '/v1/checkout/sessions' && req.method === 'POST') return json({ id: 'cs_m_1', url: 'https://checkout.stripe.test/m' });
     if (req.url === '/v1/billing_portal/sessions' && req.method === 'POST') return json({ url: 'https://billing.stripe.test/p' });
+    if (req.url.startsWith('/v1/checkout/sessions?')) return json({ data: openSessions });
     if (req.url.endsWith('/expire')) return json({ id: req.url.split('/')[4], status: 'expired' });
     if (req.url.startsWith('/v1/checkout/sessions/')) return json({ id: req.url.split('/')[4], ...checkoutRead });
     if (req.url.startsWith('/v1/subscriptions/') && req.method === 'DELETE') { const s = subs.get(req.url.split('/')[3].split('?')[0]); return json({ ...s, status: 'canceled', latest_invoice: null }); }
@@ -499,4 +502,34 @@ test('a renewal that fails and never recovers stops the paid months where paymen
   await applyStripeEvent(event('customer.subscription.deleted', sub));
   // January and February paid; March to May never collected. Nothing else in this file is dated 2024.
   assert.equal((await membershipRevenue('2024-01-01', '2024-07-01')).pence, 2 * 599);
+});
+
+test('a Checkout whose answer was lost is closed before another opens', async () => {
+  const { account } = await aMember();
+  const srv = await server(account);
+  try {
+    openSessions = [{ id: 'cs_lost', metadata: { epic_kind: 'membership' } }, { id: 'cs_other', metadata: { epic_kind: 'pro' } }];
+    calls.length = 0;
+    assert.equal((await srv.send('POST', '/api/membership/checkout', { plan: 'solo' })).status, 200);
+    assert.ok(calls.some((c) => c.url === '/v1/checkout/sessions/cs_lost/expire'));
+    assert.equal(calls.some((c) => c.url === '/v1/checkout/sessions/cs_other/expire'), false, 'not somebody else’s kind');
+  } finally { openSessions = []; await srv.close(); }
+});
+
+test('a first payment given up on is no membership; a pause and a price change are dated by Stripe', async () => {
+  const { membershipFromSubscription } = await import('../src/sources/stripe.js');
+  assert.equal(membershipFromSubscription({ status: 'incomplete_expired' }).status, null);
+  const { household } = await aMember();
+  const sub = aSub(household.id, { status: 'active', trialEnd: new Date('2023-01-01T00:00:00Z') });
+  await applyStripeEvent({ ...event('customer.subscription.updated', sub), created: secs(new Date('2023-02-01T00:00:00Z')) });
+  // A price change Stripe made on 10 Mar, heard of on a later day.
+  sub.items.data[0].price.unit_amount = 1299; sub.items.data[0].price.metadata.epic_plan = 'pro';
+  await applyStripeEvent({ ...event('customer.subscription.updated', sub), created: secs(new Date('2023-03-10T00:00:00Z')) });
+  // The renewal for the period from 1 Apr fails; the event arrives days later.
+  sub.status = 'past_due';
+  sub.items.data[0].current_period_start = secs(new Date('2023-04-01T00:00:00Z'));
+  await applyStripeEvent({ ...event('invoice.payment_failed', { id: 'in_d', object: 'invoice', subscription: sub.id }), created: secs(new Date('2023-04-01T00:00:00Z')) });
+  const m = await billing.membershipBySubscription(sub.id);
+  assert.equal(new Date(m.paused_at).toISOString(), '2023-04-01T00:00:00.000Z');
+  assert.equal(m.price_history[0].until.slice(0, 10), '2023-03-10');
 });

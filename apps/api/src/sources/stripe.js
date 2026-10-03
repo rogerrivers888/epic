@@ -457,6 +457,12 @@ export function membershipCheckoutBody({ customerId, priceId, householdId, planK
   };
 }
 
+/** The customer's Checkout sessions still open — any of them payable. */
+export function openCheckouts(customerId, { householdId = null } = {}) {
+  return call('GET', '/checkout/sessions', { customer: customerId, status: 'open', limit: 20 }, { householdId, purpose: 'membership.checkout.list' })
+    .then((r) => r?.data ?? []);
+}
+
 export function membershipCheckout(args, { idempotencyKey = null } = {}) {
   return call('POST', '/checkout/sessions', membershipCheckoutBody(args), { householdId: args.householdId, purpose: 'membership.checkout', idempotencyKey });
 }
@@ -513,7 +519,9 @@ export function membershipStatus(sub) {
     case 'trialing': return 'trialling';
     case 'active': return 'active';
     case 'past_due': case 'unpaid': case 'paused': return 'paused';
-    case 'canceled': case 'incomplete_expired': return 'cancelled';
+    case 'canceled': return 'cancelled';
+    // A first payment never made and given up on: never a membership, and no trial used (Codex, 3 Oct 2026).
+    case 'incomplete_expired': return null;
     default: return null;
   }
 }
@@ -539,6 +547,8 @@ export function membershipFromSubscription(sub) {
     trialEnd: ts(sub?.trial_end),
     // Newer API versions put the period on the item; older ones on the subscription.
     currentPeriodEnd: ts(item?.current_period_end ?? sub?.current_period_end),
+    // The period now running: for a subscription past due, the one not paid for — where a pause began, by Stripe.
+    currentPeriodStart: ts(item?.current_period_start ?? sub?.current_period_start),
     cancelAtPeriodEnd: Boolean(sub?.cancel_at_period_end),
     startedAt: ts(sub?.start_date ?? sub?.created),
     endedAt: ts(sub?.ended_at),
