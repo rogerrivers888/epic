@@ -994,6 +994,19 @@ export async function applyPartyIntent(pi) {
     const { rows: [x] } = await c.query('select * from booking_party_changes where id = $1 and stripe_payment_intent = $2 for update', [changeId, pi.id]);
     if (!x || x.state !== 'pending') return x?.id ?? null;
     if (pi.status === 'succeeded') {
+      const { rows: [bk] } = await c.query('select * from experience_bookings where id = $1 for update', [x.booking_id]);
+      if (!bk || bk.state === 'cancelled') {
+        // Paid after the booking was cancelled (Codex, 3 Oct 2026): never counted on it, and given straight back from
+        // its own payment.
+        await c.query(`update booking_party_changes set state = 'failed', finished_at = now() where id = $1`, [x.id]);
+        await c.query(`update hosting_payments set state = 'succeeded', updated_at = now() where stripe_ref = $1 and kind = 'charge'`, [pi.id]);
+        await c.query(
+          `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, epic_pence, host_pence, state, mode, cause, idem_key, refund_of, triggered_by, refund_mode)
+           values ('refund', $1, $2, $3, $4, $5, $6, $7, 'pending', 'test', 'party_paid_after_cancel', $8, $9, 'epic', 'proportional')
+           on conflict (idem_key) where idem_key is not null do nothing`,
+          [x.booking_id, bk?.offer_id ?? null, bk?.host_id ?? null, bk?.household_id ?? null, x.charge_pence, x.fee_pence, x.charge_pence - x.fee_pence, `party_after_cancel:${x.id}`, pi.id]);
+        return x.id;
+      }
       await c.query(
         `update experience_bookings set charged_pence = charged_pence + $2, value_pence = value_pence + $2, fee_pence = fee_pence + $3, host_pence = host_pence + $2 - $3
           where id = $1`, [x.booking_id, x.charge_pence, x.fee_pence]);

@@ -749,6 +749,13 @@ export function refund({ paymentIntentId, amountPence, cause, bookingId, househo
  * whole share of the cancelled amount comes back from their balance — a reversal of the charge's transfer by that
  * amount. Epic then holds exactly the fee (sandbox, 3 Oct 2026: £60 cancelled, £57 back, £51 reversed, Epic £3).
  */
+/** How much of one payment can still be refunded: its charge's amount less what Stripe has refunded of it. */
+export async function refundableOn(paymentIntentId, { householdId = null } = {}) {
+  const pi = await call('GET', `/payment_intents/${encodeURIComponent(paymentIntentId)}`, { expand: ['latest_charge'] }, { householdId, purpose: 'booking.read' });
+  const ch = typeof pi?.latest_charge === 'object' ? pi.latest_charge : null;
+  return Math.max(0, Number(ch?.amount ?? pi?.amount_received ?? 0) - Number(ch?.amount_refunded ?? 0));
+}
+
 export async function reverseHostShare({ paymentIntentId, amountPence, householdId, idempotencyKey, refundId }) {
   const pi = await call('GET', `/payment_intents/${encodeURIComponent(paymentIntentId)}`, { expand: ['latest_charge'] }, { householdId, purpose: 'booking.read' });
   const transfer = pi?.latest_charge?.transfer;

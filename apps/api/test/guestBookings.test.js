@@ -1268,3 +1268,42 @@ test('paid on the day: a party change keeps the booking’s value in step, so Ep
     assert.equal((await query('select value_pence from experience_bookings where id = $1', [r.body.booking.id])).rows[0].value_pence, 4000);
   } finally { await srv.close(); }
 });
+
+test('a booking paid in two payments is refunded from both, newest first, under keys a retry repeats', async () => {
+  settings.forget();
+  const { srv, id } = await aPaidBooking({ adults: 2, max: 6, firstIn: 30 });
+  try {
+    const r = await srv.send('POST', `/api/booked/${id}/party`, { adults: 4 });
+    pays(r.body.pay.paymentIntent);
+    await srv.send('POST', `/api/booked/${id}/payment`, { paymentIntent: r.body.pay.paymentIntent });
+    const { rows: [b] } = await query('select stripe_payment_intent, charged_pence from experience_bookings where id = $1', [id]);
+    assert.equal(b.charged_pence, 8000);
+    // All of it cancelled, a month ahead under Flexible: £80 less the 5% fee — £76 back.
+    assert.equal((await srv.send('POST', `/api/booked/${id}/cancel`, {})).status, 200);
+    calls.length = 0;
+    await engine.processRefunds({ status: () => ({ ready: true }) });
+    const refunds = calls.filter((c) => c.url === '/v1/refunds').map((c) => { const f = new URLSearchParams(c.body); return [f.get('payment_intent'), f.get('amount'), c.idem]; });
+    const mine = refunds.filter(([pi]) => pi === r.body.pay.paymentIntent || pi === b.stripe_payment_intent);
+    assert.equal(mine.length, 2, JSON.stringify(refunds));
+    assert.deepEqual(mine[0].slice(0, 2), [r.body.pay.paymentIntent, '4000'], 'the payment for more places first');
+    assert.deepEqual(mine[1].slice(0, 2), [b.stripe_payment_intent, '3600']);
+    assert.match(mine[0][2], /:0$/);
+    const { rows: [line] } = await query(`select state, refund_split from hosting_payments where booking_id = $1 and kind = 'refund' and cause = 'guest_cancelled'`, [id]);
+    assert.equal(line.state, 'succeeded');
+    assert.equal(line.refund_split.length, 2);
+  } finally { await srv.close(); }
+});
+
+test('a payment for more places that lands after the booking was cancelled is given straight back', async () => {
+  settings.forget();
+  const { srv, id } = await aPaidBooking({ adults: 1, max: 6, firstIn: 30 });
+  try {
+    const r = await srv.send('POST', `/api/booked/${id}/party`, { adults: 2 });
+    assert.equal((await srv.send('POST', `/api/booked/${id}/cancel`, {})).status, 200);
+    pays(r.body.pay.paymentIntent);
+    await srv.send('POST', `/api/booked/${id}/payment`, { paymentIntent: r.body.pay.paymentIntent });
+    const { rows: [line] } = await query(`select amount_pence, refund_of, cause from hosting_payments where booking_id = $1 and cause = 'party_paid_after_cancel'`, [id]);
+    assert.deepEqual([line.amount_pence, line.refund_of], [2000, r.body.pay.paymentIntent]);
+    assert.equal((await query('select charged_pence from experience_bookings where id = $1', [id])).rows[0].charged_pence, 2000, 'never counted on the booking');
+  } finally { await srv.close(); }
+});

@@ -37,3 +37,8 @@ create table if not exists booking_party_changes (
 -- One change waiting on a payment at a time.
 create unique index if not exists booking_party_changes_one_pending_idx on booking_party_changes (booking_id) where state = 'pending';
 create index if not exists booking_party_changes_booking_idx on booking_party_changes (booking_id, created_at desc);
+
+-- A booking whose money sits in more than one payment (the first charge, then payments for more places): a refund is
+-- split across them, newest first, once — worked out from Stripe's own refunded amounts and kept, so a retry sends the
+-- same refunds under the same keys. [{ pi, pence }]; null on a refund of a single payment.
+alter table hosting_payments add column if not exists refund_split jsonb;

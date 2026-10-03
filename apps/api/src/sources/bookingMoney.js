@@ -439,7 +439,7 @@ export async function warnUnderMinimum({ now = new Date(), withinHours = 48 } = 
  * look at; Stripe unreachable leaves it pending for the next run; Stripe not
  * ready (no key, or a live one) sends nothing.
  */
-export async function processRefunds({ status = stripe.stripeStatus, refund = stripe.refund, release = stripe.cancelPayment, reverseHostShare = stripe.reverseHostShare, limit = 50 } = {}) {
+export async function processRefunds({ status = stripe.stripeStatus, refund = stripe.refund, release = stripe.cancelPayment, reverseHostShare = stripe.reverseHostShare, refundable = stripe.refundableOn, limit = 50 } = {}) {
   const out = { sent: 0, failed: 0, waiting: 0 };
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
   const s = await settings.current();
@@ -463,19 +463,35 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
     try {
       const keepFee = p.refund_mode === 'keep_fee' && p.charge_model === 'destination';
       let r = null;
+      // A booking paid in more than one payment (more places paid for later): the refund is split across them, newest
+      // first, and kept, so a retry is the same refunds under the same keys (Codex, 3 Oct 2026).
+      const parts = p.kind === 'refund' && !p.refund_of && !p.tip_id && p.amount_pence > 0 ? await splitRefund(p, refundable) : null;
       if (p.kind === 'release') r = await release(p.stripe_payment_intent, { householdId: p.household_id, idempotencyKey: p.idem_key });
-      else if (p.amount_pence > 0) r = await refund({ paymentIntentId: p.stripe_payment_intent, amountPence: p.amount_pence, cause: p.cause, bookingId: p.booking_id, householdId: p.household_id, idempotencyKey: p.idem_key, destination: p.charge_model === 'destination', keepFee });
+      else if (parts) {
+        let hostLeft = Number(p.host_pence ?? 0);
+        for (const [i, part] of parts.entries()) {
+          const one = await refund({ paymentIntentId: part.pi, amountPence: part.pence, cause: p.cause, bookingId: p.booking_id, householdId: p.household_id, idempotencyKey: `${p.idem_key}:${i}`, destination: p.charge_model === 'destination', keepFee });
+          r = r ?? one;
+          if (keepFee && hostLeft > 0) {
+            const share = i === parts.length - 1 ? hostLeft : Math.round((Number(p.host_pence) * part.pence) / p.amount_pence);
+            if (share > 0) await reverseHostShare({ paymentIntentId: part.pi, amountPence: share, householdId: p.household_id, idempotencyKey: `${p.idem_key}:${i}:host_share`, refundId: one?.id ?? null });
+            hostLeft -= share;
+          }
+        }
+      } else if (p.amount_pence > 0) r = await refund({ paymentIntentId: p.stripe_payment_intent, amountPence: p.amount_pence, cause: p.cause, bookingId: p.booking_id, householdId: p.household_id, idempotencyKey: p.idem_key, destination: p.charge_model === 'destination', keepFee });
       // Keeping the cancellation fee: the host's whole share of the cancelled amount comes back as well (L5). Its own
       // key, so a retry after a crash between the two is the same reversal, never a second.
-      if (keepFee && Number(p.host_pence) > 0) {
+      if (!parts && keepFee && Number(p.host_pence) > 0) {
         await reverseHostShare({ paymentIntentId: p.stripe_payment_intent, amountPence: Number(p.host_pence), householdId: p.household_id, idempotencyKey: `${p.idem_key}:host_share`, refundId: r?.id ?? null });
       }
       await withTransaction(async (c) => {
         const { rowCount } = await c.query(`update hosting_payments set state = 'succeeded', stripe_ref = $2, updated_at = now() where id = $1 and state = 'pending'`, [p.id, r?.id ?? null]);
         if (!rowCount) return;
         if (p.kind === 'release') await c.query(`update experience_bookings set payment_state = 'released' where id = $1`, [p.booking_id]);
-        // A tip given back is the tip's own business: the booking's money is untouched.
+        // A tip given back is the tip's own business: the booking's money is untouched — and so is a payment for more
+        // places that landed after the booking was cancelled, given straight back.
         else if (p.tip_id) await c.query(`update booking_tips set state = 'refunded' where id = $1`, [p.tip_id]);
+        else if (p.cause === 'party_paid_after_cancel') { /* nothing on the booking: it was never counted */ }
         else {
           await c.query(
             // Refunded only once nothing else owed on it is still waiting or failed: a cancellation split into two lines
@@ -547,6 +563,31 @@ export async function refreshChargeDue({ offerId = null, bookingId = null } = {}
   }
   for (const [id, due] of by) await query('update experience_bookings set charge_due_at = $2 where id = $1 and payment_state = $3 and charge_due_at is distinct from $2', [id, due, 'card_saved']);
   return by.size;
+}
+
+/**
+ * The payments a booking-level refund is taken from, newest first: payments for more places, then the first charge.
+ * One payment only: null (the refund goes as it always has). Worked out once from Stripe's own refunded amounts.
+ */
+async function splitRefund(p, refundable) {
+  if (Array.isArray(p.refund_split)) return p.refund_split.length > 1 ? p.refund_split : null;
+  const { rows: extra } = await query(
+    `select stripe_payment_intent as pi from booking_party_changes where booking_id = $1 and state = 'done' and charge_pence > 0 and stripe_payment_intent is not null order by finished_at desc`, [p.booking_id]);
+  if (!extra.length) return null;
+  const pis = [...extra.map((x) => x.pi), p.stripe_payment_intent];
+  let left = Number(p.amount_pence);
+  const parts = [];
+  for (const pi of pis) {
+    if (left <= 0) break;
+    const room = await refundable(pi, { householdId: p.household_id });
+    const take = Math.min(left, room);
+    if (take > 0) { parts.push({ pi, pence: take }); left -= take; }
+  }
+  // More asked than Stripe holds: the rest is asked of the first charge, which refuses it, and a person looks.
+  if (left > 0) parts.push({ pi: p.stripe_payment_intent, pence: left });
+  await query('update hosting_payments set refund_split = $2::jsonb where id = $1 and refund_split is null', [p.id, JSON.stringify(parts)]);
+  const { rows: [kept] } = await query('select refund_split from hosting_payments where id = $1', [p.id]);
+  return kept.refund_split.length > 1 ? kept.refund_split : null;
 }
 
 /**
