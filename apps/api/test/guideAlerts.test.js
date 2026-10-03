@@ -238,5 +238,8 @@ test('the place lookup: counties from the list, postcodes from ONS, names only o
   const fine = await answered();
   await placeOf('rg1', { fetchImpl: fake({ '/outcodes/RG1': { admin_district: ['Reading'], admin_county: [], country: ['England'], latitude: 51.45, longitude: -0.97 } }) });
   assert.equal(await answered(), fine + 1, 'and one that answered is on it as an answer, so the failures have a denominator');
+  const broken = await failures();
+  assert.equal(await placeOf('rg1', { fetchImpl: async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('bad'); } }) }), null);
+  assert.equal(await failures(), broken + 1, 'a 200 whose body cannot be read is a failure, not an answer');
   assert.equal(await placeOf('   '), null);
 });

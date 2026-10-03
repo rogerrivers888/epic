@@ -56,22 +56,28 @@ async function ask(path, fetchImpl) {
   // Every call is on the ledger (CLAUDE.md › provider_calls), observed either way
   // (sources/meter.js), so the supplier's numbers count the answers as well as the
   // timeouts and refusals (Codex). A 404 is an answer: no such postcode.
+  // An answer counts only once its body has been read: a 200 whose body is broken
+  // or stalls is a fault too. Written once, whichever way it ends.
   const started = Date.now();
   const meter = { requests: 1 };
-  const write = () => providerCalls.record(null, 'postcodes', 'guide-alert.place', meter).catch(() => null);
-  let res;
+  let written = false;
+  const write = async () => { if (written) return; written = true; await providerCalls.record(null, 'postcodes', 'guide-alert.place', meter).catch(() => null); };
+  let res = null;
   try {
     res = await fetchImpl(`${API}${path}`, { signal: AbortSignal.timeout(4000), headers: { 'user-agent': UA, accept: 'application/json' } });
-  } catch (err) {
-    noteFault(meter, err?.name === 'TimeoutError' ? 'timeout' : 'network');
+    if (res.status === 404) { noteCall(meter, Date.now() - started); await write(); return null; }
+    if (!res.ok) { noteFault(meter, `http_${res.status}`); await write(); throw new Error(`postcodes.io ${res.status}`); }
+    const body = await res.json();
+    noteCall(meter, Date.now() - started);
     await write();
+    return body?.result ?? null;
+  } catch (err) {
+    if (!written) {
+      noteFault(meter, err?.name === 'TimeoutError' ? 'timeout' : res ? 'bad_body' : 'network');
+      await write();
+    }
     throw err;
   }
-  if (res.ok || res.status === 404) noteCall(meter, Date.now() - started); else noteFault(meter, `http_${res.status}`);
-  await write();
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`postcodes.io ${res.status}`);
-  return (await res.json())?.result ?? null;
 }
 
 const first = (v) => (Array.isArray(v) ? v[0] ?? null : v ?? null);
