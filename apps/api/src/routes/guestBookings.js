@@ -1128,10 +1128,12 @@ export async function guestPrompts({ now = new Date() } = {}) {
         and s.on_date between current_date - 2 and current_date + 2`,
   );
   let sent = 0;
-  // Reviews that have just become visible: the host is told now, once each.
+  // Reviews that have become visible: the host is told now, once each.
   const { rows: shown } = await query(
     `select r.id, r.stars, h.household_id from host_reviews r join hosts h on h.id = r.host_id
-      where r.side = 'guest' and not coalesce(r.hidden, false) and r.publish_on <= current_date and r.publish_on > current_date - 3`,
+      where r.side = 'guest' and not coalesce(r.hidden, false) and r.publish_on <= current_date
+        -- every one not yet told, however late the tick or the unhiding; reviews from before this rule were never owed one
+        and r.created_at >= '2026-10-03' and not exists (select 1 from notifications n where n.dedupe_key = 'review:' || r.id)`,
   );
   for (const v of shown) {
     const n = await notifications.notify({ householdId: v.household_id, kind: 'new_review', title: `A ${v.stars}-star review`, link: '/host/reviews', dedupeKey: `review:${v.id}` }).catch(() => null);
