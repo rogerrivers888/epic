@@ -122,6 +122,8 @@ export const SENDING_DOORS = [
   '/api/session/request-link',
   // A password reset is an e-mail to whoever owns the address (routes/authPassword.js).
   '/api/auth/forgot',
+  // The free guest account's "Use my email" (routes/authGuest.js, G21).
+  '/api/auth/guest',
   '/api/join/:token/code/again',
   '/api/join/:token/account',
   '/api/shared/:token/enter',

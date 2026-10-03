@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import { query, withTransaction } from '../db.js';
 import { normaliseMobile } from '../sources/sms.js';
 import { settleClaims, refreshStats } from './placeIndex.js';
+import { GUEST_PLAN } from '../guestAccess.js';
 
 const digest = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
@@ -264,6 +265,130 @@ export async function createGuestAccount({ name, email, mobile, trialDays = 30, 
   });
 }
 
+/** The plan a self-made free account is on (G21, migration 373): bookings, messages and payments only. */
+export { GUEST_PLAN };
+
+/**
+ * Insert a guest's household and account on a client already inside a
+ * transaction. Returns the new account, or null when the address (or the
+ * Google identity) already belongs to somebody — the caller then signs that
+ * account in, never a second one (G21: "never create a duplicate").
+ */
+async function insertGuest(client, { email, name, googleSub }) {
+  const address = normaliseEmail(email);
+  if (!address) return null;
+  // A savepoint, so a lost race on the unique email or google_sub index rolls
+  // back only this insert — never the caller's transaction, which may already
+  // have spent a link it must keep spent.
+  await client.query('savepoint guest_insert');
+  try {
+    // How they arrived (migration 199): booked from a public page, which
+    // reporting never counts as a member or a signup (memberships.js).
+    const { rows: households } = await client.query(
+      'insert into households (name, origin) values ($1, $2) returning id',
+      [name || 'A guest household', 'guest_invite'],
+    );
+    // monthly_call_bound 0: a guest never spends (paidGate.js and claude.js
+    // refuse the plan outright as well, so raising the number would not do it).
+    const { rows } = await client.query(
+      `insert into accounts (household_id, email, name, role, plan, status, monthly_call_bound, google_sub, invited_at)
+       values ($1, $2, $3, 'customer', $4, 'active', 0, $5, now())
+       returning ${COLUMNS}`,
+      [households[0].id, address, name || null, GUEST_PLAN, googleSub || null],
+    );
+    await client.query('release savepoint guest_insert');
+    return rows[0];
+  } catch (err) {
+    await client.query('rollback to savepoint guest_insert');
+    if (err?.code === '23505') return null; // somebody holds the address or the identity already
+    throw err;
+  }
+}
+
+/**
+ * A free guest account, made by the person themselves (G21, 3 Oct 2026):
+ * booking, asking to book or joining a waiting list. Their own household and
+ * nobody else's, plan `guest`, active — they have just proved the address,
+ * with Google here or with the link (`consumeGuestLink`). Returns
+ * `{ account, created }`; an address that already has an account comes back
+ * as that account with `created: false`, its plan untouched.
+ */
+export async function createGuestSignupAccount({ email, name = null, googleSub = null }) {
+  const made = await withTransaction((client) => insertGuest(client, { email, name, googleSub }));
+  if (made) return { account: made, created: true };
+  const existing = (googleSub ? await accountByGoogleSub(googleSub) : null) ?? await accountByEmail(email);
+  return { account: existing, created: false };
+}
+
+/**
+ * "Use my email" for somebody with no account yet (G21): a link for an
+ * address, not an account. The same single-use, hashed, expiring
+ * `sign_in_links` row as every other link — `purpose = 'guest'`, the address
+ * in `pending_email` — and the account is made only when it is opened
+ * (`consumeGuestLink`), so an address nobody proved is never an account.
+ * Asking again cancels the older unused ones for that address, as a login
+ * link does.
+ */
+export async function createGuestLink({ email, name = null, ttlHours = 0.25 }) {
+  const address = normaliseEmail(email);
+  if (!address) throw new Error('createGuestLink: an email is required');
+  const token = crypto.randomBytes(32).toString('base64url');
+  return withTransaction(async (client) => {
+    // Serialise per address, so two quick taps cannot both leave a live link.
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [`guest-link:${address}`]);
+    await client.query(
+      `update sign_in_links set expires_at = now()
+        where account_id is null and purpose = 'guest' and lower(pending_email) = $1
+          and used_at is null and expires_at > now()`,
+      [address],
+    );
+    const { rows } = await client.query(
+      `insert into sign_in_links (account_id, token_hash, expires_at, requested_by, purpose, pending_email, pending_name)
+       values (null, $1, now() + ($2 || ' hours')::interval, 'self', 'guest', $3, $4)
+       returning id, account_id, expires_at, created_at, purpose`,
+      [digest(token), String(ttlHours), address, name ? String(name).slice(0, 80) : null],
+    );
+    return { token, link: rows[0] };
+  });
+}
+
+/**
+ * Open a guest link, once (G21). The account is found or made here and not
+ * before: an address that has an account by now — made with Google in the
+ * meantime, or by an administrator — signs that account in, plan untouched;
+ * otherwise the guest account is made. The spend, the account and the link's
+ * `account_id` stand or fall together. A suspended account opens nothing.
+ * Returns `{ account_id, created }` or null, in the shape `consumeSignInLink`
+ * answers, so the link door treats it the same.
+ */
+export async function consumeGuestLink(token) {
+  if (!token) return null;
+  return withTransaction(async (client) => {
+    const { rows: [link] } = await client.query(
+      `update sign_in_links set used_at = now()
+        where token_hash = $1 and purpose = 'guest' and account_id is null
+          and used_at is null and expires_at > now()
+        returning id, pending_email, pending_name`,
+      [digest(token)],
+    );
+    if (!link) return null;
+    let account = (await client.query(`select ${COLUMNS} from accounts where lower(email) = $1`, [normaliseEmail(link.pending_email)])).rows[0] ?? null;
+    let created = false;
+    if (!account) {
+      account = await insertGuest(client, { email: link.pending_email, name: link.pending_name });
+      created = Boolean(account);
+      // Lost a race to another sign-up for the same address: that account, then.
+      account ??= (await client.query(`select ${COLUMNS} from accounts where lower(email) = $1`, [normaliseEmail(link.pending_email)])).rows[0] ?? null;
+    }
+    if (!account || account.status === 'suspended') {
+      // Nothing to sign in to: undo the spend, so the record says the link was never opened.
+      throw Object.assign(new Error('no account to open'), { code: 'guest_link_dead' });
+    }
+    await client.query('update sign_in_links set account_id = $2 where id = $1', [link.id, account.id]);
+    return { id: link.id, account_id: account.id, purpose: 'guest', created };
+  }).catch((err) => { if (err?.code === 'guest_link_dead') return null; throw err; });
+}
+
 /**
  * An account on a household that already exists.
  *
@@ -501,12 +626,15 @@ export async function inspectSignInLink(token) {
 export async function linkContactFor(token) {
   if (!token) return null;
   const { rows } = await query(
-    `select a.email, a.id from sign_in_links l join accounts a on a.id = l.account_id
+    // A guest link (G21) is for an address before it is for an account, so the
+    // address it was sent to is the key until an account holds it.
+    `select coalesce(a.email, lower(l.pending_email)) as email, a.id
+       from sign_in_links l left join accounts a on a.id = l.account_id
       where l.token_hash = $1 limit 1`,
     [digest(token)],
   );
   if (!rows[0]) return null;
-  return rows[0].email || rows[0].id;
+  return rows[0].email || rows[0].id || null;
 }
 
 export function markLinkSent(id, { delivery, error = null, channel = null }) {

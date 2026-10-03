@@ -96,6 +96,38 @@ export async function sessionStanding(sessionId) {
 /** Forget what was remembered about a session, so a grant takes effect now. */
 export const forgetSession = (sessionId) => kinds.delete(sessionId);
 
+/**
+ * Whether a household is a free guest's (G21, owner 3 Oct 2026: "bookings,
+ * messages, payments only"). A guest never causes a paid Google or Claude
+ * call, whatever its call bound says and whichever door asked — the route
+ * allowlist (guestAccess.js) is the first wall and this is the one that
+ * cannot be walked round. A household with any account on the guest plan is
+ * a guest's. Remembered for a minute, like a session's standing, so a
+ * membership takes effect within one. Fails closed: a lookup that cannot be
+ * answered is a guest.
+ */
+const guests = new Map();
+export async function householdIsGuest(householdId) {
+  if (!householdId) return false;
+  const hit = guests.get(householdId);
+  if (hit && Date.now() - hit.at < LIVE_FOR_MS) return hit.guest;
+  let guest = true;
+  try {
+    const { query } = await load();
+    const { rows: [row] } = await query(
+      "select exists (select 1 from accounts where household_id = $1 and plan = 'guest') as guest",
+      [householdId],
+    );
+    guest = Boolean(row?.guest);
+  } catch { return true; }
+  if (guests.size > 5000) guests.clear();
+  guests.set(householdId, { guest, at: Date.now() });
+  return guest;
+}
+
+/** Forget what was remembered about a household, so a change of plan takes effect now. */
+export const forgetHousehold = (householdId) => guests.delete(householdId);
+
 const WHY = {
   no_session: 'no session',
   service: 'the server’s own session, not a sign-in',
@@ -126,6 +158,8 @@ const admittedFor = (householdId) => {
 export async function admitPaid({ meter = null, requests = 1 } = {}) {
   const { householdId, sessionId, backOffice, elevated } = currentSpender();
   if (!householdId) { noteFault(meter, 'unattributed'); throw new UnattributedCallError('no household'); }
+  // A free guest account never spends (G21).
+  if (await householdIsGuest(householdId)) { noteFault(meter, 'guest_account'); throw new UnattributedCallError('a free guest account, which never spends'); }
   const standing = await sessionStanding(sessionId).catch(() => 'no_session');
   if (standing !== 'may_spend') {
     noteFault(meter, standing === 'agent' ? 'agent_session' : 'unattributed');

@@ -24,8 +24,12 @@
  * and the SPA trades it for the token. The session token itself never touches a
  * URL.
  *
- * Never creates an account (J11): a Google identity only ever signs in to an
- * account that already exists and already opens the admin door.
+ * The plain door never creates an account (J11): a Google identity only ever
+ * signs in to an account that already exists and already opens the admin door.
+ * The one exception is the guest door (G21, 3 Oct 2026) — `?intent=guest`,
+ * started from booking, ask to book or a waiting list — which signs any
+ * existing account in and makes a free guest account for a verified address
+ * that has none (`resolveGuestGoogleAccount`).
  */
 
 import express from 'express';
@@ -38,7 +42,7 @@ import {
 import { openSession, sessionCookie, sessionKindFor, deployed } from '../auth.js';
 import { signInLimit } from '../limits.js';
 import {
-  accountByEmail, accountByGoogleSub, accountById, setGoogleSub,
+  accountByEmail, accountByGoogleSub, accountById, setGoogleSub, createGuestSignupAccount,
   createSignInLink, consumeSignInLink, inspectSignInLink, linkContactFor, recordSignIn,
 } from '../repositories/accounts.js';
 import { roleForAccount } from '../repositories/roles.js';
@@ -144,6 +148,24 @@ export function safeNext(value) {
   return s;
 }
 
+/**
+ * Where a free guest account (G21) may be sent back to: the pages a guest makes
+ * one from, and the ones a guest uses — an event (in the app or on the public
+ * site), booking it, an invitation, a booking, Plans, Messages, Settings. A
+ * safe in-app path first (`safeNext`), then one of those; anything else is
+ * dropped and they land on their account page, never a guess.
+ */
+const GUEST_PAGES = new Set(['experiences', 'invited', 'i', 'e', 'bookings', 'plans', 'messages', 'settings', 'account', 'hosts']);
+export function guestNext(value) {
+  const s = safeNext(value);
+  if (!s) return null;
+  const segs = s.split('?')[0].split('/').filter(Boolean).map((x) => decodeURIComponent(x).toLowerCase());
+  if (GUEST_PAGES.has(segs[0])) return s;
+  // The public event and host pages: /en-gb/event/<slug>-<code>, /en-gb/host/…
+  if (/^[a-z]{2}(-[a-z]{2})?$/.test(segs[0] ?? '') && (segs[1] === 'event' || segs[1] === 'host')) return s;
+  return null;
+}
+
 /** Where the web app lives, so the callback can hand control back to it. */
 const loginUrl = (req, query) => `${webUrl(req)}/login${query ? `?${query}` : ''}`;
 
@@ -182,6 +204,41 @@ export async function resolveGoogleAccount({ sub, email, emailVerified }) {
   }
   if (!(await isStaff(account))) return { ok: false, reason: 'not-staff' };
   return { ok: true, account };
+}
+
+/**
+ * The guest door (G21, owner 3 Oct 2026): "ask to book and joining a waiting
+ * list create the same free account as booking". Started only from a guest
+ * page (`?intent=guest`), carried in the signed handshake cookie, so the plain
+ * Log in with Google stays staff-only.
+ *
+ * Matching is exactly `resolveGoogleAccount`'s — `google_sub` first, then a
+ * verified email on an account not yet bound to another Google identity — but
+ * an existing account of any kind signs in here (a customer booking is who
+ * this door is for), and no account at all, with a verified address, makes
+ * the free guest account. An existing account is never duplicated and its
+ * plan is never changed. A suspended one opens nothing.
+ */
+export async function resolveGuestGoogleAccount({ sub, email, emailVerified, name = null }) {
+  if (!sub) return { ok: false, reason: 'no-account' };
+  const live = (a) => (a && a.status !== 'suspended' ? { ok: true, account: a } : { ok: false, reason: 'no-account' });
+  const bySub = await accountByGoogleSub(sub);
+  if (bySub) return live(bySub);
+  if (emailVerified !== true || !email) return { ok: false, reason: 'no-account' };
+  const byEmail = await accountByEmail(email);
+  if (byEmail) {
+    // Never a takeover: an account bound to a different Google identity is refused.
+    if (byEmail.google_sub) return { ok: false, reason: 'no-account' };
+    if (byEmail.status === 'suspended') return { ok: false, reason: 'no-account' };
+    return live(await setGoogleSub(byEmail.id, sub));
+  }
+  const cleanName = typeof name === 'string' ? name.trim().slice(0, 80) || null : null;
+  const { account, created } = await createGuestSignupAccount({ email, name: cleanName, googleSub: sub });
+  if (created) return { ok: true, account, created: true };
+  // Lost a race to another sign-up for the same address or identity: match again, by the same rules.
+  if (!account) return { ok: false, reason: 'no-account' };
+  if (account.google_sub && account.google_sub !== String(sub)) return { ok: false, reason: 'no-account' };
+  return live(account.google_sub ? account : await setGoogleSub(account.id, sub));
 }
 
 /** An invite token as createSignInLink mints it (32 random bytes, base64url), or null. */
@@ -266,13 +323,15 @@ router.get('/auth/google', toCanonicalHost, signInLimit, async (req, res) => {
     const challenge = await calculatePKCECodeChallenge(verifier);
     const state = randomState();
     const nonce = randomNonce();
-    const next = safeNext(req.query.next);
     // "Use Google instead" on an invitation (L4) carries the invite's token, so
     // the callback can insist Google returns the address that was invited. The
     // token travels in the signed handshake cookie, never to Google.
     const invite = inviteToken(req.query.invite);
+    // A free guest account (G21): only from a guest page, and only ever back to one.
+    const guest = !invite && req.query.intent === 'guest';
+    const next = guest ? guestNext(req.query.next) : safeNext(req.query.next);
 
-    handshakeCookie(res, sign({ v: verifier, s: state, n: nonce, next, ...(invite ? { i: invite } : {}) }));
+    handshakeCookie(res, sign({ v: verifier, s: state, n: nonce, next, ...(invite ? { i: invite } : {}), ...(guest ? { g: 1 } : {}) }));
 
     const url = buildAuthorizationUrl(cfg, {
       redirect_uri: redirectUri(),
@@ -314,19 +373,32 @@ router.get('/auth/google/callback', async (req, res) => {
   if (stash.i) return finishInvite(req, res, stash.i, claims).catch(() => res.redirect(loginUrl(req, 'e=failed')));
 
   // email_verified is part of trusting the address at all (J11 / brief step 2).
-  const resolved = await resolveGoogleAccount({
+  const identity = {
     sub: claims?.sub,
     email: typeof claims?.email === 'string' ? claims.email : null,
     emailVerified: claims?.email_verified === true,
-  });
-  if (!resolved.ok) return res.redirect(loginUrl(req, 'e=no-account'));
+  };
+  // The guest door (G21) may make a free account; the plain door never does.
+  let resolved;
+  try {
+    resolved = stash.g === 1
+      ? await resolveGuestGoogleAccount({ ...identity, name: typeof claims?.name === 'string' ? claims.name : null })
+      : await resolveGoogleAccount(identity);
+  } catch {
+    return res.redirect(loginUrl(req, 'e=failed'));
+  }
+  if (!resolved.ok) {
+    // A guest is sent back to the page they were on, with the plain words there.
+    const back = stash.g === 1 ? guestNext(stash.next) : null;
+    return res.redirect(loginUrl(req, new URLSearchParams({ e: stash.g === 1 ? 'failed' : 'no-account', ...(back ? { next: back } : {}) }).toString()));
+  }
 
   // Hand the SPA a single-use code it trades for a session.
   const { token } = await createSignInLink(resolved.account.id, { requestedBy: 'google', ttlHours: HANDOFF_TTL_HOURS });
   // `next` only when the start asked for one: with none, the screen lands the
   // person where their role can open (firstAdminScreen), not on a fixed /admin.
   const params = new URLSearchParams({ code: token });
-  const next = safeNext(stash.next);
+  const next = stash.g === 1 ? guestNext(stash.next) : safeNext(stash.next);
   if (next) params.set('next', next);
   res.redirect(loginUrl(req, params.toString()));
 });

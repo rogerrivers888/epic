@@ -90,6 +90,8 @@ import { routingEnabled, routingPaused } from './sources/routing.js';
 import sessionRoutes, { devices as deviceRoutes } from './routes/session.js';
 import authGoogleRoutes from './routes/authGoogle.js';
 import authPasswordRoutes from './routes/authPassword.js';
+import authGuestRoutes from './routes/authGuest.js';
+import { guestDoor } from './guestAccess.js';
 import { authConfigured, deployed, originAllowed, requireOwner, requireSession } from './auth.js';
 import { requireDoor, requireOwnerSignedIn, hasDoor } from './access.js';
 import { writeAuditStrict } from './repositories/roles.js';
@@ -213,6 +215,9 @@ app.use('/api', guideAlertRoutes);
 // Email + password (routes/authPassword.js): log in, forgot, and the invite/reset
 // link that sets one. Public for the same reason — it is how a session is obtained.
 app.use('/api', authPasswordRoutes);
+// "Use my email" on the free account step (routes/authGuest.js, G21): sends a link,
+// and the account is made when it is opened. Public, and a sending door (limits.js).
+app.use('/api', authGuestRoutes);
 
 // The atlas image library, outside the door on purpose (routes/library.js):
 // open-licence photographs we hold and are entitled to redistribute, answered
@@ -249,6 +254,9 @@ app.use((req, res, next) => {
   }
   return next();
 });
+// A free guest account (G21) reaches bookings, messages, payments and its own
+// settings, and nothing else — refused here, whatever the path (guestAccess.js).
+app.use(guestDoor);
 // Every photo link in a JSON answer is signed for the household and session it
 // is being sent to, not for whoever filled the shared cache it came out of —
 // the picture it fetches is spent on their behalf (sources/photoLinks.js;

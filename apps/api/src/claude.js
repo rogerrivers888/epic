@@ -110,6 +110,10 @@ export async function assertWithinBounds({ householdId, sessionId }) {
     const { UnattributedCallError } = await import('./sources/paidGate.js');
     throw new UnattributedCallError('a back-office spend needs you signed in personally');
   }
+  // A free guest account never causes a Claude call (G21): its bound is nought
+  // and the plan is refused outright, whatever the bound says.
+  const { householdIsGuest, UnattributedCallError: Refused } = await import('./sources/paidGate.js');
+  if (await householdIsGuest(householdId ?? currentSpender().householdId)) throw new Refused('a free guest account, which never spends');
   await assertUnderDailyCeiling();
   const [sessionCalls, monthCalls, bound] = await Promise.all([
     providerCalls.countForSession(sessionId),

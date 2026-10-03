@@ -11,7 +11,7 @@ import {
 } from '../auth.js';
 import { findLiveSession, liveSessions, revokeAllSessions, revokeSessionById, revokeOtherSessions } from '../repositories/sessions.js';
 import {
-  accountByContact, accountById, consumeSignInLink, linkContactFor, markLinkSent,
+  accountByContact, accountById, consumeGuestLink, consumeSignInLink, linkContactFor, markLinkSent,
   ownerAccount, recordSignIn, replaceSignInLink,
 } from '../repositories/accounts.js';
 import { loginLinkEmail, mailStatus, sendMail, webUrl } from '../sources/mail.js';
@@ -185,7 +185,9 @@ router.post('/session/link', async (req, res, next) => {
     if (await signInLockedOut(req, who)) {
       return res.status(429).json({ error: 'locked_out', message: 'Too many attempts just now. Try again shortly.' });
     }
-    const spent = token ? await consumeSignInLink(token) : null;
+    // An ordinary link, or a guest's (G21) — which makes their free account as
+    // it is opened, or finds the one their address already has.
+    const spent = token ? (await consumeSignInLink(token)) ?? (await consumeGuestLink(token)) : null;
     if (!spent) {
       await noteSignInFailure(req, { kind: 'link', contact: who, reason: 'link_spent' });
       return res.status(401).json({
@@ -226,13 +228,16 @@ router.post('/session/link', async (req, res, next) => {
  * needs a way back in once its first link is spent. Dropping the SMS path would
  * lock it out for good.
  */
-async function sendLoginLink(req, account) {
+export async function sendLoginLink(req, account, { next = null, mint = null } = {}) {
   // The new link is the only one that works: replaceSignInLink voids any older
   // unused link — including a seven-day staff invite — and mints the new one in
   // one atomic step, so a leaked or forwarded one cannot still open a ninety-day
   // session, even if two requests race (Codex, 1 Oct 2026).
-  const { token, link } = await replaceSignInLink(account.id, { requestedBy: 'self', ttlHours: 0.25 });
-  const url = `${webUrl(req)}/?signin=${token}`;
+  // `mint` is the guest door's (G21): a link for an address with no account yet.
+  const { token, link } = mint ? await mint() : await replaceSignInLink(account.id, { requestedBy: 'self', ttlHours: 0.25 });
+  // `next`, already vetted by the caller, is the page to come back to — so a
+  // link opened on another device than the one that asked still lands there.
+  const url = `${webUrl(req)}/?signin=${token}${next ? `&next=${encodeURIComponent(next)}` : ''}`;
   let delivery; let error = null; let channel = null;
   if (account.email) {
     channel = 'email';

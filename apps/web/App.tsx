@@ -378,6 +378,9 @@ function Gate({ route }: { route: Route }) {
    * on and pasted into a chat, and this one signs somebody in.
    */
   const [link] = useState(() => query.get('signin'));
+  // Where the link was asked for (the free account step, G21), carried in the link
+  // itself so it lands there even opened on another device. Vetted like any `next`.
+  const [linkNext] = useState(() => query.get('next'));
   // One attempt per page load, whatever the effect's dependencies do. The
   // landing navigation changes the URL, which hands navigate/setQuery new
   // identities and re-runs the effect — and a second POST of the same token is
@@ -411,7 +414,7 @@ function Gate({ route }: { route: Route }) {
         const screen = firstAdminScreen(st.access);
         // The page they were going to when they asked for the link, if it was
         // asked for on this device in the last hour (afterSignIn.ts).
-        const landing = takeRememberedNext(safeNext) ?? (toAdmin
+        const landing = takeRememberedNext(safeNext) ?? safeNext(linkNext) ?? (toAdmin
           ? (screen === 'filing' ? paths.filing('categories') : paths.admin(screen))
           : paths.account());
         navigate(landing, { replace: true });
@@ -419,12 +422,12 @@ function Gate({ route }: { route: Route }) {
       } catch (err: any) {
         if (dropped) return;
         setLinkFailed(err?.message ?? 'That link did not work. Ask for a new one.');
-        setQuery({ signin: null }, { replace: true });
+        setQuery({ signin: null, next: null }, { replace: true });
         setRedeeming(false);
       }
     })();
     return () => { dropped = true; };
-  }, [link, recheck, setQuery, navigate]);
+  }, [link, linkNext, recheck, setQuery, navigate]);
 
   // Signed in but the access check never answered (a 429, or no network):
   // that is not a "no", so the back office says it is busy and asks again
@@ -596,10 +599,12 @@ function Shell({ route, isOwner, mayAdminister = false, guest = false }: { route
   // seconds after the app settles so it never competes with the first screen,
   // and only the pages the API answers for free — the atlas place lists can ask
   // Google what kind of place a row is, and those are saved by opening Places.
+  // A free guest account (G21) holds none of those pages — the API refuses them — so it warms nothing.
   useEffect(() => {
+    if (guest) return undefined;
     const t = setTimeout(() => { void api.keepDeviceCopyFresh(); }, 8000);
     return () => clearTimeout(t);
-  }, []);
+  }, [guest]);
 
   // No spinner on the first arrival either (owner, D13: "start loading Inspire's
   // data the moment login succeeds, and on app open when already logged in").
@@ -612,7 +617,7 @@ function Shell({ route, isOwner, mayAdminister = false, guest = false }: { route
   // anything already fresh, so a household refresh does not re-fetch. Nothing
   // here is written to disk — the Inspire pool is rented (offline/policy.ts).
   useEffect(() => {
-    if (!household) return;
+    if (!household || guest) return;
     const home = household.household.home;
     if (home) {
       const p = { lat: home.lat, lng: home.lng, label: home.label, locality: home.locality ?? null, from: null, mode: 'drive' as const, minutes: INSPIRE_DEFAULT_MINUTES };
@@ -620,7 +625,7 @@ function Shell({ route, isOwner, mayAdminister = false, guest = false }: { route
     }
     prefetch(ATLAS_KEY, () => api.atlas());
     prefetch(TRIPS_KEY, () => api.trips());
-  }, [household]);
+  }, [household, guest]);
 
   // Coming back online after being offline, the cached tabs may be holding the
   // saved copy the offline layer served — real, but possibly days old, and the

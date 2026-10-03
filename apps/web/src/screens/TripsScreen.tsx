@@ -138,7 +138,8 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
   const { data, error: tripsErr, refresh: load } = useCachedResource<Awaited<ReturnType<typeof api.trips>>>(
     TRIPS_KEY,
     () => api.trips(),
-    { staleMs: TEN_MINUTES },
+    // A free guest account has Events only, and no trips to read (G21; the API refuses them).
+    { staleMs: TEN_MINUTES, enabled: !guest },
   );
   // Derived, not stamped into state, so a successful retry after a failed
   // prefetch clears the warning on its own rather than leaving it beside a list

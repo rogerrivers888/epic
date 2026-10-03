@@ -34,8 +34,32 @@ import {
 } from './kit';
 import { CardBox, confirmWithCard, finishWithBank, loadStripe, payWithWallet, prepareWallet, walletKind, type PayOutcome } from './pay';
 import { whenWords } from './EventPage';
+import { FreeAccount } from './FreeAccount';
+import { storage } from '../../storage';
 
 type Who = { key: string; name: string; adult: boolean; age: number | null; dob: string | null; memberId: string | null; line: string };
+
+/**
+ * What was filled in before leaving to make the free account (G21). Continue
+ * with Google leaves the page and an e-mail link opens a new one, so the form
+ * is kept on this device for half an hour, for this event only, and taken back
+ * once when the booking screen opens again — then removed.
+ */
+type Draft = {
+  at: number; mode: 'drop_in' | 'book_ahead'; picks: string[]; month: number; day: string | null; time: string | null; length: number | null;
+  ticked: string[]; extra: Who[]; contacts: Record<string, string>; over18: boolean; diet: string[]; bring: string | null;
+  plusOne: boolean; stay: string | null; dobs: Record<string, string>;
+};
+const draftKey = (id: string) => `epic.book-draft.${id}`;
+function takeDraft(id: string): Draft | null {
+  try {
+    const raw = storage.getItem(draftKey(id));
+    storage.removeItem(draftKey(id));
+    if (!raw) return null;
+    const d = JSON.parse(raw) as Draft;
+    return d && Date.now() - d.at < 30 * 60 * 1000 ? d : null;
+  } catch { return null; }
+}
 const DIET: Record<string, string> = { vegetarian: 'Vegetarian', vegan: 'Vegan', gluten_free: 'Gluten free', nut_allergy: 'Nut allergy', dairy_free: 'Dairy free', halal: 'Halal' };
 
 /** A person's age on the day, from their age or date of birth; null when the household never said. */
@@ -101,6 +125,20 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   const [busy, setBusy] = useState(false);
   // An unpaid booking already made: paying again confirms the same one, never books twice (G26).
   const [pending, setPending] = useState<{ bookingId: string; clientSecret: string } | null>(null);
+  // Back from making the free account: what was filled in before, once (G21).
+  const restored = useRef(false);
+  const draftTicked = useRef<string[] | null>(null);
+  useEffect(() => {
+    if (restored.current || !signedIn()) return;
+    restored.current = true;
+    const d = takeDraft(id);
+    if (!d) return;
+    setMode(d.mode); setPicks(new Set(d.picks)); setMonth(d.month); setDay(d.day); setTime(d.time); setLength(d.length);
+    setExtra(d.extra); setContacts(d.contacts); setOver18(d.over18); setDiet(new Set(d.diet)); setBring(d.bring);
+    setPlusOne(d.plusOne); setStay(d.stay); setDobs(d.dobs);
+    // Who was ticked: the people added by hand keep their keys; "You" is whoever you are now.
+    setTicked(new Set(d.ticked)); draftTicked.current = d.ticked;
+  }, [id]);
 
   useEffect(() => {
     if (initial?.id !== id) api.experience(id, inviteToken, linkToken).then((r) => setOffer(r.offer)).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
@@ -130,6 +168,13 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
     if (started.current || !opt || !peopleKnown) return;
     started.current = true;
     const you = people.find((p) => p.line === 'You');
+    // A restored form: "you" was ticked before signing in, so tick whoever "You" is now.
+    if (draftTicked.current) {
+      const keep = draftTicked.current.filter((k) => people.some((p) => p.key === k));
+      if (draftTicked.current.includes('you') && you) keep.push(you.key);
+      setTicked(new Set(keep));
+      return;
+    }
     if (you && !opt.who.dropOff && !(opt.who.ageMax != null && opt.who.ageMax < 18)) setTicked(new Set([you.key]));
   }, [people, opt, peopleKnown]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -211,8 +256,16 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   const ok = chosen.length > 0 && whenOk && (lane !== 'weekly' || mode === 'drop_in' || picks.size > 0);
   const label = !chosen.length ? 'Choose who’s going' : !whenOk ? 'Pick a day and a time' : free || direct ? (ask ? 'Ask to book' : 'Book') : ask ? `Ask to book · ${gbp(total)} held` : `Pay ${gbp(total)}`;
 
-  const here = withQuery(paths.experienceBook(offer.id), { l: linkToken ?? null, i: inviteToken ?? null });
-  const logIn = () => navigate(`${paths.login()}?next=${encodeURIComponent(here)}`);
+  // This page, as it is set — the invitation, the link, a held waiting-list place — to come back to.
+  const here = withQuery(paths.experienceBook(offer.id), { l: linkToken ?? null, i: inviteToken ?? null, session: heldSession ?? null });
+  const keepDraft = () => {
+    const youKey = people.find((p) => p.line === 'You')?.key;
+    const d: Draft = {
+      at: Date.now(), mode, picks: [...picks], month, day, time, length, extra, contacts, over18, diet: [...diet], bring, plusOne, stay, dobs,
+      ticked: [...ticked].map((k) => (k === youKey ? 'you' : k)),
+    };
+    try { storage.setItem(draftKey(offer.id), JSON.stringify(d)); } catch { /* nowhere to keep it: the form starts afresh */ }
+  };
 
   const body = (): GuestBookBody => ({
     when: lane === 'onrequest' ? { kind: 'request', date: day!, time: time!, lengthMin: length ?? Math.min(...(opt.slots.find((s) => s.date === day)?.lengths ?? [60])) }
@@ -354,8 +407,8 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   }
 
   if (!signedIn()) {
-    blocks.push(<Kick key="acct" top={6}>Your free account</Kick>, <Para key="acct-l" color={INK_MUTED}>Just so we can send your booking. No subscription.</Para>,
-      <Buttons key="acct-b" items={[{ label: 'Continue with Google', onPress: logIn }, { label: 'Use my email', onPress: logIn }]} />);
+    blocks.push(<Kick key="acct" top={6}>Your free account</Kick>,
+      <FreeAccount key="acct-b" next={here} line="Just so we can send your booking. No subscription." onLeave={keepDraft} />);
   }
 
   if (!free) {

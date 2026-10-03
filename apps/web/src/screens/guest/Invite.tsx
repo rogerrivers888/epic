@@ -16,6 +16,7 @@ import { signedIn } from '../../session';
 import {
   Buttons, Chips, Facts, Field, Foot, GuestPage, INK_MUTED, Kick, Para, People, PhotoHead, PriceLines, Seg, Title, Waiting, dayWords, firstName, gbp, useToast,
 } from './kit';
+import { FreeAccount } from './FreeAccount';
 import { CardBox, confirmWithCard, finishWithBank, loadStripe } from './pay';
 import { whenWords } from './EventPage';
 
@@ -94,7 +95,6 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
   // The event page's own words for when, from the booking options: every lane has a date or says On request (Codex, 3 Oct 2026).
   const when = o.lane ? whenWords(o, opt) : `${o.startsOn ? dayWords(o.startsOn) : ''}${o.startsAt ? ` · ${o.startsAt}` : ''}`;
   const here = webPage ? paths.invited(token) : paths.invited(token);
-  const logIn = () => navigate(`${paths.login()}?next=${encodeURIComponent(here)}`);
 
   const partyOf = () => partyFrom(going);
   const total = quote?.valuePence ?? null;
@@ -160,8 +160,8 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
     if (signedIn() && q.stay?.on && q.stay.places?.length) blocks.push(<Para key="st">Stay over</Para>, <Chips key="stay" items={q.stay.places.map((pl: { id: string; name: string }) => ({ key: pl.id, label: pl.name, on: stay === pl.name, onPress: () => setStay(stay === pl.name ? null : pl.name) }))} />);
     if (!signedIn() && !paidHere) blocks.push(<Kick key="cnt" top={4}>How many of you</Kick>, <Field key="cntf" value={count} placeholder={String(v.invite.heads ?? 1)} onChange={setCount} keyboardType="numeric" maxLength={2} />);
     if (!signedIn()) {
-      blocks.push(<Kick key="acct" top={6}>Your free account</Kick>, <Para key="al" color={INK_MUTED}>No app needed. Your reply lands in Plans if you get the app later.</Para>,
-        <Buttons key="ab" items={[{ label: 'Continue with Google', onPress: logIn }, { label: 'Use my email', onPress: logIn }]} />);
+      blocks.push(<Kick key="acct" top={6}>Your free account</Kick>,
+        <FreeAccount key="ab" next={here} line="No app needed. Your reply lands in Plans if you get the app later." />);
     }
     if (paidHere) {
       blocks.push(<Kick key="pay" top={6}>Pay</Kick>);

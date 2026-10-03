@@ -284,15 +284,19 @@ export function People({ items }: { items: Person[] }) {
 }
 
 /** A field: optional bold label, a 1px box (red when wrong), the error under it. */
-export function Field({ label, value, onChange, placeholder, height, error, keyboardType, maxLength }: {
+export function Field({ label, value, onChange, placeholder, height, error, keyboardType, maxLength, onSubmit }: {
   label?: string; value: string; onChange: (v: string) => void; placeholder?: string; height?: number; error?: string | null;
-  keyboardType?: 'default' | 'phone-pad' | 'numeric' | 'email-address'; maxLength?: number;
+  keyboardType?: 'default' | 'phone-pad' | 'numeric' | 'email-address'; maxLength?: number; onSubmit?: () => void;
 }) {
+  // An address is typed as it is: no capital, no autocorrect.
+  const email = keyboardType === 'email-address';
   return (
     <View style={{ gap: 6 }}>
       {label ? <Text style={tx(13, '700')}>{label}</Text> : null}
       <TextInput value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={GUEST_PLACEHOLDER} multiline={!!height}
                  keyboardType={keyboardType} maxLength={maxLength} accessibilityLabel={label ?? placeholder}
+                 autoCapitalize={email ? 'none' : undefined} autoCorrect={email ? false : undefined} onSubmitEditing={onSubmit}
+                 {...(email && Platform.OS === 'web' ? ({ autoComplete: 'email' } as object) : {})}
                  style={[tx(14.5), { borderWidth: 1, borderColor: error ? INK : HAIRLINE, paddingVertical: 12, paddingHorizontal: 13 }, height ? { minHeight: height, textAlignVertical: 'top' } : null]} />
       {/* Red is for destructive confirms only (Roger, 3 Oct 2026): an error is ink, bold. */}
       {error ? <Text style={tx(12.5, '700', INK)}>{error}</Text> : null}

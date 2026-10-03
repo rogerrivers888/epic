@@ -111,7 +111,7 @@ export class QueuedError extends Error {
  * signal, and the caller is told which of the two happened.
  */
 /** Doors whose 401 is about the credential being presented, never the session held. */
-const SIGN_IN_DOORS = ['/api/session', '/api/session/link', '/api/session/request-link', '/api/auth/google/exchange', '/api/auth/login', '/api/auth/credentials'];
+const SIGN_IN_DOORS = ['/api/session', '/api/session/link', '/api/session/request-link', '/api/auth/google/exchange', '/api/auth/login', '/api/auth/credentials', '/api/auth/guest'];
 
 /**
  * Ask the session door whether `token` is still a session, once however many
@@ -3629,6 +3629,14 @@ export const api = {
    * account, so it cannot be used to find out who else uses Epic.
    */
   requestSignInLink: (email: string) => post<{ sent: boolean; message: string }>('/api/session/request-link', { email }),
+  /**
+   * "Use my email" on the free account step (G21): a link to the address, and the
+   * account is made when it is opened. Answered the same whether or not the
+   * address has an account. `next` is the page to come back to.
+   */
+  guestAccountLink: (email: string, next: string | null) => post<{ sent: boolean; message: string }>('/api/auth/guest', { email, next }),
+  /** Continue with Google on the free account step (G21): the guest door, back to `next`. */
+  guestGoogleUrl: (next: string | null) => `${API_URL}/api/auth/google?intent=guest${next ? `&next=${encodeURIComponent(next)}` : ''}`,
 
   // --- voice: the two stages (routes/voice.js) -------------------------------
   // The recording itself goes through `voice/client.ts`, not here: it is the

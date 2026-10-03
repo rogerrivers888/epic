@@ -21,6 +21,7 @@ import { paths, withQuery } from '../../routes';
 import { useRouter } from '../../router';
 import { signedIn } from '../../session';
 import { mediaUrl } from '../../components/hosting';
+import { FreeAccount } from './FreeAccount';
 import {
   AMBER, AMBER_DARK, Buttons, Facts, Field, Foot, GoingAhead, GuestPage, GuestSheet, HostRow, INK_MUTED, Kick, LANE_TAG, LIME, Notice, Para, PhotoHead, Rows,
   Tags, Title, Waiting, dayWords, firstName, gbp, useToast,
@@ -133,7 +134,6 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const first = firstName(host?.name);
   const keep = (href: string) => withQuery(href, { l: linkToken ?? null, i: inviteToken ?? null });
   const here = keep(paths.experience(o.id));
-  const logIn = () => navigate(`${paths.login()}?next=${encodeURIComponent(here)}`);
 
   const share = async () => {
     const url = Platform.OS === 'web' && typeof location !== 'undefined' ? `${location.origin}${here}` : here;
@@ -259,15 +259,13 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
         </>
       ) : (
         <>
-          <Para color={INK_MUTED}>Make a free account so {first} can answer you. No subscription.</Para>
-          <Buttons items={[{ label: 'Continue with Google', onPress: logIn }, { label: 'Use my email', onPress: logIn }]} />
+          <FreeAccount next={here} line={`Make a free account so ${first} can answer you. No subscription.`} />
         </>
       )}
     </GuestSheet>
   ) : sheet === 'account' ? (
     <GuestSheet title="Join the waiting list" onClose={() => setSheet(null)}>
-      <Para color={INK_MUTED}>Make a free account so we can tell you when a place comes free. No subscription.</Para>
-      <Buttons items={[{ label: 'Continue with Google', onPress: logIn }, { label: 'Use my email', onPress: logIn }]} />
+      <FreeAccount next={here} line="Make a free account so we can tell you when a place comes free. No subscription." />
     </GuestSheet>
   ) : null;
 

@@ -97,6 +97,9 @@ const SIGN_IN = new Set([
   // The fourth verb, GET /api/auth/link/:token, carries the token in its path and
   // is matched by SIGN_IN_LINK below.
   '/api/auth/login', '/api/auth/forgot', '/api/auth/credentials',
+  // "Use my email" on the free account step (routes/authGuest.js, G21): the
+  // person booking has no session yet; the link it sends is the credential.
+  '/api/auth/guest',
 ]);
 // L4 asks what an invite or reset link is for before anybody has a session.
 const SIGN_IN_LINK = /^\/api\/auth\/link\/[^/]+$/;
