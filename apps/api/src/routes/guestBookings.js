@@ -184,7 +184,9 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
     const next = ahead(sessions, o, now);
     // Weekly sessions are booked one by one: it is full only when every session is (Codex, 2 Oct 2026).
     const lefts = next.map((x) => (placesLeft(x, o) ?? Infinity) - x.reserved);
-    const left = next.length ? (o.lane === 'weekly' ? Math.max(...lefts) : Math.min(...lefts)) : null;
+    // Weekly: open while any session the guest can book has room — only this week's when drop in is the only way (Codex, 3 Oct 2026).
+    const weeklyKinds = o.lane === 'weekly' ? kindsFor(o) : [];
+    const left = !next.length ? null : o.lane !== 'weekly' ? Math.min(...lefts) : weeklyKinds.includes('book_ahead') ? Math.max(...lefts) : lefts[0];
     const cfg = hostingConfig();
     const slots = [];
     if (o.lane === 'onrequest') {

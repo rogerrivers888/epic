@@ -74,6 +74,8 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const [month, setMonth] = useState<number>(0);
   const [day, setDay] = useState<string | null>(null);
   const [time, setTime] = useState<string | null>(null);
+  // On request with more than one length: the guest picks it; the shortest until they do (the times offered fit it).
+  const [length, setLength] = useState<number | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [extra, setExtra] = useState<Who[]>([]);
   const [contacts, setContacts] = useState<Record<string, string>>({});
@@ -201,7 +203,7 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const logIn = () => navigate(`${paths.login()}?next=${encodeURIComponent(here)}`);
 
   const body = (): GuestBookBody => ({
-    when: lane === 'onrequest' ? { kind: 'request', date: day!, time: time!, lengthMin: opt.slots.find((s) => s.date === day)?.lengths[0] }
+    when: lane === 'onrequest' ? { kind: 'request', date: day!, time: time!, lengthMin: length ?? Math.min(...(opt.slots.find((s) => s.date === day)?.lengths ?? [60])) }
       : lane === 'weekly' ? { kind: mode, sessionIds: mode === 'drop_in' ? (sessions[0] ? [sessions[0].id] : []) : [...picks] }
         : { kind: 'whole' },
     party: {
@@ -220,6 +222,8 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
 
   const settle = async (bookingId: string, out: PayOutcome, secret: string) => {
     if (out.state === 'paid') { await api.guestPaid(bookingId, out.paymentIntent).catch(() => null); done(bookingId); return; }
+    // Still with the bank: the booking page says where it stands, never "You're booked" before it is (Codex, 3 Oct 2026).
+    if (out.state === 'processing') { toast.show('Your bank is still processing it'); navigate(paths.booking(bookingId), { replace: true }); return; }
     if (out.state === 'bank') { setPending({ bookingId, clientSecret: secret }); setSheet({ kind: 'bank' }); return; }
     // A decline ends that booking on the server (its places go back), so Try again makes a fresh one with every
     // answer still filled in — never a second go at the payment of a booking that's gone (Codex, 3 Oct 2026).
@@ -287,6 +291,8 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + month, 1));
     blocks.push(<Kick key="d">Pick a day</Kick>, <MonthPicker key="cal" month={base} days={days} picked={day} onPick={(d) => { setDay(d); setTime(null); }}
       onPrev={month > 0 ? () => setMonth(month - 1) : null} onNext={month < 2 ? () => setMonth(month + 1) : null} />);
+    const lengths = [...new Set(opt.slots.flatMap((s) => s.lengths))].sort((a, b) => a - b);
+    if (lengths.length > 1) blocks.push(<Kick key="len">How long</Kick>, <Chips key="lc" items={lengths.map((l) => ({ key: `l${l}`, label: l % 60 === 0 ? `${l / 60} hour${l === 60 ? '' : 's'}` : `${l} min`, on: (length ?? lengths[0]) === l, onPress: () => setLength(l) }))} />);
     if (day) blocks.push(<Kick key="t">Pick a time</Kick>, <Chips key="tc" items={(opt.slots.find((s) => s.date === day)?.times ?? []).map((t) => ({ label: t, on: time === t, onPress: () => setTime(t) }))} />);
   }
 

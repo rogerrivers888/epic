@@ -53,6 +53,7 @@ export const stripeKeyLoaded = () => loadedKey;
 export type PayOutcome =
   | { state: 'paid'; paymentIntent: string }
   | { state: 'bank'; paymentIntent: string }          // 3-D Secure: waiting for the bank (G27)
+  | { state: 'processing'; paymentIntent: string }    // the bank hasn't answered yet: not paid until it has
   | { state: 'declined'; message: string }            // the bank said no (G26)
   | { state: 'failed'; message: string };             // anything else (G26, second line)
 
@@ -63,7 +64,9 @@ const outcomeOf = (r: any): PayOutcome => {
   }
   const pi = r?.paymentIntent;
   if (!pi) return { state: 'failed', message: 'Something went wrong.' };
-  if (pi.status === 'succeeded' || pi.status === 'requires_capture' || pi.status === 'processing') return { state: 'paid', paymentIntent: pi.id };
+  // Paid means settled (or a card hold that's in place) — exactly what the server confirms on (Codex, 3 Oct 2026).
+  if (pi.status === 'succeeded' || pi.status === 'requires_capture') return { state: 'paid', paymentIntent: pi.id };
+  if (pi.status === 'processing') return { state: 'processing', paymentIntent: pi.id };
   if (pi.status === 'requires_action') return { state: 'bank', paymentIntent: pi.id };
   return { state: 'failed', message: 'Payment didn’t go through.' };
 };
@@ -96,18 +99,23 @@ export function prepareWallet(stripe: StripeJs, label: string, amountPence: numb
  */
 export function payWithWallet(stripe: StripeJs, pr: any, { start }: { start: () => Promise<string | null> }): Promise<PayOutcome | null> {
   // Nothing is awaited before show(): it must run inside the tap. The sheet is reused, so last time's listeners go first.
-  try { pr.off?.('paymentmethod'); pr.off?.('cancel'); } catch { /* none to remove */ }
+  // Stripe detaches a listener only by the very function it was given, so last time's are kept to remove (Codex, 3 Oct 2026).
+  const was = pr.__epic as { pm: any; cancel: any } | undefined;
+  if (was) { try { pr.off('paymentmethod', was.pm); pr.off('cancel', was.cancel); } catch { /* already gone */ } }
   return new Promise<PayOutcome>((resolve) => {
-    pr.on('paymentmethod', async (ev: any) => {
+    const pm = async (ev: any) => {
       try {
         const secret = await start();
         if (!secret) { ev.complete('fail'); resolve({ state: 'failed', message: 'Nothing to pay.' }); return; }
         const first = outcomeOf(await stripe.confirmCardPayment(secret, { payment_method: ev.paymentMethod.id }, { handleActions: false }));
-        ev.complete(first.state === 'paid' || first.state === 'bank' ? 'success' : 'fail');
+        ev.complete(first.state === 'paid' || first.state === 'bank' || first.state === 'processing' ? 'success' : 'fail');
         resolve(first.state === 'bank' ? await finishWithBank(stripe, secret) : first);
       } catch (e: any) { ev.complete('fail'); resolve({ state: 'failed', message: e?.message ?? 'Something went wrong.' }); }
-    });
-    pr.on('cancel', () => resolve({ state: 'failed', message: 'Cancelled.' }));
+    };
+    const cancel = () => resolve({ state: 'failed', message: 'Cancelled.' });
+    pr.__epic = { pm, cancel };
+    pr.on('paymentmethod', pm);
+    pr.on('cancel', cancel);
     try { pr.show(); } catch (e: any) { resolve({ state: 'failed', message: e?.message ?? 'The wallet didn’t open.' }); }
   });
 }
