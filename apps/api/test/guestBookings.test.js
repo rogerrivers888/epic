@@ -724,3 +724,32 @@ test('events near you: within reach, at one place, matching words, and in their 
   assert.equal(moodOf('Arts and crafts', 'Clay'), 'fun');
   assert.equal(moodOf('Talks and tasters', 'Wine'), 'educational');
 });
+
+test('Codex: a paid event is not a yes without a booking, and a session already started today is not the next one', async () => {
+  settings.forget();
+  const { o } = await anEvent({ priceMode: 'same_each', price: 1500 });
+  const token = crypto.randomUUID();
+  await query(`insert into offer_invites (offer_id, name, contact, heads, token) values ($1, 'Cy', 'cy@example.com', 2, $2)`, [o.id, token]);
+  const hosting = await import('../src/routes/hosting.js');
+  const app = express(); app.use(express.json()); app.use('/api', hosting.publicRouter);
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => res.status(err.status ?? 500).json({ error: err.code ?? 'x' }));
+  const s = app.listen(0, '127.0.0.1'); await new Promise((r) => s.once('listening', r));
+  try {
+    const yes = await fetch(`http://127.0.0.1:${s.address().port}/api/invited/${token}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rsvp: 'yes', heads: 2 }) });
+    assert.equal(yes.status, 409);
+    assert.equal((await yes.json()).error, 'needs_booking');
+  } finally { await new Promise((r) => s.close(r)); }
+
+  // Today at 00:01 has already started by the time anybody reads this; the one after it is next.
+  const { o: w } = await anEvent({ lane: 'weekly', sessions: 2, firstIn: 0 });
+  await query(`update host_offers set venue_lat = 51.4, venue_lng = -0.62 where id = $1`, [w.id]);
+  await query(`update offer_sessions set starts_at = '00:01' where offer_id = $1 and on_date = current_date`, [w.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const e = (await srv.get('/api/events/near?lat=51.39&lng=-0.62&minutes=30')).body.events.find((x) => x.id === w.id);
+    assert.ok(e, 'still offered, by its next session');
+    assert.notEqual(e.date, new Date().toISOString().slice(0, 10), 'a started session is not offered as the next');
+  } finally { await srv.close(); }
+});

@@ -764,9 +764,10 @@ router.get('/events/near', async (req, res, next) => {
                          where bs.session_id = nxt.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')), 0)::int as booked,
               (select round(avg(r.stars)::numeric, 1)::float from host_reviews r where r.host_id = o.host_id and r.side = 'guest' and not r.hidden and r.publish_on <= current_date) as rating,
               (select count(*)::int from host_reviews r where r.host_id = o.host_id and r.side = 'guest' and not r.hidden and r.publish_on <= current_date) as reviews,
-              (select count(*)::int from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and s.on_date >= current_date) as ahead
+              (select count(*)::int from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and (s.on_date > current_date or (s.on_date = current_date and (s.starts_at is null or s.starts_at > (now() at time zone coalesce(o.time_zone, 'Europe/London'))::time)))) as ahead
          from o
-         left join lateral (select s.* from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and s.on_date >= current_date order by s.on_date, s.starts_at limit 1) nxt on true
+         -- The next session not yet started, in the event's own time zone (Codex, 3 Oct 2026).
+         left join lateral (select s.* from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and (s.on_date > current_date or (s.on_date = current_date and (s.starts_at is null or s.starts_at > (now() at time zone coalesce(o.time_zone, 'Europe/London'))::time))) order by s.on_date, s.starts_at limit 1) nxt on true
         where (($4::text is not null) or (o.at_lat is not null and o.at_lng is not null)) and (nxt.id is not null or o.lane = 'onrequest')
           and ($4::text is not null or (6371 * acos(least(1, cos(radians($1)) * cos(radians(o.at_lat)) * cos(radians(o.at_lng) - radians($2)) + sin(radians($1)) * sin(radians(o.at_lat))))) <= $3)
           and ($4::text is null or o.venue_ref = $4)
@@ -781,7 +782,8 @@ router.get('/events/near', async (req, res, next) => {
         const left = most != null ? Math.max(0, most - r.booked) : null;
         return {
           id: r.id, title: r.title, lane: r.lane, photo: mediaRef(r.photo_ids?.[0]), mood: moodOf(r.what_category, `${r.what_label ?? ''} ${r.title ?? ''}`),
-          date: ymd(r.on_date), time: hm(r.starts_at), sessionsAhead: r.ahead, minutesAway: Math.max(1, Math.round(Number(r.km) / 0.75)),
+          date: ymd(r.on_date), time: hm(r.starts_at), sessionsAhead: r.ahead, // Found by its place with no point to measure from: no journey time, rather than a made-up one (Codex, 3 Oct 2026).
+          minutesAway: Number.isFinite(Number(r.km)) && r.km != null ? Math.max(1, Math.round(Number(r.km) / 0.75)) : null,
           price: { mode: r.price_mode ?? 'free', pence: r.price_pence, childPence: r.child_pence, nowEach: r.price_mode === 'by_numbers' && r.total_pence && r.min_count ? perPersonAt(r.total_pence, r.min_count) : null },
           who: { ageMin: r.age_min, ageMax: r.age_max, dropOff: r.parents === 'drop_off' },
           placesLeft: left, full: left === 0, needs: r.min_count && r.booked < r.min_count ? r.min_count - r.booked : null, waitlist: r.waitlist_on === true,

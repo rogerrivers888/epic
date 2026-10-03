@@ -49,7 +49,7 @@ import * as skills from '../repositories/hostSkills.js';
 import { FACET_CAP, TAG_CAP, categoryForPassion, categoryFrom, credentialDisplay } from '../domain/hostSkills.js';
 import { pdfText } from '../sources/menuRead.js';
 import { extract as extractWith, openaiEnabled, transcribe } from '../sources/openai.js';
-import { refundWords, hostingConfig, decidesOn as laneDecidesOn } from '../domain/lanes.js';
+import { refundWords, hostingConfig, decidesOn as laneDecidesOn, paidThroughEpic } from '../domain/lanes.js';
 
 export const router = Router();
 export const publicRouter = Router();
@@ -1336,6 +1336,8 @@ publicRouter.post('/invited/:token', async (req, res, next) => {
     if (!o || !['live', 'paused'].includes(o.state)) return res.status(404).json({ error: 'not_yet', message: o?.state === 'ended' ? 'This one was called off.' : 'This invitation is not ready yet.' });
     const rsvp = oneOf(['yes', 'no'], req.body?.rsvp);
     if (!rsvp) throw refuse(400, 'rsvp_required', 'Yes or no.');
+    // A paid event from the four lanes is a yes only with a booking: no account, no place (Codex, 3 Oct 2026).
+    if (rsvp === 'yes' && o.lane && paidThroughEpic(o)) throw refuse(409, 'needs_booking', 'Make your free account to book and pay.');
     const heads = rsvp === 'yes' ? Math.max(1, int(req.body?.heads) ?? inv.heads) : 0;
     const updated = await repo.answerInvite(inv.id, rsvp, heads);
     res.json({ invite: invitePayload(updated) });

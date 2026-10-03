@@ -263,7 +263,7 @@ export function eventBadge(e: EventNear): { words: string; bg: string } | null {
 /** "Sat 3 Oct · 8 min · £12 a child"; in a category lane it starts "Event ·" and leaves out the drive (G1b). */
 export function eventMeta(e: EventNear, mixed: boolean): string {
   const when = e.date ? (e.lane === 'weekly' && (e.sessionsAhead ?? 0) > 1 ? `${DOW[new Date(`${e.date}T12:00:00Z`).getUTCDay()]}days` : eventDay(e.date)) : 'On request';
-  return mixed ? `Event · ${when} · ${eventPrice(e)}` : `${when} · ${e.minutesAway} min · ${eventPrice(e)}`;
+  return mixed ? `Event · ${when} · ${eventPrice(e)}` : [when, e.minutesAway != null ? `${e.minutesAway} min` : null, eventPrice(e)].filter(Boolean).join(' · ');
 }
 
 /** The event's photo at the place card's size, with the kind tag top-left and the badge bottom-left. */

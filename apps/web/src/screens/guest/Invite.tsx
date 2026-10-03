@@ -14,7 +14,7 @@ import { paths, withQuery } from '../../routes';
 import { useRouter } from '../../router';
 import { signedIn } from '../../session';
 import {
-  Buttons, Chips, Facts, Foot, GuestPage, INK_MUTED, Kick, Para, People, PhotoHead, PriceLines, Seg, Title, Waiting, dayWords, firstName, gbp, useToast,
+  Buttons, Chips, Facts, Field, Foot, GuestPage, INK_MUTED, Kick, Para, People, PhotoHead, PriceLines, Seg, Title, Waiting, dayWords, firstName, gbp, useToast,
 } from './kit';
 import { CardBox, confirmWithCard, finishWithBank, loadStripe } from './pay';
 
@@ -58,6 +58,8 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
   const [quote, setQuote] = useState<GuestQuote | null>(null);
   // A paid reply already made: paying again confirms that booking, never answers twice (Codex, 3 Oct 2026).
   const [pending, setPending] = useState<{ bookingId: string; clientSecret: string } | null>(null);
+  // Signed out there is no household to tick: how many are coming is typed, from what the host invited (Codex, 3 Oct 2026).
+  const [count, setCount] = useState<string>('');
 
   useEffect(() => {
     api.invited(token).then((r) => { setV(r); api.guestOptions(r.offer.id, { i: token }).then(setOpt).catch(() => setOpt(null)); }).catch((e) => setError(e?.message ?? 'That invitation didn’t open.'));
@@ -80,7 +82,11 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
   const paidHere = Boolean(opt?.price.mode && opt.price.mode !== 'free' && opt.price.throughEpic);
   const people = peopleOf(hh);
   const going = goingOf(people, ticked);
-  const heads = Math.max(1, going.length);
+  const typed = Math.floor(Number(count));
+  const heads = !signedIn() ? (Number.isFinite(typed) && typed >= 1 ? Math.min(typed, 20) : Math.max(1, v.invite.heads ?? 1)) : Math.max(1, going.length);
+  // Some ways of booking need a slot or sessions picked: On request, and a weekly class booked ahead only. Those
+  // invitations are answered on the booking screen itself, with the invitation carried (Codex, 3 Oct 2026).
+  const needsPicking = Boolean(opt && (opt.lane === 'onrequest' || (opt.lane === 'weekly' && !opt.kinds.includes('drop_in'))));
   const q = opt?.questions ?? {};
   const taken = new Set(v.taken ?? []);
   const when = `${o.startsOn ? dayWords(o.startsOn) : ''}${o.startsAt ? ` · ${o.startsAt}` : ''}`;
@@ -102,6 +108,7 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
         return;
       }
       if (reply === 'no') { await api.invitedBook(token, { rsvp: 'no' }); toast.show(`${host} knows you can’t make it`); return; }
+      if (needsPicking) { navigate(withQuery(paths.experienceBook(o.id), { i: token })); return; }
       // Ready to pay before anything is made, so a missing card never leaves a booking stranded.
       if (paidHere && (!stripe || !card.current)) { toast.show(stripe ? 'Add your card' : 'Card payments aren’t switched on yet'); return; }
       let made = pending;
@@ -146,6 +153,7 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
       ? { key: it.id, label: `${it.name} · taken`, on: false, disabled: true, onPress: () => {} }
       : { key: it.id, label: it.name, on: bring === it.name, onPress: () => setBring(bring === it.name ? null : it.name) }))} />);
     if (signedIn() && q.stay?.on && q.stay.places?.length) blocks.push(<Para key="st">Stay over</Para>, <Chips key="stay" items={q.stay.places.map((pl: { id: string; name: string }) => ({ key: pl.id, label: pl.name, on: stay === pl.name, onPress: () => setStay(stay === pl.name ? null : pl.name) }))} />);
+    if (!signedIn() && !paidHere) blocks.push(<Kick key="cnt" top={4}>How many of you</Kick>, <Field key="cntf" value={count} placeholder={String(v.invite.heads ?? 1)} onChange={setCount} keyboardType="numeric" maxLength={2} />);
     if (!signedIn()) {
       blocks.push(<Kick key="acct" top={6}>Your free account</Kick>, <Para key="al" color={INK_MUTED}>No app needed. Your reply lands in Plans if you get the app later.</Para>,
         <Buttons key="ab" items={[{ label: 'Continue with Google', onPress: logIn }, { label: 'Use my email', onPress: logIn }]} />);
@@ -159,7 +167,7 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
   }
   return (
     <GuestPage head={<PhotoHead uri={mediaUrl(o.photos[0] ?? null)} webPage={webPage} onBack={() => back(paths.trips())} />}
-               foot={<Foot label={busy ? '…' : reply === 'yes' && paidHere && total ? `Pay ${gbp(total)} and send reply` : 'Send reply'} onPress={send} disabled={busy} />}
+               foot={<Foot label={busy ? '…' : !opt ? 'Send reply' : reply === 'yes' && needsPicking && signedIn() ? 'Pick a time and book' : reply === 'yes' && paidHere && total ? `Pay ${gbp(total)} and send reply` : 'Send reply'} onPress={send} disabled={busy || !opt} />}
                overlay={toast.node}>
       {blocks}
     </GuestPage>

@@ -6288,7 +6288,7 @@ export type GuestPayment = { id: string; kind: string; pence: number; state: str
 
 /** An event near the household, for Inspire's lanes and Events near you (guest handoff G1, G1b, G1c; routes/guestBookings.js). */
 export type EventNear = {
-  id: string; title: string | null; lane: GuestLane; photo: string | null; mood: string; date: string | null; time: string | null; sessionsAhead: number; minutesAway: number;
+  id: string; title: string | null; lane: GuestLane; photo: string | null; mood: string; date: string | null; time: string | null; sessionsAhead: number; minutesAway: number | null;
   price: { mode: string; pence: number | null; childPence: number | null; nowEach: number | null };
   who: { ageMin: number | null; ageMax: number | null; dropOff: boolean };
   placesLeft: number | null; full: boolean; needs: number | null; waitlist: boolean; rating: number | null; reviews: number;
