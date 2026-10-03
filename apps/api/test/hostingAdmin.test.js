@@ -194,6 +194,9 @@ test('a held payout: released by the owner only, over a complaint; staff are tol
     const { rows: [row] } = await query('select state, released_by from host_payouts where id = $1', [p.id]);
     assert.deepEqual([row.state, row.released_by], ['scheduled', 'owner']);
     assert.equal((await owner.send('POST', `/api/admin/hosting/money/payouts/${p.id}/release`, { why: 'again' })).status, 404, 'only a held one');
+    await query(`update host_payouts set state = 'failed' where id = $1`, [p.id]);
+    assert.equal((await owner.send('POST', `/api/admin/hosting/money/payouts/${p.id}/retry`, {})).body.retried, true);
+    assert.equal((await query('select released_by from host_payouts where id = $1', [p.id])).rows[0].released_by, null, 'a retry decides afresh');
     assert.equal((await staff.get('/api/admin/hosting/hosts/not-a-uuid/videos')).status, 404, 'a bad id is a 404, not a cast error');
   } finally { await staff.close(); await owner.close(); }
 });

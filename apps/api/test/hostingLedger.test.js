@@ -236,6 +236,14 @@ test('the owner releases a held payout over a complaint, never over missing tax 
   await money.releasePayouts({ transfer, status });
   assert.deepEqual([(await row(a)).state, (await row(a)).released_by], ['paid', 'owner']);
   assert.equal((await row(b)).state, 'held', 'no tax details, no transfer, whoever says so');
+  assert.equal((await row(b)).released_by, null, 'held again, the owner’s release is spent');
+  // A failed transfer retried: a complaint raised since holds it, whoever released it before.
+  await query(`update host_payouts set state = 'failed' where id = $1`, [(await row(a)).id]);
+  await query(`insert into hosting_complaints (session_id, booking_id, host_id, reason) values ($1, $2, $3, 'Raised after')`, [a.sessions[0].id, a.booking.id, a.host.id]);
+  // As the Retry route leaves it (hostingAdmin.test checks the route itself).
+  await query(`update host_payouts set state = 'scheduled', hold_reason = null, released_by = null where id = $1`, [(await row(a)).id]);
+  await money.releasePayouts({ transfer, status });
+  assert.equal((await row(a)).state, 'held');
 });
 
 test('a course booking pays per session, split evenly, refunds taken off in proportion', async () => {

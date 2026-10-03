@@ -591,7 +591,7 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
 router.post('/money/payouts/:id/retry', requireOwnerSignedIn('retry a payout'), async (req, res, next) => {
   try {
     if (!UUID.test(String(req.params.id))) throw refuse(404, 'not_found', 'No such payout.');
-    const { rows: [p] } = await query(`update host_payouts set state = 'scheduled', hold_reason = null, updated_at = now() where id = $1 and state = 'failed' returning id`, [req.params.id]);
+    const { rows: [p] } = await query(`update host_payouts set state = 'scheduled', hold_reason = null, released_by = null, updated_at = now() where id = $1 and state = 'failed' returning id`, [req.params.id]);
     if (!p) throw refuse(404, 'not_found', 'That payout isn’t waiting on a person.');
     await logChange({ subjectKind: 'payout', subjectId: p.id, field: 'retry', after: { state: 'scheduled' }, why: typeof req.body?.why === 'string' ? req.body.why.slice(0, 500) : null, by: by(), byLabel: 'staff', approvalId: UUID.test(String(req.body?.approvalId ?? '')) ? req.body.approvalId : null });
     res.json({ retried: true });

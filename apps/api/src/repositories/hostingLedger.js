@@ -184,7 +184,8 @@ export async function claimPayout(id, { by }) {
 
 export async function holdPayout(id, reason) {
   const { rows: [row] } = await query(
-    `update host_payouts set state = 'held', hold_reason = $2, updated_at = now()
+    // An owner's Release is one decision about one hold: held again, it is forgotten, so a later complaint holds it too (Codex, 3 Oct 2026).
+    `update host_payouts set state = 'held', hold_reason = $2, released_by = null, updated_at = now()
       where id = $1 and state in ('scheduled', 'held', 'released') and (state = 'released' or hold_reason is distinct from $2) returning *`,
     [id, reason],
   );
