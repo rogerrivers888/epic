@@ -134,8 +134,16 @@ export function prefillIndividual({ email = null, legalName = null, dateOfBirth 
   return ind;
 }
 
-/** The body that makes a host's account (L2, L6, L11): exported so a test can hold it to the rules. */
-export function connectAccountBody({ hostId, email = null, legalName = null, dateOfBirth = null, displayName = null }) {
+/**
+ * The body that makes a host's account (L2, L6, L11): exported so a test can hold it to the rules.
+ *
+ * Dormant (owner, 3 Oct 2026): every host gets an account silently at the passport step, so the check can be tied
+ * to its Person and count as Stripe's own — free hosts too. It asks for nothing: a merchant configuration with no
+ * capabilities (Stripe needs one to hold a Person at all; sandbox 3 Oct 2026), nothing due from the host, never paid
+ * out, so never a Connect "active account". Card payments are asked for only when the host first takes money
+ * (`wakeAccount`).
+ */
+export function connectAccountBody({ hostId, email = null, legalName = null, dateOfBirth = null, displayName = null, dormant = false }) {
   return {
     contact_email: email ?? undefined,
     display_name: displayName ?? undefined,
@@ -145,10 +153,25 @@ export function connectAccountBody({ hostId, email = null, legalName = null, dat
     identity: { country: 'gb', entity_type: 'individual', individual: prefillIndividual({ email, legalName, dateOfBirth }) },
     // Merchant, not recipient: the host is merchant of record on a destination charge with on_behalf_of (L2).
     // Guests' statements read "EPIC* <host>" (L11).
-    configuration: { merchant: { capabilities: { card_payments: { requested: true } }, statement_descriptor: { prefix: 'EPIC' } } },
+    configuration: { merchant: { ...(dormant ? {} : { capabilities: { card_payments: { requested: true } } }), statement_descriptor: { prefix: 'EPIC' } } },
     metadata: { epic_host_id: hostId },
   };
 }
+
+/**
+ * A dormant account woken when its host first takes money through Epic: card payments asked for, and what Epic
+ * already knows filled in (the kind of business, the host's page) — only possible before Stripe's form is first
+ * opened. The passport check tied to it earlier stands: Stripe does not ask for ID again (sandbox, 3 Oct 2026).
+ */
+export function wakeAccount(accountId, { householdId = null, businessUrl = null } = {}) {
+  return call('POST', `/v2/core/accounts/${encodeURIComponent(accountId)}`, {
+    configuration: { merchant: { capabilities: { card_payments: { requested: true } }, mcc: '7999' } },
+    ...(businessUrl ? { defaults: { profile: { business_url: businessUrl } } } : {}),
+  }, { householdId, purpose: 'host.payouts.wake', idempotencyKey: `wake-${accountId}`, v2: true });
+}
+
+/** Has the account been asked for card payments yet? A dormant one has no capabilities at all. */
+export const accountAwake = (a) => Boolean(a?.capabilities && 'card_payments' in a.capabilities);
 
 /**
  * A host's connected account, created in the background (L6): Accounts v2,
@@ -156,8 +179,8 @@ export function connectAccountBody({ hostId, email = null, legalName = null, dat
  * that stops hosts changing it is Stripe-side, and this does not rely on it.
  * Returns `{ id, personId }`: the Person is what Identity is tied to (L7).
  */
-export async function createConnectAccount({ email, householdId, hostId, legalName = null, dateOfBirth = null, displayName = null }) {
-  const a = await call('POST', '/v2/core/accounts', connectAccountBody({ hostId, email, legalName, dateOfBirth, displayName }),
+export async function createConnectAccount({ email, householdId, hostId, legalName = null, dateOfBirth = null, displayName = null, dormant = false }) {
+  const a = await call('POST', '/v2/core/accounts', connectAccountBody({ hostId, email, legalName, dateOfBirth, displayName, dormant }),
     { householdId, purpose: 'host.payouts.account', idempotencyKey: `acct-v2-${hostId}`, v2: true });
   await setManualPayouts(a.id, { householdId });
   const v1 = await retrieveAccount(a.id, { householdId });

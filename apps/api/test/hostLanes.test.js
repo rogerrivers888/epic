@@ -26,6 +26,7 @@ import express from 'express';
 const calls = [];
 let modelAnswer = {};
 let checkoutStatus = 'paid';
+let dormantRead = false;
 const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -36,8 +37,10 @@ const fake = http.createServer((req, res) => {
     if (req.url.startsWith('/openai/responses')) return json({ model: 'gpt-5-mini', usage: { input_tokens: 400, output_tokens: 120 }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(modelAnswer) }] }] });
     // Accounts v2 makes the host's account; v1 sets and reads its payout schedule (register L, 3 Oct 2026).
     if (req.url === '/v2/core/accounts' && req.method === 'POST') return json({ id: 'acct_test_1', object: 'v2.core.account' });
+    // Waking a dormant account: card payments asked for (owner, 3 Oct 2026).
+    if (req.url.startsWith('/v2/core/accounts/') && req.method === 'POST') return json({ id: 'acct_test_1', object: 'v2.core.account' });
     if (req.url === '/v1/accounts' && req.method === 'POST') return json({ error: { code: 'invalid_request_error', message: 'Accounts v1 creation is refused' } }, 400);
-    if (req.url.startsWith('/v1/accounts/')) return json({ id: 'acct_test_1', details_submitted: true, charges_enabled: true, payouts_enabled: true, individual: { id: 'person_test_1' }, settings: { payouts: { schedule: { interval: 'manual' } } }, requirements: { currently_due: [], eventually_due: [], past_due: [] } });
+    if (req.url.startsWith('/v1/accounts/')) return json({ id: 'acct_test_1', details_submitted: !dormantRead, charges_enabled: !dormantRead, payouts_enabled: !dormantRead, capabilities: dormantRead ? {} : { card_payments: 'active', transfers: 'active' }, individual: { id: 'person_test_1' }, settings: { payouts: { schedule: { interval: 'manual' } } }, requirements: { currently_due: [], eventually_due: [], past_due: [] } });
     if (req.url === '/v1/account_links') return json({ url: 'https://connect.stripe.test/onboard' });
     if (req.url === '/v1/identity/verification_sessions' && req.method === 'POST') return json({ id: 'vs_test_1', url: 'https://verify.stripe.test/start' });
     if (req.url.startsWith('/v1/identity/verification_sessions/')) return json({ id: 'vs_test_1', status: 'verified' });
@@ -645,40 +648,69 @@ test('an account from before register L is left alone for the owner’s void, ne
   } finally { await srv.close(); }
 });
 
-test('L7: a host taking money gets their Stripe account before the passport check, so the check is tied to it; a free host gets none', async () => {
+test('L7: every host — free or paid — gets a dormant Stripe account at the passport step, tied to the check; it wakes when they first take money', async () => {
   const { household: h, member } = await aHousehold(query);
   const srv = await server(await readyHost(h, member, { verified: false }));
   try {
     const host = await repo.hostByHousehold(h.id);
-    const paid = await repo.insertOffer(host.id, 'oneoff', { lane: 'oneoff' });
-    await query(`update host_offers set price_mode = 'same_each', price_pence = 2000, money = 'epic', visibility = 'invite' where id = $1`, [paid.id]);
     const free = await repo.insertOffer(host.id, 'oneoff', { lane: 'oneoff' });
-    const accountsMade = () => calls.filter((c) => c.url === '/v2/core/accounts' && c.method === 'POST').length;
-    const before = accountsMade();
+    const made = () => calls.filter((c) => c.url === '/v2/core/accounts' && c.method === 'POST');
+    const before = made().length;
     const linksBefore = calls.filter((c) => c.url === '/v1/account_links').length;
     await withStripe('sk_test_fake', async () => {
-      // A free event: the check stands on its own, and no Stripe account is made (L6).
+      // A free host: an account is made silently and dormant — no capabilities asked for — and the check tied to it.
       await srv.send('POST', '/api/host/lanes/verify', { offerId: free.id, consent: true });
-      assert.equal(accountsMade(), before, 'a free host never needs a Stripe account');
-      const alone = new URLSearchParams(calls.filter((c) => c.url === '/v1/identity/verification_sessions' && c.method === 'POST').at(-1).body);
-      assert.equal(alone.get('related_person[account]'), null);
-      // The same host, for a paid event, after that check was dropped: account first, then the check, tied to it.
-      await repo.updateHost(host.id, { identityState: 'none', identitySessionId: null });
-      await srv.send('POST', '/api/host/lanes/verify', { offerId: paid.id, consent: true });
-      assert.equal(accountsMade(), before + 1, 'the account is made first');
+      assert.equal(made().length, before + 1, 'made at the passport step, free host too');
+      const body = JSON.parse(made().at(-1).body);
+      assert.equal(body.configuration.merchant.capabilities, undefined, 'dormant: nothing requested');
+      assert.equal(body.configuration.recipient, undefined);
       const tied = new URLSearchParams(calls.filter((c) => c.url === '/v1/identity/verification_sessions' && c.method === 'POST').at(-1).body);
       assert.deepEqual([tied.get('related_person[account]'), tied.get('related_person[person]')], ['acct_test_1', 'person_test_1']);
-      assert.equal(calls.filter((c) => c.url === '/v1/account_links').length, linksBefore, 'Stripe’s form is not opened by the check');
-      assert.equal((await repo.hostById(host.id)).stripe_link_made_at, null);
+      assert.ok(calls.some((c) => c.url === '/v1/accounts/acct_test_1' && /interval%5D=manual/.test(c.body ?? '')), 'manual payouts, dormant or not');
+      assert.equal(calls.filter((c) => c.url === '/v1/account_links').length, linksBefore, 'the host never sees Stripe');
+      // A second check (the first dropped) uses the same account: one account a host.
+      await repo.updateHost(host.id, { identityState: 'none', identitySessionId: null });
+      await srv.send('POST', '/api/host/lanes/verify', { offerId: free.id, consent: true });
+      assert.equal(made().length, before + 1);
+      // A check already open is carried on only with the yes too.
+      await repo.updateHost(host.id, { identityState: 'pending', identitySessionId: 'vs_test_1' });
+      assert.equal((await srv.send('POST', '/api/host/lanes/verify', { offerId: free.id })).body.error, 'consent_required');
     });
-    // A check already open is carried on only with the yes too.
-    await repo.updateHost(host.id, { identityState: 'pending', identitySessionId: 'vs_test_1' });
-    assert.equal((await srv.send('POST', '/api/host/lanes/verify', { offerId: paid.id })).body.error, 'consent_required');
     // Each yes to the face match is logged with its date.
     const { rows: consents } = await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'identity_consent'`, [host.id]);
     assert.equal(consents.length, 2, 'two yeses, and none logged for the refused resume');
     assert.equal(consents[0].after.biometric, true);
     assert.ok(Date.parse(consents[0].after.at));
+  } finally { await srv.close(); }
+});
+
+test('the dormant account wakes when its host first takes money: card payments asked for, then Stripe’s form', async () => {
+  const stripe = await import('../src/sources/stripe.js');
+  assert.equal(stripe.accountAwake({ capabilities: {} }), false);
+  assert.equal(stripe.accountAwake({ capabilities: { card_payments: 'inactive', transfers: 'inactive' } }), true);
+  assert.deepEqual(stripe.connectAccountBody({ hostId: 'h', dormant: true }).configuration.merchant, { statement_descriptor: { prefix: 'EPIC' } });
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await readyHost(h, member));
+  try {
+    const host = await repo.hostByHousehold(h.id);
+    await repo.updateHost(host.id, { stripeAccountId: 'acct_test_1', stripeAccountModel: 'v2', stripePersonId: 'person_test_1' });
+    // The fake reads card_payments as asked for already; make this read dormant so the wake is exercised.
+    const wakes = () => calls.filter((c) => c.url === '/v2/core/accounts/acct_test_1' && c.method === 'POST');
+    const before = wakes().length;
+    dormantRead = true;
+    try {
+      await withStripe('sk_test_fake', async () => {
+        const r = await srv.send('POST', '/api/host/lanes/payouts', { offerId: null });
+        assert.equal(r.body.url, 'https://connect.stripe.test/onboard');
+      });
+    } finally { dormantRead = false; }
+    assert.equal(wakes().length, before + 1, 'woken once, before the form');
+    const body = JSON.parse(wakes().at(-1).body);
+    assert.deepEqual(body.configuration.merchant.capabilities, { card_payments: { requested: true } });
+    assert.match(body.defaults.profile.business_url, /\/hosts\//);
+    const wakeAt = calls.findLastIndex((c) => c.url === '/v2/core/accounts/acct_test_1');
+    const linkAt = calls.findLastIndex((c) => c.url === '/v1/account_links');
+    assert.ok(wakeAt < linkAt, 'woken before Stripe’s form opens');
   } finally { await srv.close(); }
 });
 

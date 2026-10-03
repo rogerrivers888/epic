@@ -762,7 +762,7 @@ async function ownDoc(householdId, id) {
  * The host's Stripe account, made once (L6): Accounts v2, pre-filled from what Epic holds, manual payouts. Called
  * under the per-host payouts lock. An account from before register L is left for the owner's void and refused.
  */
-async function ensureStripeAccount(host, { account, household }) {
+async function ensureStripeAccount(host, { account, household, dormant = false }) {
   // An account from before this build (no model) took money the old way. It is voided by the owner's own action
   // (G7), which keeps its id; until then it is left exactly as it is, and set-up waits rather than replacing it
   // (owner, 3 Oct 2026: void the old, recreate under the new model). Once voided, a new one is made the L1 way.
@@ -770,7 +770,7 @@ async function ensureStripeAccount(host, { account, household }) {
   if (host.stripe_account_id) return host;
   const a = await stripe.createConnectAccount({
     email: account?.email, householdId: household.id, hostId: host.id,
-    legalName: host.legal_name, dateOfBirth: host.date_of_birth, displayName: host.name,
+    legalName: host.legal_name, dateOfBirth: host.date_of_birth, displayName: host.name, dormant,
   });
   return repo.updateHost(host.id, {
     stripeAccountId: a.id, stripeMode: 'test', stripeAccountModel: 'v2', stripePersonId: a.personId,
@@ -795,6 +795,12 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
     if (!['verified', 'pending'].includes(host.identity_state)) throw refuse(409, 'verify_first', 'Verify your identity first — then Stripe asks only for your bank details.');
     const ready = await ensureStripeAccount(host, { account, household });
     const accountId = ready.stripe_account_id;
+    // The host's first money through Epic: a dormant account made at the passport step is woken now — card payments
+    // asked for, and what Epic knows filled in before Stripe's form opens (owner, 3 Oct 2026).
+    if (!ready.stripe_link_made_at) {
+      const now = await stripe.retrieveAccount(accountId, { householdId: household.id });
+      if (!stripe.accountAwake(now)) await stripe.wakeAccount(accountId, { householdId: household.id, businessUrl: `${appUrl()}/hosts/${host.id}` });
+    }
     const link = await stripe.accountLink({ accountId, refreshUrl: back, returnUrl: back, householdId: household.id });
     // From here Stripe no longer lets an Identity check be tied to the account's Person (L7).
     if (!host.stripe_link_made_at) await repo.updateHost(host.id, { stripeLinkMadeAt: new Date() });
@@ -831,14 +837,13 @@ router.post('/host/lanes/verify', async (req, res, next) => {
       // Stripe is still reading what was sent: wait for it, never start a second check (Codex, 2 Oct 2026).
       if (open?.status === 'processing') return res.json({ url: null, processing: true });
     }
-    // A host who will take money through Epic gets their Stripe account now, before the check, so the check can be tied
-    // to the account's Person (create account → passport and selfie → Stripe's form). A free-event host gets none (L6).
+    // Every host — free or paid — gets their Stripe account now, silently and dormant, before the check, so the check is
+    // tied to the account's Person and counts as Stripe's own: a free host who later takes money is never asked for ID
+    // again (owner, 3 Oct 2026). The host never sees it; Stripe's form opens only when they first take money.
     let me2 = host;
-    const offerId = str(req.body?.offerId, 40);
-    const offer = offerId && UUID_RE.test(offerId) ? await repo.offerById(offerId) : null;
-    if (offer && offer.host_id === host.id && paidThroughEpic(offer) && stripe.stripeStatus().ready) {
+    if (stripe.stripeStatus().ready) {
       await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-payouts:${host.id}`]);
-      try { me2 = await ensureStripeAccount(await repo.hostById(host.id), { account, household }); }
+      try { me2 = await ensureStripeAccount(await repo.hostById(host.id), { account, household, dormant: true }); }
       finally { await lockClient.query('select pg_advisory_unlock(hashtext($1))', [`host-payouts:${host.id}`]).catch(() => null); }
     }
     const cfg = await hostingSettings.current();
