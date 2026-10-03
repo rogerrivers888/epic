@@ -542,15 +542,13 @@ export async function chargeLaterDue({ now = new Date(), status = stripe.stripeS
   for (const b of rows) {
     const { rows: [h] } = await query('select * from hosts where id = $1', [b.host_id]);
     const { rows: [hh] } = await query('select stripe_customer_id from households where id = $1', [b.household_id]);
+    // From the booking's own fee, never one already prorated: a retry works it out the same way (Codex, 3 Oct 2026).
     const value = Number(b.value_pence ?? 0);
     const amountPence = Math.max(0, value - Number(b.later_off_pence ?? 0));
     const feePence = value > 0 ? Math.round((Number(b.fee_pence ?? 0) * amountPence) / value) : 0;
     if (amountPence <= 0) { await query(`update experience_bookings set payment_state = 'released' where id = $1 and payment_state = 'card_saved'`, [b.id]); continue; }
     let pi;
     try {
-      // The fee and the host's part follow what is charged (less any part cancelled before it), so a refund later
-      // splits it in the right proportions.
-      await query('update experience_bookings set fee_pence = $2, host_pence = $3 where id = $1', [b.id, feePence, amountPence - feePence]);
       pi = await charge({ amountPence, destination: h?.stripe_account_id, applicationFeePence: feePence, hostName: h?.name, bookingId: b.id, offerId: b.offer_id, householdId: b.household_id,
         customerId: hh?.stripe_customer_id, paymentMethod: b.saved_payment_method });
     } catch (err) {

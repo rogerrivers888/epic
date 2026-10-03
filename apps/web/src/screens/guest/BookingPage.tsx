@@ -43,6 +43,43 @@ export function GuestBooking({ route }: { route: Extract<Route, { name: 'booking
   return <BookingPage id={route.id} />;
 }
 
+/**
+ * TEMPORARY until Claude Design's screen: the payment a booking far ahead owes after its saved card was refused
+ * (register L4), from the kit's own pieces — the card field, a line, one button. Stripe confirms it in the browser;
+ * the server reads it back.
+ */
+function PayDue({ id, pence, onPaid }: { id: string; pence: number; onPaid: () => void }) {
+  const toast = useToast();
+  const stripe = useRef<any>(null);
+  const card = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+  const pending = useRef<{ clientSecret: string; paymentIntent: string } | null>(null);
+  useEffect(() => { void loadStripe().then((s) => { stripe.current = s; setReady(Boolean(s)); }); }, []);
+  const pay = async () => {
+    if (!stripe.current || !card.current) { toast.show('Add your card'); return; }
+    try {
+      if (!pending.current) {
+        const r = await api.guestPayNow(id);
+        if (!r.pay.clientSecret) { toast.show('Paying isn’t ready yet'); return; }
+        pending.current = { clientSecret: r.pay.clientSecret, paymentIntent: r.pay.paymentIntent };
+      }
+      let out: PayOutcome = await confirmWithCard(stripe.current, pending.current.clientSecret, card.current);
+      if (out.state === 'bank') out = await finishWithBank(stripe.current, pending.current.clientSecret);
+      if (out.state !== 'paid') { if (out.state === 'declined' || out.state === 'failed') pending.current = null; toast.show(out.state === 'processing' ? 'Your bank is still processing it' : out.state === 'bank' ? 'Approve it in your banking app, then pay again' : out.message); return; }
+      await api.guestPaid(id, pending.current.paymentIntent).catch(() => null);
+      toast.show('Paid · your place is kept');
+      onPaid();
+    } catch (e: any) { toast.show(e?.message ?? 'That didn’t go through.'); }
+  };
+  return (
+    <>
+      <Notice bg={AMBER} weight="700">{`Your card was declined · ${gbp(pence)} is due now. Your place is kept.`}</Notice>
+      {ready ? <CardBox stripe={stripe.current} onReady={(c) => { card.current = c; }} /> : null}
+      <Buttons row={false} items={[{ label: `Pay ${gbp(pence)}`, tone: 'ink', onPress: () => { void pay(); } }]} />
+    </>
+  );
+}
+
 export function BookingPage({ id }: { id: string }) {
   const { navigate, back } = useRouter();
   const toast = useToast();
@@ -80,6 +117,8 @@ export function BookingPage({ id }: { id: string }) {
       ]} />,
     );
   }
+  // A booking far ahead whose later charge the card refused (L4): pay it here and keep the place.
+  if (!cancelled && b.money.later?.failed) blocks.push(<PayDue key="due" id={b.id} pence={b.money.later.pence} onPaid={() => { void load(); }} />);
   if (declined) {
     blocks.push(
       <Notice key="no" weight="800">{`${host} can’t make ${b.request!.date ? dayWords(b.request!.date) : 'that time'}`}</Notice>,

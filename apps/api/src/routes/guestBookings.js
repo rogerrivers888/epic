@@ -597,12 +597,16 @@ export async function applyPaymentIntent(pi) {
       const { rows: [now] } = await c.query('select * from experience_bookings where id = $1 for update', [b.id]);
       if (!now || !['none', 'held', 'failed', 'card_saved', 'charge_failed'].includes(now.payment_state)) return null;
       const later = ['card_saved', 'charge_failed'].includes(now.payment_state);
+      // A later charge (L4) of less than the booking's value (a part cancelled before it): the fee and the host's part
+      // follow what was charged, once it is — so a refund later splits it in the right proportions.
       const { rows: [charged] } = await c.query(
-        `update experience_bookings set payment_state = 'charged', charged_pence = $2,
+        `update experience_bookings set payment_state = 'charged', charged_pence = $2::int,
+                fee_pence = case when $3::boolean and value_pence > 0 then round(fee_pence::numeric * $2::int / value_pence)::int else fee_pence end,
+                host_pence = case when $3::boolean and value_pence > 0 then $2::int - round(fee_pence::numeric * $2::int / value_pence)::int else host_pence end,
                 state = case when state = 'pending' then 'confirmed' else state end,
                 request_state = case when request_state = 'asked' and state <> 'cancelled' then 'accepted' else request_state end
           where id = $1 returning *`,
-        [b.id, pi.amount_received ?? b.value_pence],
+        [b.id, pi.amount_received ?? b.value_pence, later],
       );
       const { rowCount: ledgered } = await c.query(`update hosting_payments set state = 'succeeded', kind = 'charge', updated_at = now() where stripe_ref = $1 and kind in ('charge', 'hold')`, [pi.id]);
       // Stripe answered before our own ledger row was written: write it now, already succeeded; the later write is then a no-op (Codex, 2 Oct 2026).
@@ -1153,7 +1157,9 @@ router.get('/booked/:id', async (req, res, next) => {
         goingAhead: o.min_count ? { min: o.min_count, booked: b.cancel_cause === 'called_off' ? (b.sessionsList[0]?.booked_at_decision ?? 0) : live[0]?.booked ?? 0, decidesOn: decides ? localDay(new Date(decides.decides_at), tzOf(o)) : null, outcome: decides?.decided_outcome ?? null } : null,
         numbers: settlement,
         dateChange: changed.some((x) => !b.change_seen_at || new Date(x.changed_from.at) > new Date(b.change_seen_at)) ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
-        money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy, refunds: refunds.map((r) => ({ pence: r.amount_pence, feeKeptPence: r.fee_kept_pence ?? 0, triggeredBy: r.triggered_by ?? null, cause: r.cause, state: r.state, at: r.created_at })) },
+        money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy,
+          // A booking far ahead (L4): when its card is charged and how much — or, refused, what is due now.
+          later: ['card_saved', 'charge_failed'].includes(b.payment_state) ? { chargeOn: b.charge_due_at, pence: laterAmounts(b).amountPence, failed: b.payment_state === 'charge_failed' } : null, refunds: refunds.map((r) => ({ pence: r.amount_pence, feeKeptPence: r.fee_kept_pence ?? 0, triggeredBy: r.triggered_by ?? null, cause: r.cause, state: r.state, at: r.created_at })) },
         // The fee rule as the server will charge it, so the screen never shows a different one (Codex, 3 Oct 2026).
         after: lastEnd && lastEnd <= now ? { happened: b.confirmed_happened ?? null, rated: Boolean(b.rated_at), tipOpen: tipOpen(lastEnd, now), tipFee: await tipFeeRule() } : null,
         dropOff: o.parents === 'drop_off',
@@ -1188,7 +1194,7 @@ async function quoteFor(b, o, sessionIds, now = new Date()) {
   const q = o.lane === 'course' && everStarted
     ? { pence: 0, cause: 'guest_cancelled', words: 'The course has started: no refund.' }
     // A card saved and not yet charged (L4): quoted on what would be charged, and no fee is kept on money never taken.
-    : cancelQuote({ booking: { ...chargeBasis(b), all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms, feePct: b.cancellation_fee_pct == null || b.payment_state === 'card_saved' || b.payment_state === 'charge_failed' ? null : Number(b.cancellation_fee_pct) });
+    : cancelQuote({ booking: { ...chargeBasis(b), ...(['card_saved', 'charge_failed'].includes(b.payment_state) ? { payment_state: 'charged' } : {}), all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms, feePct: b.cancellation_fee_pct == null || b.payment_state === 'card_saved' || b.payment_state === 'charge_failed' ? null : Number(b.cancellation_fee_pct) });
   return { ...q, losing, liveCount: live.length };
 }
 

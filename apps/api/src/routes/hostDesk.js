@@ -298,7 +298,7 @@ async function todoItems(host, household, offers, now, s) {
     const { rows: asks } = await query(
       `select b.id, b.offer_id, b.respond_by, h.name as household from experience_bookings b join households h on h.id = b.household_id
         where b.offer_id = any($1::uuid[]) and b.request_state = 'asked' and b.state = 'pending'
-          and (coalesce(b.value_pence, 0) = 0 or b.payment_state = 'held')`, [ids],
+          and (coalesce(b.value_pence, 0) = 0 or b.payment_state in ('held', 'card_saved'))`, [ids],
     );
     for (const a of asks) items.push({ kind: 'ask_to_book', title: 'Reply to ask to book', line: `${a.household} · ${title.get(a.offer_id)}`, due: a.respond_by, blocking: true, offerId: a.offer_id, ref: a.id });
     const { rows: qs } = await query(

@@ -6301,6 +6301,8 @@ export type GuestBooking = {
   numbers: { paidEach: number; nowEach: number; dueBackPence: number; settled: boolean; heads: number; minCount: number; atMost: { count: number; each: number; dueBackPence: number } | null } | null;
   dateChange: { sessions: { id: string; from: { date: string; time: string | null }; to: { date: string; time: string | null } }[] } | null;
   money: { lines: { label: string; each?: number; count?: number; pence: number }[]; grossPence: number | null; discountPence: number | null; valuePence: number | null; paidPence: number | null; heldPence: number | null; refundedPence: number | null; paymentState: string; refundPolicy: string | null;
+    /** A booking far ahead (L4): when the saved card is charged, how much, and whether that charge was refused. */
+    later?: { chargeOn: string | null; pence: number; failed: boolean } | null;
     /** feeKeptPence: the cancellation fee Epic kept from this refund (L5); triggeredBy: who set it off. */
     refunds: { pence: number; feeKeptPence?: number; triggeredBy?: 'guest' | 'host' | 'epic' | 'staff' | null; cause: string | null; state: string; at: string }[] };
   after: { happened: string | null; rated: boolean; tipOpen: boolean; tipFee?: { pct: number; minPence: number } | null } | null;

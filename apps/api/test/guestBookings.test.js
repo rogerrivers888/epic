@@ -26,7 +26,7 @@ const fake = http.createServer((req, res) => {
     const json = (o, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     const form = new URLSearchParams(body);
     // A booking far ahead (L4): the household's customer and the card saved, for the host as merchant.
-    if (req.url === '/v1/customers' && req.method === 'POST') return json({ id: `cus_${calls.length}` });
+    if (req.url === '/v1/customers' && req.method === 'POST') return json({ id: `cus_${crypto.randomUUID().slice(0, 12)}` });
     if (req.url === '/v1/setup_intents' && req.method === 'POST') {
       if (!/^acct_/.test(form.get('on_behalf_of') ?? '') || form.get('usage') !== 'off_session' || !/^cus_/.test(form.get('customer') ?? '')) return json({ error: { code: 'bad_setup' } }, 400);
       n += 1;
@@ -1089,5 +1089,36 @@ test('L4: a booking far ahead cancelled before its charge is never charged, and 
     calls.length = 0;
     await engine.chargeLaterDue({ now: new Date(new Date(b.charge_due_at).getTime() + 1000), status: () => ({ ready: true }) });
     assert.equal(calls.some((x) => x.url === '/v1/payment_intents'), false);
+  } finally { await srv.close(); }
+});
+
+test('L4: part of a booking far ahead cancelled before its charge comes off it; the fee follows what is charged, once', async () => {
+  settings.forget();
+  const { o, sessions } = await anEvent({ lane: 'weekly', price: 1500, priceMode: 'same_each', sessions: 3, firstIn: 100 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'book_ahead', sessionIds: [sessions[0].id, sessions[2].id] }, party: { adults: 2 } });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    Object.assign(setups.get(r.body.pay.setupIntent), { status: 'succeeded', payment_method: 'pm_saved_4' });
+    await srv.send('POST', `/api/booked/${r.body.booking.id}/payment`, {});
+    // £15 × 2 × 2 = £60, 20% fee £12. One of the two sessions cancelled long before: half comes off, no fee kept.
+    const c = await srv.send('POST', `/api/booked/${r.body.booking.id}/cancel`, { sessionIds: [sessions[2].id] });
+    assert.equal(c.status, 200, JSON.stringify(c.body));
+    const { rows: [b] } = await query('select later_off_pence, fee_pence, charge_due_at, cancellation_fee_pence from experience_bookings where id = $1', [r.body.booking.id]);
+    assert.deepEqual([b.later_off_pence, b.fee_pence, b.cancellation_fee_pence], [3000, 1200, 0]);
+    const page = await srv.get(`/api/booked/${r.body.booking.id}`);
+    assert.deepEqual([page.body.booking.money.later.pence, page.body.booking.money.later.failed], [3000, false]);
+    // A charge Stripe couldn't be reached for: tried again later with the same amounts — the fee not prorated twice.
+    const unreachable = async () => { throw Object.assign(new Error('x'), { code: 'stripe_unreachable' }); };
+    const due = new Date(new Date(b.charge_due_at).getTime() + 1000);
+    await engine.chargeLaterDue({ now: due, status: () => ({ ready: true }), charge: unreachable });
+    await query('update experience_bookings set later_charge_claimed_at = null where id = $1', [r.body.booking.id]);
+    calls.length = 0;
+    await engine.chargeLaterDue({ now: due, status: () => ({ ready: true }) });
+    const f = new URLSearchParams(calls.find((x) => x.url === '/v1/payment_intents').body);
+    assert.deepEqual([f.get('amount'), f.get('application_fee_amount')], ['3000', '600']);
+    const { rows: [after] } = await query('select charged_pence, fee_pence, host_pence from experience_bookings where id = $1', [r.body.booking.id]);
+    assert.deepEqual([after.charged_pence, after.fee_pence, after.host_pence], [3000, 600, 2400]);
   } finally { await srv.close(); }
 });
