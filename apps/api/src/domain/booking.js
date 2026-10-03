@@ -143,7 +143,7 @@ export function guestChip({ booking, sessions, min, booked, waitPosition = null 
   if (waitPosition != null) return { chip: 'waitlist', words: `Waiting list #${waitPosition}` };
   if (booking.state === 'cancelled') return booking.cancel_cause === 'called_off' ? { chip: 'called_off', words: 'Called off' } : { chip: 'cancelled', words: 'Cancelled' };
   if (booking.request_state === 'asked') return { chip: 'requested', words: 'Requested' };
-  if (sessions.some((s) => s.changed && !booking.change_seen_at)) return { chip: 'changed', words: 'Changed' };
+  if (sessions.some((s) => s.changed)) return { chip: 'changed', words: 'Changed' };
   if (min && booked < min && !sessions.some((s) => s.decided === 'on')) return { chip: 'waiting', words: 'Waiting on numbers' };
   return { chip: 'on', words: 'On' };
 }

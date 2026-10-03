@@ -218,6 +218,13 @@ function parseWhen(o, sessionsAhead, body) {
   return { kind, sessionIds: ids, slot: null };
 }
 
+const realPastDate = (v) => {
+  const t = String(v ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const d = new Date(`${t}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === t && d <= new Date() ? t : null;
+};
+
 function parseParty(body) {
   const kids = Array.isArray(body?.children) ? body.children.slice(0, 20) : [];
   return {
@@ -225,7 +232,8 @@ function parseParty(body) {
     children: kids.map((k) => ({
       name: k?.name == null ? null : String(k.name).trim().slice(0, 60) || null,
       age: k?.age == null || k.age === '' ? null : Number(k.age),
-      dob: /^\d{4}-\d{2}-\d{2}$/.test(String(k?.dob ?? '')) ? String(k.dob) : null,
+      // A real calendar day, not in the future; anything else is no date (Codex, 2 Oct 2026).
+      dob: realPastDate(k?.dob),
       needs: Array.isArray(k?.needs) ? k.needs.filter((x) => typeof x === 'string').map((x) => x.slice(0, 60)).slice(0, 10) : [],
       emergencyContact: k?.emergencyContact == null ? null : String(k.emergencyContact).trim().slice(0, 20),
     })),
@@ -419,9 +427,12 @@ export async function applyPaymentIntent(pi) {
       await confirmed(b, o, host);
     }
   } else if (pi.status === 'requires_capture' && b.payment_state === 'none' && b.state === 'cancelled') {
-    // Held after the request was already cancelled: let the card go at once, and tell nobody (Codex, 2 Oct 2026).
-    await stripe.cancelPayment(pi.id, { householdId: b.household_id, idempotencyKey: `release-late-${b.id}` }).catch(() => null);
-    await query(`update experience_bookings set payment_state = 'released' where id = $1 and payment_state = 'none'`, [b.id]);
+    // Held after the request was already cancelled: the release goes on the refund queue, which retries until Stripe
+    // has let the card go, and tells nobody (Codex, 2 Oct 2026).
+    await withTransaction(async (c) => {
+      const { rows: [now] } = await c.query(`update experience_bookings set payment_state = 'held', held_pence = $2 where id = $1 and payment_state = 'none' returning *`, [b.id, pi.amount_capturable ?? b.value_pence]);
+      if (now) await owe(c, now, { amountPence: 0, cause: 'cancelled_before_hold', key: `release-late:${b.id}`, wholeBooking: true });
+    });
   } else if (pi.status === 'requires_capture' && b.payment_state === 'none') {
     await query(`update experience_bookings set payment_state = 'held', held_pence = $2 where id = $1 and payment_state = 'none'`, [b.id, pi.amount_capturable ?? b.value_pence]);
     await notifications.notify({ householdId: host.household_id, kind: 'ask_to_book_request', title: `Ask to book: ${o?.title ?? 'your offer'}`, body: `${b.requested_date ? ymd(b.requested_date) : ''} ${hm(b.requested_time) ?? ''}`.trim(), link: hostLink(b.offer_id), dedupeKey: `ask:${b.id}` }).catch(() => null);
@@ -592,7 +603,9 @@ function card(b, now) {
   const nextS = live.find((x) => endOf(x, o) > now) ?? null;
   const all = b.sessionsList.length;
   const idx = nextS ? b.sessionsList.indexOf(nextS) + 1 : null;
-  const chip = guestChip({ booking: b, sessions: b.sessionsList.map((x) => ({ changed: Boolean(x.changed_from && new Date(x.changed_from.at) > new Date(b.created_at)), decided: x.decided_outcome })), min: b.min_count, booked: nextS?.booked ?? 0 });
+  // Changed since they booked, and since they last said Keep my place (Codex, 2 Oct 2026).
+  const seen = b.change_seen_at ? new Date(b.change_seen_at) : new Date(b.created_at);
+  const chip = guestChip({ booking: b, sessions: b.sessionsList.map((x) => ({ changed: Boolean(x.changed_from && new Date(x.changed_from.at) > new Date(b.created_at) && new Date(x.changed_from.at) > seen), decided: x.decided_outcome })), min: b.min_count, booked: nextS?.booked ?? 0 });
   const lastEnd = b.sessionsList.length ? Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime())) : null;
   return {
     id: b.id, offerId: b.offer_id, title: b.title, lane: b.lane, photo: mediaRef(b.photo_ids?.[0]),
@@ -673,7 +686,7 @@ router.get('/booked/:id', async (req, res, next) => {
         answers: b.answers ?? {}, answersEditable: answersEditable(firstAhead, now) && b.state !== 'cancelled',
         goingAhead: o.min_count ? { min: o.min_count, booked: live[0]?.booked ?? 0, decidesOn: decides ? localDay(new Date(decides.decides_at), tzOf(o)) : null, outcome: decides?.decided_outcome ?? null } : null,
         numbers: settlement,
-        dateChange: changed.length && !b.change_seen_at ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
+        dateChange: changed.some((x) => !b.change_seen_at || new Date(x.changed_from.at) > new Date(b.change_seen_at)) ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
         money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy, refunds: refunds.map((r) => ({ pence: r.amount_pence, cause: r.cause, state: r.state, at: r.created_at })) },
         after: lastEnd && lastEnd <= now ? { happened: b.confirmed_happened ?? null, rated: Boolean(b.rated_at), tipOpen: tipOpen(lastEnd, now) } : null,
         dropOff: o.parents === 'drop_off',

@@ -499,7 +499,8 @@ test('Codex: two tips at once make one, and a request cancelled before its hold 
     await sb.send('POST', `/api/booked/${req.body.booking.id}/cancel`, {});
     pays(req.body.pay.paymentIntent);
     await sb.send('POST', `/api/booked/${req.body.booking.id}/payment`, {});
-    assert.equal(intents.get(req.body.pay.paymentIntent).status, 'canceled', 'the hold is let go');
+    await engine.processRefunds();
+    assert.equal(intents.get(req.body.pay.paymentIntent).status, 'canceled', 'the hold is let go, through the queue that retries');
     assert.equal((await query('select payment_state from experience_bookings where id = $1', [req.body.booking.id])).rows[0].payment_state, 'released');
   } finally { await sb.close(); }
 });
