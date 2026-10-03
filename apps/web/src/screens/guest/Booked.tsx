@@ -16,6 +16,15 @@ import { useRouter } from '../../router';
 import { AMBER, BookingRows, Buttons, CHIP_BG, Foot, GuestPage, LIME, Notice, Waiting, dayWords, firstName, useToast } from './kit';
 
 /** A calendar file for the sessions booked, made on the phone; nothing is sent anywhere. */
+/** An Ask to book in its own terms: the host's real deadline, and a hold only when there is one (Codex, 3 Oct 2026). */
+function askedWords(b: GuestBooking, host: string): string {
+  const by = b.request?.respondBy ? new Date(b.request.respondBy) : null;
+  const hours = by ? Math.max(1, Math.round((by.getTime() - Date.now()) / 3_600_000)) : null;
+  const when = hours == null ? 'has a little while' : hours >= 48 ? `has until ${dayWords(b.request!.respondBy!.slice(0, 10))}` : `has ${hours} hour${hours === 1 ? '' : 's'}`;
+  const held = (b.money.heldPence ?? 0) > 0;
+  return `${host} ${when} to say yes.${held ? ' Your card is held, not charged.' : ''}`;
+}
+
 export function calendarFile(b: GuestBooking): string {
   const stamp = (d: string, t: string | null) => `${d.replace(/-/g, '')}T${(t ?? '09:00').replace(':', '')}00`;
   const esc = (s: string) => s.replace(/[\\,;]/g, (c) => `\\${c}`).replace(/\n/g, '\\n');
@@ -54,7 +63,7 @@ export function Booked({ id }: { id: string }) {
       head={<CompactBand title={asked ? 'Request sent' : 'You’re booked'} context={b.event.title ?? ''} onBack={() => navigate(paths.trips())} />}
       foot={<Foot label="See it in Plans" onPress={() => navigate(paths.trips())} />}
       overlay={toast.node}>
-      <Notice bg={LIME} weight="700">{asked ? `${host} has 24 hours to say yes. Your card is held, not charged.` : 'It’s in your Plans.'}</Notice>
+      <Notice bg={LIME} weight="700">{asked ? askedWords(b, host) : 'It’s in your Plans.'}</Notice>
       <BookingRows items={[{ key: b.id, photo: mediaUrl(b.event.photo), title: b.event.title ?? 'Your booking', line, chip: b.chipWords, chipBg: CHIP_BG[b.chip] ?? AMBER, extra, onPress: () => navigate(paths.booking(b.id)) }]} />
       <Buttons items={[
         // Nothing to put in a calendar until there's a session: an Ask to book has one only once the host accepts.
