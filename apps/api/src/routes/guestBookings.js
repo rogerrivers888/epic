@@ -918,7 +918,7 @@ router.get('/booked/:id', async (req, res, next) => {
     res.json({
       booking: {
         id: b.id, state: b.state, chip: c.chip, chipWords: c.chipWords, kind: b.booking_kind, heads: b.heads,
-        event: { id: o.id, title: o.title, lane: o.lane, photo: mediaRef(o.photo_ids?.[0]), host: { id: host.id, name: host.name }, endsAt: hm(o.ends_at), refundPolicy: o.refund_policy ?? null, partyMax: o.party_max ?? null },
+        event: { id: o.id, title: o.title, lane: o.lane, visibility: o.visibility, photo: mediaRef(o.photo_ids?.[0]), host: { id: host.id, name: host.name }, endsAt: hm(o.ends_at), refundPolicy: o.refund_policy ?? null, partyMax: o.party_max ?? null },
         sessions: b.sessionsList.map((x) => ({ id: x.id, n: x.n, topic: x.topic ?? null, date: ymd(x.on_date), time: hm(x.starts_at), endsAt: hm(x.ends_at), booked: x.held === 'booked', state: x.state, finished: endOf(x, o) <= now, changedFrom: x.changed_from ? { date: x.changed_from.onDate, time: x.changed_from.startsAt } : null })),
         request: b.request_state ? { state: b.request_state, date: ymd(b.requested_date), time: hm(b.requested_time), lengthMin: b.requested_length_min, respondBy: b.respond_by } : null,
         // The exact address once booked (or when the host never hid it); the area until then, and whenever no address was written down.

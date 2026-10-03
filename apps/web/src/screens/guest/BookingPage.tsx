@@ -145,10 +145,11 @@ export function BookingPage({ id }: { id: string }) {
       <Rows key="acts" items={[
         { title: `Message ${host}`, onPress: () => navigate(paths.bookingChat(b.id)) },
         ...(b.sessions.some((s) => s.booked) ? [{ title: 'Add to calendar', onPress: () => { if (addToCalendar(b)) toast.show('Added'); } }] : []),
-        { title: 'Share with someone going', onPress: async () => {
+        // A private event's bare address opens for nobody else: share it only when it is public (Codex, 3 Oct 2026).
+        ...(b.event.visibility && b.event.visibility !== 'public' ? [] : [{ title: 'Share with someone going', onPress: async () => {
           const url = Platform.OS === 'web' && typeof location !== 'undefined' ? `${location.origin}${paths.experience(b.event.id)}` : paths.experience(b.event.id);
           try { if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) { await navigator.clipboard.writeText(url); toast.show('Link copied'); } else await Share.share({ message: url }); } catch { /* closed */ }
-        } },
+        } }]),
         { title: 'Receipt', onPress: () => navigate(paths.settings('payments')) },
       ]} />,
       <Kick key="manage-k" top={4}>Manage</Kick>,
@@ -212,7 +213,7 @@ function EditAnswers({ booking, onClose, onSaved }: { booking: Booking; onClose:
     <GuestSheet title={`What you told ${firstName(booking.event.host.name)}`} onClose={onClose}>
       <Chips items={DIET.map((d) => ({ label: d, on: diet.has(d), onPress: () => setDiet((s) => { const n = new Set(s); if (n.has(d)) n.delete(d); else n.add(d); return n; }) }))} />
       <Field value={note} onChange={setNote} placeholder="Anything else" height={72} maxLength={500} />
-      {failed ? <Para color={GUEST_RED}>{failed}</Para> : null}
+      {failed ? <Para>{failed}</Para> : null}
       <Buttons items={[{ label: 'Save', tone: 'ink', onPress: async () => {
         // Saved only when it was: a failure stays here and says so (Codex, 3 Oct 2026).
         try { await api.guestAnswers(booking.id, { ...booking.answers, dietary: [...diet], note: note.trim() || undefined }); onSaved(); }

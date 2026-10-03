@@ -6270,7 +6270,7 @@ export type GuestBookedList = {
 };
 export type GuestBooking = {
   id: string; state: string; chip: string; chipWords: string; kind: string | null; heads: number;
-  event: { id: string; title: string | null; lane: GuestLane; photo: string | null; host: { id: string; name: string }; endsAt?: string | null; refundPolicy?: string | null; partyMax?: number | null };
+  event: { id: string; visibility?: string; title: string | null; lane: GuestLane; photo: string | null; host: { id: string; name: string }; endsAt?: string | null; refundPolicy?: string | null; partyMax?: number | null };
   sessions: { id: string; n: number | null; topic?: string | null; date: string; time: string | null; endsAt: string | null; booked: boolean; state: string; finished: boolean; changedFrom: { date: string; time: string | null } | null }[];
   request: { state: string; date: string | null; time: string | null; lengthMin: number | null; respondBy: string | null } | null;
   where: { label: string | null; venue: string | null; lat: number | null; lng: number | null };

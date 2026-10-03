@@ -23,15 +23,19 @@ export function GuestEvent({ route, webPage }: { route: Extract<Route, { name: '
   const [lane, setLane] = useState<string | null | undefined>(undefined);
   // Read once and handed on: every read of an event counts a view in the host's Insights (Codex, 3 Oct 2026).
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(null);
+  // A question already asked (?topic=, from Messages), Ask and Where keep the page they were built on, whatever the
+  // lane — so nothing is read here first, and the visit counts once (Codex, 3 Oct 2026).
+  const older = Boolean(query.get('topic')) || route.layer === 'ask' || route.layer === 'where';
   useEffect(() => {
+    if (older) return;
     setLane(undefined); setData(null);
     api.experience(route.id, i, l).then((r) => { setData(r); setLane(r.offer.lane ?? null); }).catch(() => setLane(null));
-  }, [route.id, i, l]);
+  }, [route.id, i, l, older]);
+  if (older) return <ExperienceScreen route={route} />;
   if (lane === undefined) return <Waiting />;
-  // An older offer, and a question already asked (?topic=, from Messages), keep the page they were built on.
-  if (!lane || query.get('topic')) return <ExperienceScreen route={route} />;
+  // An older offer keeps the page it was built on.
+  if (!lane) return <ExperienceScreen route={route} />;
   if (route.layer === 'book') return <Book id={route.id} webPage={webPage} linkToken={l} inviteToken={i} initial={data?.offer ?? null} />;
-  if (route.layer === 'ask' || route.layer === 'where') return <ExperienceScreen route={route} />;
   return <EventPage id={route.id} webPage={webPage} linkToken={l} inviteToken={i} initial={data} />;
 }
 

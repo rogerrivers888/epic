@@ -293,8 +293,9 @@ export function Field({ label, value, onChange, placeholder, height, error, keyb
       {label ? <Text style={tx(13, '700')}>{label}</Text> : null}
       <TextInput value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={GUEST_PLACEHOLDER} multiline={!!height}
                  keyboardType={keyboardType} maxLength={maxLength} accessibilityLabel={label ?? placeholder}
-                 style={[tx(14.5), { borderWidth: 1, borderColor: error ? GUEST_RED : HAIRLINE, paddingVertical: 12, paddingHorizontal: 13 }, height ? { minHeight: height, textAlignVertical: 'top' } : null]} />
-      {error ? <Text style={tx(12.5, '700', GUEST_RED)}>{error}</Text> : null}
+                 style={[tx(14.5), { borderWidth: 1, borderColor: error ? INK : HAIRLINE, paddingVertical: 12, paddingHorizontal: 13 }, height ? { minHeight: height, textAlignVertical: 'top' } : null]} />
+      {/* Red is for destructive confirms only (Roger, 3 Oct 2026): an error is ink, bold. */}
+      {error ? <Text style={tx(12.5, '700', INK)}>{error}</Text> : null}
     </View>
   );
 }
