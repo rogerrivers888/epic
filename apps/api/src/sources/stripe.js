@@ -19,6 +19,8 @@
  *     which Stripe only allows before the first onboarding link is made.
  *     Epic sees the result, never the document.
  *   · The private host's £10 and joining Pro are a hosted Checkout.
+ *   · Memberships are Epic's own revenue on Epic's own account (L8): a Customer
+ *     per household, a Checkout with a month free, Stripe's portal after that.
  *
  * **Test mode only.** Going live, or anything that spends money — an Identity
  * check costs per verification in live mode — is an Approval for the owner
@@ -383,6 +385,131 @@ export function expireCheckout(id, { householdId } = {}) {
 /** Paid: a payment session marked paid, or a subscription session complete. */
 // Only money actually taken counts: a subscription can complete Checkout with a delayed payment still unpaid (Codex, 2 Oct 2026).
 export const checkoutPaid = (s) => s?.payment_status === 'paid';
+
+// ---------------------------------------------------------------------------
+// memberships: Epic's own revenue, ordinary Stripe Billing (L8)
+//
+// Solo, Household and Pro on Epic's own account — no Connect account, nothing
+// to do with a host's balance. A household is one Stripe Customer; a plan's
+// price is a Stripe Price found by its lookup key (made if missing, test mode
+// only); joining is a hosted Checkout with a month free and the card taken up
+// front; changing the card or cancelling is Stripe's customer portal. Nothing
+// here grants a membership: Epic's record follows Stripe's events.
+// ---------------------------------------------------------------------------
+
+/** One household's Stripe Customer. Keyed on the household, so a retry finds the one already made. */
+export function createCustomer({ householdId, email = null, name = null }) {
+  return call('POST', '/customers', { email: email ?? undefined, name: name ?? undefined, metadata: { epic_household_id: householdId } },
+    { householdId, purpose: 'membership.customer.create', idempotencyKey: `customer-${householdId}` });
+}
+
+/** The customer's email follows the account's, so Stripe's receipts and the portal reach the right person. */
+export function updateCustomerEmail(customerId, email, { householdId = null } = {}) {
+  return call('POST', `/customers/${encodeURIComponent(customerId)}`, { email }, { householdId, purpose: 'membership.customer.update' });
+}
+
+/**
+ * A plan's price at Stripe is named by what it is: the plan, the channel, the
+ * amount and the interval. A new price in `plan_prices` is therefore a new
+ * Stripe Price, and the old one stays on the subscriptions already sold at it.
+ */
+export const membershipLookupKey = ({ planKey, amountPence, interval = 'month' }) => `epic_${planKey}_web_${amountPence}_${interval}`;
+/** Epic's own product id at Stripe for a plan: fixed, so finding it never needs a search. */
+export const membershipProductId = (planKey) => `epic_membership_${planKey}`;
+
+export function findPriceByLookupKey(lookupKey) {
+  return call('GET', '/prices', { lookup_keys: [lookupKey], active: 'true', limit: 1 }, { purpose: 'membership.price.read' })
+    .then((r) => r?.data?.[0] ?? null);
+}
+
+export async function ensureMembershipProduct({ planKey, name }) {
+  const id = membershipProductId(planKey);
+  try {
+    return await call('GET', `/products/${encodeURIComponent(id)}`, null, { purpose: 'membership.product.read' });
+  } catch (err) {
+    if (err.httpStatus !== 404) throw err;
+    return call('POST', '/products', { id, name, metadata: { epic_plan: planKey } }, { purpose: 'membership.product.create', idempotencyKey: `product-${id}` });
+  }
+}
+
+export async function ensureMembershipPrice({ planKey, name, amountPence, interval = 'month' }) {
+  const lookupKey = membershipLookupKey({ planKey, amountPence, interval });
+  const found = await findPriceByLookupKey(lookupKey);
+  if (found) return found;
+  const product = await ensureMembershipProduct({ planKey, name });
+  return call('POST', '/prices', {
+    product: product.id, currency: 'gbp', unit_amount: amountPence, recurring: { interval }, lookup_key: lookupKey,
+    metadata: { epic_plan: planKey, epic_channel: 'web' },
+  }, { purpose: 'membership.price.create', idempotencyKey: `price-${lookupKey}` });
+}
+
+/** Joining: a month free, the card taken now, the household's own customer. */
+export function membershipCheckoutBody({ customerId, priceId, householdId, planKey, successUrl, cancelUrl, trialDays = 30 }) {
+  const meta = { epic_kind: 'membership', epic_household_id: householdId, epic_plan: planKey };
+  return {
+    mode: 'subscription',
+    customer: customerId,
+    line_items: [{ price: priceId, quantity: 1 }],
+    payment_method_collection: 'always',
+    success_url: successUrl, cancel_url: cancelUrl,
+    metadata: meta,
+    subscription_data: { metadata: meta, ...(trialDays > 0 ? { trial_period_days: trialDays } : {}) },
+  };
+}
+
+export function membershipCheckout(args, { idempotencyKey = null } = {}) {
+  return call('POST', '/checkout/sessions', membershipCheckoutBody(args), { householdId: args.householdId, purpose: 'membership.checkout', idempotencyKey });
+}
+
+/** Stripe's customer portal: the card, the invoices, cancelling. `flow` opens it straight on one task (cancelling). */
+export function portalSession({ customerId, returnUrl, householdId, flow = null }) {
+  return call('POST', '/billing_portal/sessions', { customer: customerId, return_url: returnUrl, ...(flow ? { flow_data: flow } : {}) },
+    { householdId, purpose: flow ? 'membership.portal.cancel' : 'membership.portal' });
+}
+
+export function retrieveSubscription(id, { householdId = null } = {}) {
+  return call('GET', `/subscriptions/${encodeURIComponent(id)}`, null, { householdId, purpose: 'membership.subscription.read' });
+}
+
+/**
+ * A Stripe subscription in Epic's words. `past_due` and `unpaid` are **paused**,
+ * never cancelled (owner, 3 Oct 2026): a payment failed and Smart Retries are
+ * trying again; it comes back on its own when one succeeds. `incomplete` (the
+ * first payment never went through at Checkout) is not a membership at all.
+ */
+export function membershipStatus(sub) {
+  switch (sub?.status) {
+    case 'trialing': return 'trialling';
+    case 'active': return 'active';
+    case 'past_due': case 'unpaid': case 'paused': return 'paused';
+    case 'canceled': case 'incomplete_expired': return 'cancelled';
+    default: return null;
+  }
+}
+
+/** What Epic writes down about a subscription: its state, its price a month and its dates. Nothing else. */
+export function membershipFromSubscription(sub) {
+  const item = sub?.items?.data?.[0] ?? null;
+  const price = item?.price ?? null;
+  const interval = price?.recurring?.interval ?? 'month';
+  const count = Number(price?.recurring?.interval_count ?? 1) || 1;
+  const unit = Number(price?.unit_amount ?? 0) * Number(item?.quantity ?? 1);
+  const monthly = interval === 'year' ? Math.round(unit / (12 * count)) : interval === 'month' ? Math.round(unit / count) : unit;
+  const ts = (s) => (s ? new Date(s * 1000) : null);
+  return {
+    status: membershipStatus(sub),
+    planKey: sub?.metadata?.epic_plan ?? price?.metadata?.epic_plan ?? null,
+    priceId: price?.id ?? null,
+    monthlyPence: monthly,
+    interval,
+    trialEnd: ts(sub?.trial_end),
+    // Newer API versions put the period on the item; older ones on the subscription.
+    currentPeriodEnd: ts(item?.current_period_end ?? sub?.current_period_end),
+    cancelAtPeriodEnd: Boolean(sub?.cancel_at_period_end),
+    startedAt: ts(sub?.start_date ?? sub?.created),
+    endedAt: ts(sub?.ended_at),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // guests' payments: destination charges to the host's own account (L1, L2)

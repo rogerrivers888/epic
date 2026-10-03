@@ -79,8 +79,13 @@ async function hostingPro(account, householdId) {
   if (accountPro(account)) return true;
   if (!householdId) return false;
   const { rows: [r] } = await query("select 1 from hosting_payments where household_id = $1 and kind = 'pro' and state = 'succeeded' limit 1", [householdId]);
-  return Boolean(r);
+  if (r) return true;
+  // A Pro membership (L8), trialling or paid: the same Pro. Paused — a payment failing — stops counting, as above.
+  const { rows: [m] } = await query("select 1 from memberships where household_id = $1 and plan_key = 'pro' and status in ('trialling', 'active') limit 1", [householdId]);
+  return Boolean(m);
 }
+/** Exported for the tests: Pro for a household with no account plan in play. */
+export const hostingProFor = (householdId) => hostingPro(null, householdId);
 // HMRC's shape: the second letter is never O, and BG, GB, KN, NK, NT, TN and ZZ are never issued (Codex, 2 Oct 2026).
 const NI_SHAPE = /^[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\d{6}[A-D]$/;
 const NI_NEVER = new Set(['BG', 'GB', 'KN', 'NK', 'NT', 'TN', 'ZZ']);
@@ -1194,6 +1199,9 @@ export async function applyAccountFacts(hostId, patchOrRead, { accountId = null 
 /** What one Stripe event changes. Exported for the tests; the route above is the only caller. */
 export async function applyStripeEvent(event) {
     const obj = event?.data?.object ?? {};
+    // A household membership (L8): Epic's own revenue, handled on its own and asked first.
+    const { applyMembershipEvent } = await import('../sources/membership.js');
+    if (await applyMembershipEvent(event)) return;
     if (event.type === 'account.updated' && obj.id) {
       const host = await repo.hostByStripeAccount(obj.id);
       if (host) {

@@ -24,19 +24,17 @@
  * Guest-invite households (`households.origin = 'guest_invite'`) are never
  * members or customers, so they are not classified at all.
  *
- * **No membership is billed yet.** The schema holds no Stripe record of a
- * household membership — no customer id, no subscription id, no membership
- * table; only hosting Pro is billed, and that is money code owned elsewhere. So
- * `billedMemberships()` answers an empty list, every household falls through
- * to complimentary, invited or none, and members, trialling, MRR and the
- * average price are all nought today. `MEMBERSHIP_BILLING` says so in every
- * payload (`billed: false`) so a screen can say "Not billed yet" rather than
- * draw a £0 that reads as "nobody pays".
+ * **Billing is built, and waits to be switched on.** Memberships are billed
+ * through Stripe (L8, Phase 4): Stripe's events write `memberships`, and
+ * `billedMemberships()` reads it. `MEMBERSHIP_BILLING` stays false until that is
+ * proven live in the sandbox, and says so in every payload (`billed: false`) so
+ * a screen can say "Not billed yet" rather than draw a £0 that reads as
+ * "nobody pays".
  */
 
 import { query } from '../db.js';
 
-/** False until household memberships are billed through Stripe. */
+/** False until household memberships are proven live through Stripe in the sandbox. */
 export const MEMBERSHIP_BILLING = false;
 
 /** Plans an administrator gives away by hand. Not `trial`, not `standard`. */
@@ -58,25 +56,34 @@ export const CLASS_WORDS = {
 export const NOT_BILLED = 'Not billed yet';
 
 /**
- * The memberships Stripe knows about — **the one place to plug Stripe in**.
+ * The memberships Stripe knows about — **the one place Stripe plugs in**.
  *
- * Returns one entry per household with a live membership:
- *   `{ householdId, state: 'paid' | 'trialling', planKey, monthlyPence, startedAt, endedAt }`
- * where `monthlyPence` is what the membership is billed a month (an annual
- * membership divided by twelve) and `endedAt` is null while it runs.
- *
- * Empty today, on purpose: there is no Stripe record of a household membership
- * anywhere in the schema yet, and inventing one from `accounts.plan` is exactly
- * the account counting this module exists to stop.
+ * One entry per Stripe subscription (repositories/membershipBilling.js, written
+ * only from Stripe's events):
+ *   `{ householdId, state: 'paid' | 'trialling' | 'cancelled', planKey, monthlyPence, startedAt, endedAt, channel, paused, mode }`
+ * where `monthlyPence` is what Stripe's own price bills a month (an annual price
+ * divided by twelve), `endedAt` is null while it runs and set once cancelled,
+ * and `channel` is 'website' (the app stores come later). A membership whose
+ * payment failed after the trial is **paused**, not cancelled, while Stripe
+ * retries (owner, 3 Oct 2026): it stays `paid` with `paused: true`, and a £0
+ * trial is `trialling`.
  */
-// When Stripe plugs in here, two things follow (Codex, 3 Oct 2026): lifetime spend must be summed over each
+// Two things follow from Stripe being plugged in (Codex, 3 Oct 2026): lifetime spend must be summed over each
 // membership's billing periods (startedAt → endedAt), not today's price × the account's age; and a closed period's
 // stock must classify the memberships running at that period's end, so classification will need an as-of date.
 export async function billedMemberships() {
-  // Stripe goes here: read the household memberships it holds and answer them in
-  // the shape above, then set MEMBERSHIP_BILLING to true. Nothing else in the
-  // reports has to change.
-  return [];
+  const { rows } = await query('select * from memberships order by started_at');
+  return rows.map((m) => ({
+    householdId: m.household_id,
+    state: m.status === 'cancelled' ? 'cancelled' : m.status === 'trialling' ? 'trialling' : 'paid',
+    planKey: m.plan_key,
+    monthlyPence: Number(m.monthly_pence) || 0,
+    startedAt: m.started_at,
+    endedAt: m.status === 'cancelled' ? (m.ended_at ?? m.updated_at) : null,
+    channel: m.channel,
+    paused: m.status === 'paused',
+    mode: m.mode,
+  }));
 }
 
 /**

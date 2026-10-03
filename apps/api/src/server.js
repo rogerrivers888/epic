@@ -26,6 +26,8 @@ import prototypeRoutes from './routes/prototypes.js';
 import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import hostLanesRoutes, { webhookRouter as stripeWebhookRoutes } from './routes/hostLanes.js';
+import membershipRoutes, { publicRouter as membershipPublicRoutes } from './routes/membership.js';
+import { sendRemindersDue as membershipReminders } from './sources/membership.js';
 import hostDeskRoutes from './routes/hostDesk.js';
 import * as hostingSettingsRepo from './repositories/hostingSettings.js';
 import hostingAdminV4Routes from './routes/hostingAdmin.js';
@@ -79,7 +81,7 @@ import voiceRoutes, { adminRouter as voiceLabRoutes } from './routes/voice.js';
 import { startScoutLoop } from './sources/scoutArea.js';
 import { photoFor } from './sources/google.js';
 import { spenderForLink, restampForSpender } from './sources/photoLinks.js';
-import { currentSpender, runAsSpender } from './context.js';
+import { currentSpender, runAsSpender, runOutsideRequest } from './context.js';
 import { currentHousehold } from './routes/household.js';
 import { SCOUT_MONTHLY_RUNS } from './sources/localscout.js';
 import { enabledSources, defaultSourceKeys, loadSourceSettings, sourceHasKey, sourceOff, bedRatesOn } from './sources/index.js';
@@ -544,6 +546,9 @@ app.use('/api', skillsPublicRoutes);
 app.use(['/api/host', '/api/experiences', '/api/booked', '/api/invited'], (_req, _res, next) => { hostingSettingsRepo.current().catch(() => null).finally(() => next()); });
 // Hosting v4, the guest side: what booking asks (public), ahead of the old offer routes.
 app.use('/api', guestBookingPublicRoutes);
+// Memberships (L8): the reminder's one-tap cancel is public, its token the credential; the rest needs the household.
+app.use('/api', membershipPublicRoutes);
+app.use('/api', membershipRoutes);
 app.use('/api', hostingPublicRoutes);
 // The FAQ on a listing is public for the same reason the listing is (Chat screens, C7).
 app.use('/api', chatPublicRoutes);
@@ -1008,6 +1013,13 @@ startReminderLoop();
 startHostingLoop();
 // Payouts 72h after a session, the daily Stripe reconciliation, queued notification e-mail.
 startHostingMoneyLoop();
+// Memberships (L8): the reminder seven days before a trial ends or an annual renewal, once a date — hourly, so a
+// deploy or a failed send only delays it. Stripe's own three-day warning is the backstop (sources/membership.js).
+const membershipRound = () => runOutsideRequest(() => membershipReminders())
+  .then((r) => { if (r.due) console.log(`membership reminders: ${r.sent} of ${r.due} sent`); })
+  .catch((err) => console.error('membership reminders', err.message));
+setTimeout(membershipRound, 90_000).unref?.();
+setInterval(membershipRound, 3600_000).unref?.();
 // Nudge an unanswered introduction once, let it go after a week, clear a trip entry when the trip has been.
 startOpenToLoop();
 startChatLoop();

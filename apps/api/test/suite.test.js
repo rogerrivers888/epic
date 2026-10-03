@@ -16,17 +16,20 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_PERIOD, PERIODS, monthBuckets, resolvePeriod } from '../src/domain/reportingPeriods.js';
-import { FIXTURE_MEMBERS, FIXTURE_PAID, fixtureHousehold, fixtureSupplier, fixtures, scaleFixtures } from '../src/domain/reportingFixtures.js';
-import { annualPence } from '../src/repositories/pricing.js';
-import { PURPOSE_CLASSES, backOfficeActorExpression, classExpression, classOf } from '../src/domain/costClass.js';
-import { change } from '../src/repositories/suite.js';
-import { listCounterparties, setAdapter } from '../src/repositories/counterparties.js';
-import { readStanding, readTiers, setPrice } from '../src/repositories/pricing.js';
-import { withhold } from '../src/routes/suite.js';
-import { enabledSources, loadSourceSettings, setSourceOff, sourceKeys, sourceOff } from '../src/sources/index.js';
-import { bump, healthOf, noteCall, noteFault } from '../src/sources/meter.js';
-import { pool, query } from '../src/db.js';
+// Its own database, built from the migrations like every other test file's — never the developer's own, which can
+// be any number of migrations behind (3 Oct 2026: the dev database at 311, and the reports reading a table from 372).
+const { testDatabase } = await import('./helpers/db.js');
+const { pool, query } = await testDatabase();
+const { DEFAULT_PERIOD, PERIODS, monthBuckets, resolvePeriod } = await import('../src/domain/reportingPeriods.js');
+const { FIXTURE_MEMBERS, FIXTURE_PAID, fixtureHousehold, fixtureSupplier, fixtures, scaleFixtures } = await import('../src/domain/reportingFixtures.js');
+const { annualPence } = await import('../src/repositories/pricing.js');
+const { PURPOSE_CLASSES, backOfficeActorExpression, classExpression, classOf } = await import('../src/domain/costClass.js');
+const { change } = await import('../src/repositories/suite.js');
+const { listCounterparties, setAdapter } = await import('../src/repositories/counterparties.js');
+const { readStanding, readTiers, setPrice } = await import('../src/repositories/pricing.js');
+const { withhold } = await import('../src/routes/suite.js');
+const { enabledSources, loadSourceSettings, setSourceOff, sourceKeys, sourceOff } = await import('../src/sources/index.js');
+const { bump, healthOf, noteCall, noteFault } = await import('../src/sources/meter.js');
 
 test.after(() => pool.end());
 // `enabledSources()` is synchronous and reads a set loaded once at start, so
@@ -410,9 +413,10 @@ test('an account on a priced plan is not a member until Stripe bills it', async 
   // anything. A test that needs an account makes one, and takes it away again.
   let made = null;
   if (!(await query('select 1 from accounts limit 1')).rows.length) {
-    const { rows: [h] } = await query(
-      "select id from households where coalesce(origin, '') <> 'guest_invite' order by created_at limit 1");
-    assert.ok(h, 'a household to hang the account on');
+    // The test database starts empty: a household to hang the account on is made when there is none.
+    const h = (await query(
+      "select id from households where coalesce(origin, '') <> 'guest_invite' order by created_at limit 1")).rows[0]
+      ?? (await query("insert into households (name) values ('A test household') returning id")).rows[0];
     const { rows: [row] } = await query(
       `insert into accounts (household_id, email, name, status, plan)
        values ($1, 'sold-at@test.local', 'A test account', 'active', 'household') returning id`, [h.id]);

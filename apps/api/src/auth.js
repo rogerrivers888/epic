@@ -269,6 +269,9 @@ const PUBLIC = [
   (req) => req.method === 'POST' && req.path === '/api/postmark/events',
   // Stripe's events (routes/hostLanes.js): admitted by their signature, never by a session.
   (req) => req.method === 'POST' && req.path === '/api/stripe/webhook',
+  // The membership reminder's one-tap cancel (routes/membership.js): the unguessable token is the credential, and it
+  // only opens Stripe's own cancel page for that one membership.
+  (req) => req.method === 'GET' && /^\/api\/membership\/cancel\/[^/]+$/.test(req.path),
   // "Register your interest" on epic.day (routes/interest.js): the people it is
   // for cannot sign in yet. Validated, rate-limited per caller and honeypotted in
   // its own handler; it reads and writes nothing of any household's.
