@@ -431,3 +431,25 @@ test('Codex: Stripe’s payout.failed arriving before Epic wrote the Payout down
   assert.equal((await query(`select count(*)::int as n from hosting_payments where stripe_ref = 'po_early' and kind = 'payout'`)).rows[0].n, 0, 'never recorded as paid');
   assert.equal((await query(`select count(*)::int as n from notifications where dedupe_key = $1`, [`payout_sent:${p.id}`])).rows[0].n, 0, 'nor announced');
 });
+
+test('Codex: money not yet cleared is checked for first, and a refusal Stripe would remember moves the payout to a new key', async () => {
+  settings.forget();
+  const status = () => ({ ready: true, mode: 'test' });
+  const a = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  const { rows: [p] } = await query('select * from host_payouts where session_id = $1', [a.sessions[0].id]);
+  const asked = [];
+  const payout = async (x) => { if (x.hostId === a.host.id) asked.push(x.idempotencyKey); return { id: `po_${asked.length}_${x.payoutId.slice(0, 4)}` }; };
+  // Not there yet: Stripe is not even asked.
+  await money.releasePayouts({ payout, balance: async () => ({ availablePence: 100, pendingPence: 7900 }), status });
+  assert.deepEqual([asked.length, (await query('select state from host_payouts where id = $1', [p.id])).rows[0].state], [0, 'released']);
+  // A released payout is picked up again by a later run (ten minutes on); this is that run.
+  const later = () => query(`update host_payouts set updated_at = now() - interval '1 hour' where id = $1`, [p.id]);
+  await later();
+  // The balance said yes but Stripe still refused: the next try is a new attempt, with a new key.
+  await money.releasePayouts({ payout: async (x) => { if (x.hostId === a.host.id) { asked.push(x.idempotencyKey); throw Object.assign(new Error('x'), { code: 'funds_pending' }); } return { id: 'po_other' }; }, balance: async () => ({ availablePence: 999999 }), status });
+  await later();
+  await money.releasePayouts({ payout, balance: async () => ({ availablePence: 999999 }), status });
+  assert.deepEqual(asked, [`payout-${p.id}`, `payout-${p.id}-a1`]);
+  assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'paid');
+});

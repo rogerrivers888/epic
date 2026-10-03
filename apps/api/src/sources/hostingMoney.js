@@ -61,7 +61,7 @@ export async function schedulePayouts({ now = new Date() } = {}) {
  * before the Payout, and the Payout carries the payout's id as its
  * idempotency key so a retry after a crash is the same Payout.
  */
-export async function releasePayouts({ now = new Date(), payout = stripe.payout, status = stripe.stripeStatus } = {}) {
+export async function releasePayouts({ now = new Date(), payout = stripe.payout, balance = stripe.hostBalance, status = stripe.stripeStatus } = {}) {
   const out = { released: 0, held: 0, failed: 0, waiting: 0 };
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
   const s = await settings.current();
@@ -102,6 +102,10 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
     if (!claimed) continue; // another run has it
     const amount = claimed.amount_pence + claimed.tips_pence;
     try {
+      // Is the money there to pay out yet? Asked first, so Stripe is not asked for a Payout it would refuse — a
+      // refusal it would then remember under this payout's key (Codex, 3 Oct 2026). Can't tell: ask anyway.
+      const held = await balance(p.stripe_account_id, { householdId: p.household_id }).catch(() => null);
+      if (held && held.availablePence < amount) { out.waiting += 1; continue; }
       const po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: payoutKey(claimed) });
       // Stripe's payout.failed can land before this write: then the row is failed already, and it is neither
       // recorded as paid nor announced (Codex, 3 Oct 2026).
@@ -119,7 +123,7 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
       // refusal marks it failed for a person to look at.
       if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
       // The money is in the host's balance but has not cleared yet: wait, released, and try again next run.
-      if (err.code === 'funds_pending') { out.waiting += 1; continue; }
+      if (err.code === 'funds_pending') { await ledger.nextAttempt(p.id); out.waiting += 1; continue; }
       await ledger.finishPayout(p.id, { state: 'failed' });
       console.error(`epic-api: payout ${p.id} failed — ${err.code ?? err.message}`);
       out.failed += 1;

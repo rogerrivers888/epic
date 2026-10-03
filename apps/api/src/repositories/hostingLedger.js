@@ -210,6 +210,16 @@ export async function finishPayout(id, { state, stripePayout = null, mode = 'tes
 }
 
 /**
+ * A refusal Stripe will remember under the idempotency key (the money had not
+ * cleared): the payout stays released, and its next try is a new attempt with a
+ * new key, so a cleared balance is never met with the old refusal replayed.
+ */
+export async function nextAttempt(id) {
+  const { rows: [row] } = await query(`update host_payouts set attempt = attempt + 1, updated_at = now() where id = $1 and state = 'released' returning *`, [id]);
+  return row ?? null;
+}
+
+/**
  * Stripe's word on a payout after it was made (the Connect webhook): one that
  * bounced at the host's bank is failed, for a person to look at; one that
  * landed stays paid. Matched on the account as well as the id, so another
