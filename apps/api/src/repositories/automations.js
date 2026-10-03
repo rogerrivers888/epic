@@ -353,19 +353,10 @@ registerUndo('checks_lapse_pause', {
   },
 });
 
-/** Approved → live: back to "Approved · waiting" while nobody has booked it. */
-registerUndo('events_go_live', {
-  person: true,
-  async fn(run, { by, client: c }) {
-    const id = run.subject_id;
-    const { rows: [{ n }] } = await c.query(`select count(*)::int as n from experience_bookings where offer_id = $1 and state <> 'cancelled'`, [id]);
-    if (n > 0) throw refuse(409, 'has_bookings', 'Somebody has booked it since it went live, so it stays live.');
-    const { rows: [o] } = await c.query(`update host_offers set state = 'approved', published_at = null where id = $1 and state = 'live' returning id`, [id]);
-    if (!o) throw refuse(409, 'nothing_to_undo', 'It is not live any more.');
-    await logHostingChange({ subjectKind: 'event', subjectId: id, field: 'state', before: { state: 'live' }, after: { state: 'approved' }, why: `Undo of an automatic release (run ${run.id})`, by, byLabel: 'staff' }, c);
-    return 'Put it back to Approved · waiting';
-  },
-});
+// Taking an event back down after it went live is not undone from the log yet: the release loop
+// (routes/hostingAdmin.js releaseApproved) would publish it again on its next pass, so an Undo here
+// would say it worked and not stay done (Codex, 3 Oct 2026). It is done from the event itself.
+registerUndo('events_go_live', { refusal: 'An event that has gone live is taken down from the event itself, in Hosting › Events.' });
 
 /**
  * Undo one run through its automation's handler. Refused when there is no

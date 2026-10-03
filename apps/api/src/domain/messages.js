@@ -44,25 +44,13 @@ export const CATEGORIES = Object.freeze(['transactional', 'marketing']);
 /** The placeholder a marketing e-mail must carry, so it always says how to stop them (Roger, 3 Oct 2026). */
 export const UNSUBSCRIBE_FIELD = 'unsubscribeUrl';
 
-// ---------------------------------------------------------------------------
-// The host's own words (E4) — one place
-// ---------------------------------------------------------------------------
+// The host's own words (E4) stay where they are kept today — AUTO_DEFAULTS in
+// repositories/notifications.js and AUTO_MESSAGES in routes/hostDesk.js, the
+// hosting chat's — and a template reads them through hostWords() at render
+// time. The samples below are examples for Preview, not a copy to keep in step
+// (Codex, 3 Oct 2026: a third copy would drift). Moving the two into one place
+// is the hosting chat's change, agreed with them before it lands.
 
-/**
- * A host's automatic messages: the moment, what the host desk calls it, and
- * Epic's default words for a host who never wrote their own. These were in
- * two places (notifications.js and hostDesk.js) and are served from here now;
- * both read this (K16, Roger, 3 Oct 2026). A template takes them as its
- * `{{hostWords}}` field.
- */
-export const HOST_WORDS = Object.freeze([
-  { kind: 'confirmed', title: 'Booking confirmed', when: 'As soon as they book', body: 'Thanks for booking. See you there.' },
-  { kind: 'reminder', title: 'Reminder 24h before', when: 'The day before', body: 'See you tomorrow. Here is what to bring and where to meet.' },
-  { kind: 'date_changed', title: 'Date changed', when: 'When you move a date', body: 'I have had to move the date. If the new one doesn’t work, you can cancel for a full refund.' },
-  { kind: 'called_off', title: 'Called off', when: 'If it doesn’t go ahead', body: 'Sorry — this one isn’t going ahead. You get a full refund.' },
-  { kind: 'thank_you', title: 'Thank you and review request', when: 'The morning after', body: 'Thank you for coming. If you have a minute, a review helps other people find this.' },
-]);
-export const HOST_WORDS_DEFAULTS = Object.freeze(Object.fromEntries(HOST_WORDS.map((w) => [w.kind, w.body])));
 
 // ---------------------------------------------------------------------------
 // Triggers: the system moments, and the fields each provides
