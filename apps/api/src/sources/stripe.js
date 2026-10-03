@@ -663,6 +663,21 @@ export function laterCharge(args) {
   return call('POST', '/payment_intents', laterChargeBody(args), { householdId: args.householdId, purpose: 'booking.later_charge', idempotencyKey: `booking-later-${args.bookingId}` });
 }
 
+/**
+ * A chargeback answered (register L3: the guest's bank decides). With destination charges the dispute is on Epic's
+ * own account. `submit` sends it to the bank; without it the evidence is only saved. Text fields only — Epic never
+ * holds the guest's card or documents to attach.
+ */
+export function submitDisputeEvidence(disputeId, evidence, { submit = true, householdId = null } = {}) {
+  return call('POST', `/disputes/${encodeURIComponent(disputeId)}`, { evidence, submit: submit ? 'true' : 'false', metadata: { epic_evidence: 'epic' } },
+    { householdId, purpose: 'dispute.evidence', idempotencyKey: submit ? `dispute-evidence-${disputeId}` : null });
+}
+
+/** Accept a chargeback: the guest's bank keeps the money, nothing is contested. */
+export function acceptDispute(disputeId, { householdId = null } = {}) {
+  return call('POST', `/disputes/${encodeURIComponent(disputeId)}/close`, {}, { householdId, purpose: 'dispute.accept', idempotencyKey: `dispute-close-${disputeId}` });
+}
+
 export function retrievePaymentIntent(id, { householdId } = {}) {
   return call('GET', `/payment_intents/${encodeURIComponent(id)}`, null, { householdId, purpose: 'booking.read' });
 }

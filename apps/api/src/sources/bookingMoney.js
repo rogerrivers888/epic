@@ -619,4 +619,86 @@ async function laterChargeRefused(b, { amountPence, code }) {
   await tell([{ householdId: b.household_id, kind: 'payment_needed', title: `Your card was declined for ${o?.title ?? 'your booking'}`, body: `£${(amountPence / 100).toFixed(2)} is due now. Your place is kept — pay from the booking to keep it.`, link: guestLink(b.id), dedupeKey: `payment_needed:${b.id}` }]);
 }
 
+// ---------------------------------------------------------------------------
+// Complaints that end in money (back-office hooks, 3 Oct 2026)
+// ---------------------------------------------------------------------------
+
+/** The auto-refund limit: the claim_auto_pay_limit setting, or £50 until it is set (owner, 3 Oct 2026). */
+export const DEFAULT_AUTO_REFUND_PENCE = 5000;
+export const HOST_ANSWER_HOURS = 48;
+
+/** What a complaint stands for: its session's even share of what is left on the booking, or all of it. */
+async function complaintShare(c, k) {
+  const { rows: [b] } = await c.query('select * from experience_bookings where id = $1 for update', [k.booking_id]);
+  if (!b) return { b: null, pence: 0 };
+  const left = Math.max(0, Number(b.charged_pence ?? 0) - Number(b.refunded_pence ?? 0) - Number(b.cancellation_fee_pence ?? 0));
+  if (!k.session_id) return { b, pence: left };
+  const { rows: [{ n }] } = await c.query(`select count(*)::int as n from booking_sessions where booking_id = $1 and state <> 'cancelled'`, [b.id]);
+  return { b, pence: Math.min(left, Math.floor(Number(b.charged_pence ?? 0) / Math.max(1, n))) };
+}
+
+/**
+ * Refund a complaint (the hook the back office and the host's answer call): `amountPence` (capped at what is left on
+ * the booking) or, given none, the complaint's session's share. Through the refund queue like any refund (cause
+ * 'complaint'), the complaint marked paid with the amount, which lifts its hold on the payout.
+ *   refundComplaint({ complaintId, amountPence?, by: 'host' | 'staff' | 'epic', why? })
+ * Answers { complaintId, refundPence } — or null when there is nothing to refund (an unpaid booking, already paid).
+ */
+export async function refundComplaint({ complaintId, amountPence = null, by = 'staff', why = null }) {
+  return withTransaction(async (c) => {
+    const { rows: [k] } = await c.query('select * from hosting_complaints where id = $1 for update', [complaintId]);
+    if (!k) throw refuse(404, 'not_found', 'No such complaint.');
+    if (k.state !== 'open') throw refuse(409, 'not_open', 'That complaint is settled already.');
+    if (!k.booking_id) throw refuse(409, 'no_booking', 'That complaint has no booking to refund.');
+    const { b, pence: share } = await complaintShare(c, k);
+    if (!b) throw refuse(409, 'no_booking', 'That complaint has no booking to refund.');
+    const want = amountPence == null ? share : Math.max(0, Math.round(Number(amountPence)));
+    const line = await owe(c, b, { amountPence: want, cause: 'complaint', key: `complaint:${k.id}`, sessionId: k.session_id, wholeBooking: false, triggeredBy: by === 'host' ? 'host' : by === 'epic' ? 'epic' : 'staff' });
+    const refunded = line ? Number(line.amount_pence) : 0;
+    await c.query(`update hosting_complaints set state = 'paid', amount_pence = $2, refund_line = $3, refunded_by = $4, resolved_at = now() where id = $1`, [k.id, refunded, line?.id ?? null, by]);
+    await logChange({ subjectKind: 'complaint', subjectId: k.id, field: 'state', after: { state: 'paid', refundPence: refunded }, why, byLabel: by === 'epic' ? 'epic' : by }, c);
+    return { complaintId: k.id, refundPence: refunded };
+  });
+}
+
+/**
+ * The host's answer to a complaint, within 48 hours: a refund offered is paid at once and closes it; disputed, it
+ * waits for a person. `hostAnswerComplaint({ complaintId, hostId, offerPence? , dispute? })`.
+ */
+export async function hostAnswerComplaint({ complaintId, hostId, offerPence = null, dispute = false }) {
+  const { rows: [k] } = await query(`update hosting_complaints set host_replied_at = now(), host_offer_pence = $3, host_disputes = $4
+    where id = $1 and host_id = $2 and state = 'open' returning *`, [complaintId, hostId, offerPence, Boolean(dispute)]);
+  if (!k) throw refuse(404, 'not_found', 'That complaint isn’t open.');
+  if (!dispute && offerPence != null && Number(offerPence) > 0) return refundComplaint({ complaintId, amountPence: Number(offerPence), by: 'host', why: 'The host offered a refund' });
+  return { complaintId: k.id, refundPence: 0 };
+}
+
+/**
+ * The job: complaints the host has not answered in 48 hours, worth no more than the auto-refund limit, are refunded
+ * automatically (design handover §6). Above the limit, or disputed, they wait for a person (Actions).
+ */
+export async function autoRefundComplaints({ now = new Date() } = {}) {
+  const s = await settings.current();
+  const limit = typeof s.claim_auto_pay_limit === 'number' ? s.claim_auto_pay_limit : DEFAULT_AUTO_REFUND_PENCE;
+  const { rows } = await query(
+    `select k.* from hosting_complaints k join experience_bookings b on b.id = k.booking_id
+      where k.state = 'open' and k.host_replied_at is null and not k.host_disputes and k.kind in ('complaint', 'host_no_show')
+        and k.created_at <= $1::timestamptz - make_interval(hours => $2) and b.payment_state in ('charged', 'partially_refunded')
+      order by k.created_at limit 50`, [now, HOST_ANSWER_HOURS]);
+  const out = { refunded: 0, overLimit: 0 };
+  for (const k of rows) {
+    const share = await withTransaction(async (c) => (await complaintShare(c, k)).pence);
+    if (share > limit) { out.overLimit += 1; continue; }
+    try {
+      const r = await refundComplaint({ complaintId: k.id, by: 'epic', why: `No answer from the host in ${HOST_ANSWER_HOURS} hours, within the auto-refund limit` });
+      out.refunded += 1;
+      const { logAutomation } = await import('./automationLog.js');
+      await logAutomation({ automation: 'complaint_auto_refund', subjectKind: 'complaint', subjectId: k.id, rule: `The host didn't answer in ${HOST_ANSWER_HOURS} hours and ${(share / 100).toFixed(2)} is within the £${(limit / 100).toFixed(2)} limit`, evidence: { bookingId: k.booking_id, sharePence: share, limitPence: limit, openedAt: k.created_at }, did: `Refunded £${(r.refundPence / 100).toFixed(2)} and closed the complaint`, undo: null });
+    } catch (err) {
+      if (err.code !== 'not_open') console.error(`epic-api: complaint ${k.id} auto-refund — ${err.code ?? err.message}`);
+    }
+  }
+  return out;
+}
+
 export { ledger };

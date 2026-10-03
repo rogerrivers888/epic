@@ -25,7 +25,8 @@ import * as notifications from '../repositories/notifications.js';
 import * as problems from '../repositories/paymentProblems.js';
 import * as stripe from './stripe.js';
 import { payoutDecision } from '../domain/money.js';
-import { decideDue, warnUnderMinimum, processRefunds, chargeLaterDue } from './bookingMoney.js';
+import { decideDue, warnUnderMinimum, processRefunds, chargeLaterDue, autoRefundComplaints } from './bookingMoney.js';
+import { sendDueEvidence } from './disputes.js';
 
 const HELD_WORDS = {
   complaint: 'A guest raised a problem with this session. The payout waits until it is sorted.',
@@ -342,7 +343,11 @@ export async function moneyTick({ now = new Date() } = {}) {
   // Bookings far ahead whose day has come are charged on their saved card (L4) — after decides-by, so one called off
   // is never charged.
   await chargeLaterDue({ now }).catch((err) => console.error(`epic-api: later charges — ${err.message}`));
+  // Complaints the host left unanswered for 48 hours and worth no more than the limit are refunded, then sent below.
+  await autoRefundComplaints({ now }).catch((err) => console.error(`epic-api: complaint refunds — ${err.message}`));
   await processRefunds();
+  // A chargeback nobody has answered two days before its deadline gets Epic's evidence.
+  await sendDueEvidence({ now }).catch((err) => console.error(`epic-api: chargeback evidence — ${err.message}`));
   await refreshAccountFacts().catch((err) => console.error(`epic-api: account facts refresh — ${err.message}`));
   // What hosts owe back is collected before anything is paid out to them (L5).
   await processRecoveries().catch((err) => console.error(`epic-api: host recoveries — ${err.message}`));

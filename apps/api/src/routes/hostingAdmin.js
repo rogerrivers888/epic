@@ -951,6 +951,65 @@ router.post('/payment-problems/:id/resolve', requires('manage_hosting'), async (
 });
 
 // ---------------------------------------------------------------------------
+// Chargebacks and complaint refunds (back-office hooks; Stripe build, 3 Oct 2026)
+// ---------------------------------------------------------------------------
+
+const DISPUTE_ID = /^(dp|du)_[A-Za-z0-9]+$/;
+
+// Every chargeback: its stage, its deadline, and when Epic will send its evidence if nobody acts first
+// (design handover §3: "Sends automatically on {date}").
+router.get('/chargebacks', requires('view_hosting'), async (_req, res, next) => {
+  try {
+    const { SEND_DAYS_BEFORE } = await import('../sources/disputes.js');
+    const { rows } = await query(
+      `select c.*, o.title as offer_title, h.name as host_name from chargebacks c
+         left join experience_bookings b on b.id = c.booking_id left join host_offers o on o.id = b.offer_id left join hosts h on h.id = b.host_id
+        where c.mode = $1 order by (c.closed_at is null) desc, c.due_by nulls last, c.created_at desc limit 200`, [stripeMode() ?? 'test']);
+    res.json({ chargebacks: rows.map((c) => ({
+      id: c.id, bookingId: c.booking_id, offerTitle: c.offer_title, hostName: c.host_name, amountPence: c.amount_pence, reason: c.reason, status: c.status,
+      dueBy: c.due_by, sendsOn: c.due_by && !c.evidence_sent_at && !c.accepted_at && !c.closed_at ? new Date(new Date(c.due_by).getTime() - SEND_DAYS_BEFORE * 86_400_000) : null,
+      evidenceSentAt: c.evidence_sent_at, evidenceSentBy: c.evidence_sent_by, acceptedAt: c.accepted_at, acceptedBy: c.accepted_by, closedAt: c.closed_at,
+    })) });
+  } catch (err) { next(err); }
+});
+
+// Submit Epic's evidence now, or accept the chargeback — both move money at the guest's bank, so a person signed in.
+router.post('/chargebacks/:dispute/evidence', requires('manage_hosting'), requireOwnerSignedIn('send chargeback evidence'), async (req, res, next) => {
+  try {
+    if (!DISPUTE_ID.test(req.params.dispute)) throw refuse(404, 'not_found', 'No such chargeback.');
+    const { sendEvidence } = await import('../sources/disputes.js');
+    const who = currentAccount();
+    const done = await sendEvidence(req.params.dispute, { by: who?.email ?? 'staff' });
+    if (!done) throw refuse(409, 'answered', 'That chargeback is answered or closed already.');
+    res.json({ sentAt: done.evidence_sent_at });
+  } catch (err) { next(err); }
+});
+
+router.post('/chargebacks/:dispute/accept', requires('manage_hosting'), requireOwnerSignedIn('accept a chargeback'), async (req, res, next) => {
+  try {
+    if (!DISPUTE_ID.test(req.params.dispute)) throw refuse(404, 'not_found', 'No such chargeback.');
+    const { acceptChargeback } = await import('../sources/disputes.js');
+    const who = currentAccount();
+    const done = await acceptChargeback(req.params.dispute, { by: who?.email ?? 'staff' });
+    if (!done) throw refuse(409, 'answered', 'That chargeback is answered or closed already.');
+    res.json({ acceptedAt: done.accepted_at });
+  } catch (err) { next(err); }
+});
+
+// Refund a complaint: the amount given, or the complaint's share of the booking. Money, so a person signed in.
+router.post('/complaints/:id/refund', requires('manage_hosting'), requireOwnerSignedIn('refund a complaint'), async (req, res, next) => {
+  try {
+    if (!UUID.test(req.params.id)) throw refuse(404, 'not_found', 'No such complaint.');
+    const why = String(req.body?.why ?? '').trim();
+    if (!why) throw refuse(400, 'why', 'Say why.');
+    const amount = req.body?.amountPence == null ? null : Math.round(Number(req.body.amountPence));
+    if (amount != null && !(amount > 0)) throw refuse(400, 'amount', 'An amount in pence, more than nought.');
+    const { refundComplaint } = await import('../sources/bookingMoney.js');
+    res.json(await refundComplaint({ complaintId: req.params.id, amountPence: amount, by: 'staff', why }));
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
 // Overview health — BO8m
 // ---------------------------------------------------------------------------
 
