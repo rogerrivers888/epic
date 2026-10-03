@@ -15,7 +15,9 @@
 alter table hosts
   add column if not exists fee_payment_method   text,
   add column if not exists fee_card_setup_intent text,
-  add column if not exists fee_card_saved_at    timestamptz;
+  add column if not exists fee_card_saved_at    timestamptz,
+  -- The last fee the card refused: the checklist asks for a card again until a new one is saved.
+  add column if not exists fee_card_failed_at   timestamptz;
 
 alter table offer_sessions
   add column if not exists headcount     integer,
@@ -34,6 +36,8 @@ create table if not exists organiser_fees (
   state                 text not null default 'pending',
   stripe_payment_intent text unique,
   failure               text,
+  -- A definite refusal moves the next try to a new idempotency key (a new card is a new request).
+  attempt               integer not null default 0,
   mode                  text not null default 'test',
   created_at            timestamptz not null default now(),
   paid_at               timestamptz,

@@ -1307,3 +1307,19 @@ test('a payment for more places that lands after the booking was cancelled is gi
     assert.equal((await query('select charged_pence from experience_bookings where id = $1', [id])).rows[0].charged_pence, 2000, 'never counted on the booking');
   } finally { await srv.close(); }
 });
+
+test('a refund that fits in a later payment for more places is taken from that payment', async () => {
+  settings.forget();
+  const { srv, id } = await aPaidBooking({ adults: 2, max: 6, firstIn: 30 });
+  try {
+    const r = await srv.send('POST', `/api/booked/${id}/party`, { adults: 4 });
+    pays(r.body.pay.paymentIntent);
+    await srv.send('POST', `/api/booked/${id}/payment`, { paymentIntent: r.body.pay.paymentIntent });
+    // One person fewer: £20 less the 5% — fits in the £40 payment for more places.
+    assert.equal((await srv.send('POST', `/api/booked/${id}/party`, { adults: 3 })).status, 200);
+    calls.length = 0;
+    await engine.processRefunds({ status: () => ({ ready: true }) });
+    const mine = calls.filter((c) => c.url === '/v1/refunds').map((c) => new URLSearchParams(c.body)).filter((f) => f.get('metadata[epic_booking_id]') === id);
+    assert.deepEqual(mine.map((f) => [f.get('payment_intent'), f.get('amount')]), [[r.body.pay.paymentIntent, '1900']]);
+  } finally { await srv.close(); }
+});

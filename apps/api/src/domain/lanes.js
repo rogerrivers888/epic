@@ -560,7 +560,7 @@ export function checklist(offer, { host, account } = {}, cfg = DEFAULT_CONFIG) {
   if (epic) push('payouts', 'send', host?.payouts_state === 'ready', { pending: host?.payouts_state === 'pending' });
   if (epic) push('tax', 'payout', has(host?.tax_reference));
   // Paid on the day (L10): Epic's fee is charged to the organiser's own card, so one is saved before sending.
-  if (offer.money === 'direct' && offer.price_mode && offer.price_mode !== 'free') push('fee_card', 'send', Boolean(host?.fee_payment_method));
+  if (offer.money === 'direct' && offer.price_mode && offer.price_mode !== 'free') push('fee_card', 'send', Boolean(host?.fee_payment_method) && !host?.fee_card_failed_at, { failed: Boolean(host?.fee_card_failed_at) });
   if (pub) push('review', null, false, { info: true });
   return items;
 }

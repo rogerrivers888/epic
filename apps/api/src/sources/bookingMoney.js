@@ -570,7 +570,9 @@ export async function refreshChargeDue({ offerId = null, bookingId = null } = {}
  * One payment only: null (the refund goes as it always has). Worked out once from Stripe's own refunded amounts.
  */
 async function splitRefund(p, refundable) {
-  if (Array.isArray(p.refund_split)) return p.refund_split.length > 1 ? p.refund_split : null;
+  // A split is used whenever it names more than one payment, or one that isn't the first charge (Codex, 3 Oct 2026).
+  const useful = (parts) => (parts.length > 1 || (parts.length === 1 && parts[0].pi !== p.stripe_payment_intent) ? parts : null);
+  if (Array.isArray(p.refund_split)) return useful(p.refund_split);
   const { rows: extra } = await query(
     `select stripe_payment_intent as pi from booking_party_changes where booking_id = $1 and state = 'done' and charge_pence > 0 and stripe_payment_intent is not null order by finished_at desc`, [p.booking_id]);
   if (!extra.length) return null;
@@ -587,7 +589,7 @@ async function splitRefund(p, refundable) {
   if (left > 0) parts.push({ pi: p.stripe_payment_intent, pence: left });
   await query('update hosting_payments set refund_split = $2::jsonb where id = $1 and refund_split is null', [p.id, JSON.stringify(parts)]);
   const { rows: [kept] } = await query('select refund_split from hosting_payments where id = $1', [p.id]);
-  return kept.refund_split.length > 1 ? kept.refund_split : null;
+  return useful(kept.refund_split);
 }
 
 /**

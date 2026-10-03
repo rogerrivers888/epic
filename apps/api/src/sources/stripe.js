@@ -706,7 +706,7 @@ export function organiserFeeBody({ customerId, paymentMethod, amountPence, feeId
 }
 
 export function organiserFeeCharge(args) {
-  return call('POST', '/payment_intents', organiserFeeBody(args), { householdId: args.householdId, purpose: 'pay_on_day.fee', idempotencyKey: `organiser-fee-${args.feeId}` });
+  return call('POST', '/payment_intents', organiserFeeBody(args), { householdId: args.householdId, purpose: 'pay_on_day.fee', idempotencyKey: `organiser-fee-${args.feeId}-${args.attempt ?? 0}` });
 }
 
 export function retrievePaymentIntent(id, { householdId } = {}) {

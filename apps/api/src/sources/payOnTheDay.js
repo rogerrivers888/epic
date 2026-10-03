@@ -59,7 +59,7 @@ export async function startFeeCard({ host, household, account }) {
   const def = c?.invoice_settings?.default_payment_method;
   const pm = typeof def === 'string' ? def : def?.id ?? null;
   if (pm) {
-    await query('update hosts set fee_payment_method = $2, fee_card_saved_at = now() where id = $1', [host.id, pm]);
+    await query('update hosts set fee_payment_method = $2, fee_card_saved_at = now(), fee_card_failed_at = null where id = $1', [host.id, pm]);
     return { saved: true };
   }
   const si = await stripe.organiserCardSetup({ customerId, hostId: host.id, householdId: household.id });
@@ -73,7 +73,7 @@ export async function applyOrganiserSetup(si) {
   const pm = typeof si.payment_method === 'string' ? si.payment_method : si.payment_method?.id ?? null;
   if (!pm) return null;
   const { rows: [h] } = await query(
-    `update hosts set fee_payment_method = $2, fee_card_saved_at = now() where id = $1::uuid and fee_card_setup_intent = $3 returning id`,
+    `update hosts set fee_payment_method = $2, fee_card_saved_at = now(), fee_card_failed_at = null where id = $1::uuid and fee_card_setup_intent = $3 returning id`,
     [si.metadata.epic_host_id, pm, si.id]);
   return h?.id ?? null;
 }
@@ -97,7 +97,7 @@ async function chargeRow(row, { host, charge = stripe.organiserFeeCharge }) {
   if (!host.fee_payment_method || !hh?.stripe_customer_id) return failRow(row, host, 'no_card');
   let pi;
   try {
-    pi = await charge({ customerId: hh.stripe_customer_id, paymentMethod: host.fee_payment_method, amountPence: row.fee_pence, feeId: row.id, offerId: row.offer_id, sessionId: row.session_id, kind: row.kind, householdId: host.household_id });
+    pi = await charge({ customerId: hh.stripe_customer_id, paymentMethod: host.fee_payment_method, amountPence: row.fee_pence, feeId: row.id, attempt: row.attempt ?? 0, offerId: row.offer_id, sessionId: row.session_id, kind: row.kind, householdId: host.household_id });
   } catch (err) {
     if (err.code === 'stripe_unreachable') return null; // the next run asks again, same key
     return failRow(row, host, err.detail ?? err.code ?? 'refused');
@@ -111,9 +111,11 @@ async function chargeRow(row, { host, charge = stripe.organiserFeeCharge }) {
 }
 
 async function failRow(row, host, code, piId = null) {
-  await query(`update organiser_fees set state = 'failed', failure = $2, stripe_payment_intent = coalesce($3, stripe_payment_intent) where id = $1`, [row.id, String(code).slice(0, 80), piId]);
+  // A definite refusal: the next try (a new card) is a new request under a new key; and the checklist asks for a card again.
+  await query(`update organiser_fees set state = 'failed', failure = $2, stripe_payment_intent = coalesce($3, stripe_payment_intent), attempt = attempt + case when $2 = 'no_card' then 0 else 1 end where id = $1`, [row.id, String(code).slice(0, 80), piId]);
+  if (code !== 'no_card') await query('update hosts set fee_card_failed_at = now() where id = $1', [row.host_id]);
   await problems.record({ kind: 'payment_failed', dedupeKey: `organiser_fee:${row.id}`, amountPence: row.fee_pence, hostId: row.host_id, offerId: row.offer_id, householdId: host.household_id, stripeRef: piId, detail: { for: 'organiser_fee', kind: row.kind, code }, reopen: true });
-  await notifications.notify({ householdId: host.household_id, kind: 'organiser_fee_failed', title: 'Epic’s fee for your event didn’t go through', body: code === 'no_card' ? 'Add a card for Epic’s fee.' : 'Your card was declined. Update it from the event.', link: `/host/events/${row.offer_id}`, dedupeKey: `organiser_fee_failed:${row.id}` }).catch(() => null);
+  await notifications.notify({ householdId: host.household_id, kind: 'organiser_fee_failed', title: 'Epic’s fee for your event didn’t go through', body: code === 'no_card' ? 'Add a card for Epic’s fee.' : 'Your card was declined. Update it from the event.', link: `/host/offers/${row.offer_id}/publish?sheet=fee_card`, dedupeKey: `organiser_fee_failed:${row.id}` }).catch(() => null);
   return 'failed';
 }
 
@@ -160,7 +162,8 @@ export async function retryOrganiserFees({ charge = stripe.organiserFeeCharge, s
   for (const row of rows) {
     const { rows: [host] } = await query('select * from hosts where id = $1', [row.host_id]);
     if (row.state === 'failed') await query(`update organiser_fees set state = 'pending' where id = $1 and state = 'failed'`, [row.id]);
-    if ((await chargeRow(row, { host, charge })) === 'paid') n += 1;
+    const { rows: [fresh] } = await query('select * from organiser_fees where id = $1', [row.id]);
+    if ((await chargeRow(fresh, { host, charge })) === 'paid') n += 1;
   }
   return n;
 }
