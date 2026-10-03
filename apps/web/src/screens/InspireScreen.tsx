@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { Press } from '../components/press';
-import { api, Experience, EventNear, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
+import { api, EventNear, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
 import { useCachedResource, runFetch, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, savedOverrides, useScrollMemory, scrollKey } from '../cache/resourceCache';
@@ -18,7 +18,6 @@ import { paths, withQuery, ACTIVITY_CATEGORIES, FOOD_CATEGORIES, type Route } fr
 import { TallBand, CompactBand, MicTile } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
 import { ContextRow } from '../components/NavRows';
-import { ExperienceCard } from '../components/hosting';
 import { BoxRow, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
 import { CardWide, Carousel, EmptyMatch, EventCard, EventLane, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
 import { Button } from '../components/ui';
@@ -354,7 +353,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
    * places and drawn as one more shelf — the Host tab is hosting only, so this
    * is where a guest finds them.
    */
-  const [hosted, setHosted] = useState<Experience[]>([]);
   // Events near you (guest handoff G1): the lane first under Activities, and each event in its category's lane.
   const [events, setEvents] = useState<EventNear[]>([]);
 
@@ -397,11 +395,9 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
   // "where" is the one on screen, and it is in the address so it travels.
   const centre = unknown ? null : chosen ?? home;
   useEffect(() => {
-    if (!centre) { setHosted([]); return; }
+    if (!centre) { setEvents([]); return; }
     let live = true;
-    api.experiencesNear({ lat: centre.lat, lng: centre.lng, km: Math.max(10, Math.round((travel ?? HOW_FAR_DEFAULT) * 0.8)) })
-      .then((r) => { if (live) setHosted(r.cards); })
-      .catch(() => { if (live) setHosted([]); });
+    // "Events near you" replaced "Hosted near" (Roger, 3 Oct 2026).
     api.eventsNear({ lat: centre.lat, lng: centre.lng, minutes: travel ?? HOW_FAR_DEFAULT })
       .then((r) => { if (live) setEvents(r.events); })
       .catch(() => { if (live) setEvents([]); });
@@ -1110,19 +1106,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                            onAll={() => navigate(withQuery(paths.inspireEvents(), centre ? { lat: String(centre.lat), lng: String(centre.lng), m: String(travel ?? HOW_FAR_DEFAULT), at: placeName ?? null } : {}))} />
               ) : null}
 
-              {/* Hosted near you: people, with faces and type chips (H3 cards), and the door to "who does what you love". */}
-              {!pick && mode === 'activities' && !(answer && answer.length) && hosted.length ? (
-                <View style={styles.gutter}>
-                  <View style={styles.hostedHead}>
-                    <Text style={type.h2}>Hosted near {placeName}</Text>
-                    <Pressable onPress={() => navigate(paths.people())} accessibilityRole="button"><Text style={[type.small, { color: colors.accent, fontWeight: '700' }]}>Who does what you love? ›</Text></Pressable>
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hostedRow}>
-                    {hosted.slice(0, 8).map((c) => <ExperienceCard key={c.id} item={c} width={240} onOpen={() => navigate(paths.experience(c.id))} />)}
-                  </ScrollView>
-                </View>
-              ) : null}
-
               {/* All: shelves per category, each "All N ›". Empty shelves are dropped. */}
               {!pick && mode === 'activities' && !(answer && answer.length) ? shelves.map((sh) => (
                 <Carousel
@@ -1360,8 +1343,6 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
 }
 
 const styles = StyleSheet.create({
-  hostedHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 6, paddingTop: 8, paddingBottom: 8 },
-  hostedRow: { gap: 14, paddingBottom: 8 },
   fill: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingBottom: spacing.xxl },
   // The head of the tab: cream, and carrying the block rule that closes it.
