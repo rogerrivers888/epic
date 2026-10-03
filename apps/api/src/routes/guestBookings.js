@@ -230,7 +230,7 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
       who: { ageMin: o.age_min, ageMax: o.age_max, partyMax: o.party_max, dropOff: o.parents === 'drop_off', adultsOnly: o.age_min != null && o.age_min >= cfg.adultAge },
       questions: o.guest_questions ?? {},
       refundWords: o.refund_policy && paidThroughEpic(o) ? refundWords(o.refund_policy, cfg) : null,
-      waitlist: { on: o.waitlist_on === true, offerHours: typeof s.waitlist_offer === 'number' ? s.waitlist_offer : null, offeredUntil: mineOffered[0]?.offer_expires_at ?? null },
+      waitlist: { on: o.waitlist_on === true, offerHours: typeof s.waitlist_offer === 'number' ? s.waitlist_offer : null, offeredUntil: mineOffered[0]?.offer_expires_at ?? null, offeredParty: mineOffered[0]?.party ?? null },
       askWindowHours: o.lane === 'onrequest' ? (typeof s.ask_to_book_window === 'number' ? s.ask_to_book_window : null) : null,
     });
   } catch (err) { next(err); }
@@ -667,11 +667,15 @@ router.delete('/experiences/:id/waitlist', async (req, res, next) => {
     const { household } = await me();
     // Leaving one weekly session's list leaves only that one (Codex, 2 Oct 2026).
     const sessionId = typeof req.query.session === 'string' && UUID.test(req.query.session) ? req.query.session : (typeof req.body?.sessionId === 'string' && UUID.test(req.body.sessionId) ? req.body.sessionId : null);
-    const { rowCount } = await query(
-      `update offer_waitlist set state = 'left' where offer_id = $1 and household_id = $2 and state in ('waiting', 'offered') and ($3::uuid is null or session_id = $3)`,
+    const { rows } = await query(
+      `update offer_waitlist w set state = 'left' from offer_waitlist was where was.id = w.id
+          and w.offer_id = $1 and w.household_id = $2 and w.state in ('waiting', 'offered') and ($3::uuid is null or w.session_id = $3)
+        returning was.state as was`,
       [req.params.id, household.id, sessionId],
     );
-    res.json({ left: rowCount > 0 });
+    // Passing on a place that was offered (G18 "Pass"): it goes to the next person now, not at the job's next run.
+    if (rows.some((r) => r.was === 'offered')) await offerFreedPlaces().catch(() => 0);
+    res.json({ left: rows.length > 0, passed: rows.some((r) => r.was === 'offered') });
   } catch (err) { next(err); }
 });
 

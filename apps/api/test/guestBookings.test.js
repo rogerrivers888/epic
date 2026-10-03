@@ -931,3 +931,23 @@ test('a guest’s money news opens the booking itself, not the Plans list', asyn
     assert.deepEqual(rows.map((x) => x.link), [`/bookings/${id}`]);
   } finally { await srv.close(); }
 });
+
+test('G18: passing on a place offered from the waiting list hands it to the next person straight away', async () => {
+  settings.forget();
+  const { o, h } = await anEvent({ max: 1, waitlist: true });
+  const taken = await aPerson();
+  await query(`insert into experience_bookings (offer_id, host_id, household_id, state, heads) values ($1, $2, $3, 'confirmed', 1)`, [o.id, h.id, taken.household.id]);
+  const first = await aPerson();
+  const second = await aPerson();
+  await query(`insert into offer_waitlist (offer_id, household_id, party, state, offer_expires_at, created_at) values ($1, $2, 1, 'offered', now() + interval '11 hours', now() - interval '2 hours')`, [o.id, first.household.id]);
+  await query(`insert into offer_waitlist (offer_id, household_id, party, state, created_at) values ($1, $2, 1, 'waiting', now() - interval '1 hour')`, [o.id, second.household.id]);
+  // The place frees: the confirmed booking is cancelled, so there is a place for the list.
+  await query(`update experience_bookings set state = 'cancelled' where offer_id = $1 and household_id = $2`, [o.id, taken.household.id]);
+  const srv = await server(first.account);
+  try {
+    const out = await srv.send('DELETE', `/api/experiences/${o.id}/waitlist`);
+    assert.deepEqual([out.body.left, out.body.passed], [true, true]);
+    const { rows: [next] } = await query(`select state from offer_waitlist where offer_id = $1 and household_id = $2`, [o.id, second.household.id]);
+    assert.equal(next.state, 'offered', 'the next in line is offered it now');
+  } finally { await srv.close(); }
+});

@@ -22,7 +22,7 @@ import { useRouter } from '../../router';
 import { signedIn } from '../../session';
 import { mediaUrl } from '../../components/hosting';
 import {
-  AMBER, AMBER_DARK, Buttons, Facts, Field, Foot, GoingAhead, GuestPage, GuestSheet, HostRow, INK_MUTED, Kick, LANE_TAG, Para, PhotoHead, Rows,
+  AMBER, AMBER_DARK, Buttons, Facts, Field, Foot, GoingAhead, GuestPage, GuestSheet, HostRow, INK_MUTED, Kick, LANE_TAG, LIME, Notice, Para, PhotoHead, Rows,
   Tags, Title, Waiting, dayWords, firstName, gbp, useToast,
 } from './kit';
 
@@ -159,6 +159,18 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const tags = [LANE_TAG[lane], ...(opt?.who.dropOff ? [{ label: 'Drop off', bg: AMBER, fg: LANE_TAG.course.fg }] : [])];
   const ga = o.goingAhead;
   const most = o.maxCount ?? null;
+  // G18 · a place offered from the waiting list: how long is left, until when, and Book now or Pass.
+  const offeredAt = opt?.waitlist.offeredUntil ? new Date(opt.waitlist.offeredUntil) : null;
+  const hoursLeft = offeredAt ? Math.max(0, Math.floor((offeredAt.getTime() - Date.now()) / 3_600_000)) : null;
+  const byWhen = offeredAt ? `${offeredAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${offeredAt.toDateString() === new Date().toDateString() ? ' tonight' : offeredAt.toDateString() === new Date(Date.now() + 86_400_000).toDateString() ? ' tomorrow' : ` ${dayWords(offeredAt.toISOString().slice(0, 10))}`}` : null;
+  const party = opt?.waitlist.offeredParty ?? 1;
+  // The price for the party the place is held for; the event's own words when it can't be said simply.
+  const each = !opt ? null : opt.price.mode === 'free' ? 0 : opt.price.mode === 'by_numbers' ? opt.price.nowEach ?? null : opt.price.per === 'booking' ? null : opt.price.pence ?? null;
+  const offerPrice = opt?.price.per === 'booking' && opt.price.pence != null ? gbp(opt.price.pence) : each != null ? gbp(each * party) : price.big;
+  const pass = async () => {
+    try { await api.guestLeaveWaitlist(o.id); toast.show('Passed to the next person'); api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => null); }
+    catch (e: any) { toast.show(e?.message ?? 'That didn’t go through.'); }
+  };
   const sessions = opt?.sessions ?? [];
   const blocks: React.ReactNode[] = [
     <Title key="t" title={o.title ?? 'An event'} line={o.venueArea ?? o.venueLabel ?? null} />,
@@ -170,6 +182,16 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
     ) : null,
     <Facts key="facts" items={[{ label: 'When', value: whenWords(o, opt) }, { label: 'Price', value: [price.big, price.small].filter(Boolean).join(' ') }]} weights={[1.3, 1]} />,
   ];
+  if (offeredAt) {
+    blocks.push(
+      <Notice key="g18" bg={LIME} weight="800">{`Your place is ready · ${hoursLeft} h left`}</Notice>,
+      <Para key="g18t" color={INK_MUTED}>{`A place came free. Take it before ${byWhen}, or it goes to the next person.`}</Para>,
+      <Buttons key="g18b" row items={[
+        { label: `Book now · ${offerPrice}`, tone: 'ink', onPress: () => navigate(bookHref) },
+        { label: 'Pass', onPress: () => { void pass(); } },
+      ]} />,
+    );
+  }
   if (ga && !ga.calledOff) {
     const cheaper = opt?.price.mode === 'by_numbers' && opt.price.totalPence && most ? ` The more come, the less each pays: ${gbp(Math.ceil(opt.price.totalPence / most))} each if ${most} come.` : '';
     blocks.push(<GoingAhead key="ga" boxes={[{ label: 'Needs', value: String(ga.min) }, { label: 'Booked so far', value: String(ga.booked) }, { label: 'Decided', value: ga.decidesOn ? dayWords(ga.decidesOn) : '—' }]}
@@ -238,7 +260,7 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   return (
     <GuestPage
       head={<PhotoHead uri={mediaUrl(o.photos[0] ?? null)} webPage={webPage} onBack={() => back(paths.inspire())} onShare={share} />}
-      foot={foot}
+      foot={offeredAt ? undefined : foot}
       overlay={<>{toast.node}{sheets}</>}>
       {blocks}
     </GuestPage>
