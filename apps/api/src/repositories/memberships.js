@@ -84,6 +84,9 @@ export async function billedMemberships() {
     startedAt: m.started_at,
     endedAt: m.status === 'cancelled' ? (m.ended_at ?? m.updated_at) : null,
     paidFrom: m.paid_from ?? null,
+    // Where its paid months stop, if they stop before its end: paused (a payment failing, and nothing collected since)
+    // or cancelled while paused. A pause that recovers was paid late, and counts again once active.
+    paidUntil: m.paused_at && ['paused', 'cancelled'].includes(m.status) ? m.paused_at : null,
     // Earlier prices and when each stopped, oldest first: a month is valued at the price in force when it began.
     priceHistory: (m.price_history ?? []).map((p) => ({ until: p.until, monthlyPence: Number(p.monthlyPence) || 0 })),
     channel: m.channel,
@@ -275,7 +278,8 @@ function monthStarts(from, to) {
 function paidIn(b, monthStart) {
   if (!b.paidFrom) return false;
   const next = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1));
-  return new Date(b.paidFrom) < next && (!b.endedAt || new Date(b.endedAt) > monthStart);
+  const until = b.paidUntil ?? b.endedAt;
+  return new Date(b.paidFrom) < next && (!until || new Date(until) > monthStart);
 }
 
 /** The price a month was billed at: the earliest earlier price still in force when the month began, else today's. */

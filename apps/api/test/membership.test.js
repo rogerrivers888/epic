@@ -485,3 +485,18 @@ test('the membership bought decides how many people a household can hold', async
   await applyStripeEvent(event('customer.subscription.updated', sub));
   assert.ok((await planCapFor(household.id)).cap > 1);
 });
+
+test('a renewal that fails and never recovers stops the paid months where payment stopped', async () => {
+  const { membershipRevenue } = await import('../src/repositories/memberships.js');
+  const { household } = await aMember();
+  const sub = aSub(household.id, { status: 'active', trialEnd: new Date('2024-01-01T00:00:00Z') });
+  await applyStripeEvent(event('customer.subscription.updated', sub));
+  sub.status = 'past_due';
+  await applyStripeEvent(event('invoice.payment_failed', { id: 'in_r', object: 'invoice', subscription: sub.id }));
+  // The pause began on 1 Mar 2024 (set by hand: the test runs today); then cancelled on 1 Jun.
+  await query("update memberships set paused_at = '2024-03-01T00:00:00Z' where stripe_subscription_id = $1", [sub.id]);
+  sub.status = 'canceled'; sub.ended_at = secs(new Date('2024-06-01T00:00:00Z'));
+  await applyStripeEvent(event('customer.subscription.deleted', sub));
+  // January and February paid; March to May never collected. Nothing else in this file is dated 2024.
+  assert.equal((await membershipRevenue('2024-01-01', '2024-07-01')).pence, 2 * 599);
+});

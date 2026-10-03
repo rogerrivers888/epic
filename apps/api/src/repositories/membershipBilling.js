@@ -102,7 +102,9 @@ export async function upsertFromSubscription({ householdId, subscriptionId, fact
          current_period_end = excluded.current_period_end,
          cancel_at_period_end = excluded.cancel_at_period_end,
          ended_at = case when excluded.status = 'cancelled' then coalesce(memberships.ended_at, excluded.ended_at, now()) else null end,
-         paused_at = case when excluded.status = 'paused' then coalesce(memberships.paused_at, now()) else null end,
+         -- Kept when it is cancelled while paused: its paid months end where its payments stopped (Codex, 3 Oct 2026).
+         paused_at = case when excluded.status = 'paused' then coalesce(memberships.paused_at, now())
+                          when excluded.status = 'cancelled' then memberships.paused_at else null end,
          pause_reason = case when excluded.status = 'paused' then coalesce($13, memberships.pause_reason) else null end,
          paid_from = coalesce(memberships.paid_from, excluded.paid_from),
          read_stamp = excluded.read_stamp,
