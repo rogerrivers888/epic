@@ -215,3 +215,20 @@ test('rating thresholds: one set of names for Safety and Standing, older names s
     assert.equal(typeof health.tabs.money, 'number');
   } finally { await srv.close(); }
 });
+
+test('a hosting change replayed from Approvals carries the approval’s id; DAC7 is never produced by a replay', async () => {
+  const { runApprovedCall } = await import('../src/routes/admin.js');
+  const seen = [];
+  const dispatch = async (call) => { seen.push(call); return { ok: true, status: 200, body: {} }; };
+  const req = { headers: { authorization: 'Bearer t' } };
+  const id = crypto.randomUUID();
+  await runApprovedCall({ id, request: 'PUT /api/admin/hosting/settings/review_window', payload: { value: 24, why: 'Faster' } }, req, dispatch);
+  assert.deepEqual(seen[0].body, { value: 24, why: 'Faster', approvalId: id });
+  await runApprovedCall({ id, request: 'POST /api/admin/places/refresh', payload: { a: 1 } }, req, dispatch);
+  assert.deepEqual(seen[1].body, { a: 1 }, 'other doors are replayed exactly as filed');
+  const owner = await server(OWNER);
+  try {
+    const r = await owner.send('POST', '/api/admin/hosting/reports/dac7', { year: 2026, approvalId: id });
+    assert.equal(r.status, 409);
+  } finally { await owner.close(); }
+});

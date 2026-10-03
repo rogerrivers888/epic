@@ -84,8 +84,10 @@ router.get('/review', requires('view_hosting'), async (req, res, next) => {
     const { rows: [today] } = await query(
       `select count(*)::int as n from hosting_changes where subject_kind = 'event' and field = 'review' and at >= date_trunc('day', now()) and after->>'outcome' = 'live'`,
     );
-    const out = [];
-    for (const o of rows) out.push({ ...reviewRow(o, s), waitingOn: o.state === 'approved' ? waitingFor(o, await repo.hostById(o.host_id)) : null });
+    const approvedHosts = [...new Set(rows.filter((o) => o.state === 'approved').map((o) => o.host_id))];
+    const { rows: hosts } = approvedHosts.length ? await query('select * from hosts where id = any($1::uuid[])', [approvedHosts]) : { rows: [] };
+    const hostOf = new Map(hosts.map((h) => [h.id, h]));
+    const out = rows.map((o) => ({ ...reviewRow(o, s), waitingOn: o.state === 'approved' ? waitingFor(o, hostOf.get(o.host_id)) : null }));
     res.json({ rows: out, wentLiveToday: today.n, reviewHours: s.review_window ?? null, capped: rows.length === 500 });
   } catch (err) { next(err); }
 });
@@ -386,7 +388,7 @@ router.post('/hosts/:id/remove', requireOwnerSignedIn('remove a host'), async (r
       const { rowCount } = await c.query(`update hosts set stopped_at = now(), paused = true where id = $1`, [req.params.id]);
       if (!rowCount) throw refuse(404, 'not_found', 'No such host.');
       await c.query(`update host_offers set state = 'ended' where host_id = $1 and state in ('live', 'paused', 'approved', 'in_review')`, [req.params.id]);
-      await logChange({ subjectKind: 'host', subjectId: req.params.id, field: 'removed', after: { removed: true }, why, by: by(), byLabel: 'staff' }, c);
+      await logChange({ subjectKind: 'host', subjectId: req.params.id, field: 'removed', after: { removed: true }, why, by: by(), byLabel: 'staff', approvalId: UUID.test(String(req.body?.approvalId ?? '')) ? req.body.approvalId : null }, c);
       return { removed: true };
     });
     if (out.refused) throw refuse(409, 'outstanding', `Not while ${out.refused.bookings} bookings and ${out.refused.payouts} payouts are outstanding.`);
@@ -417,10 +419,14 @@ router.get('/events', requires('view_hosting'), async (req, res, next) => {
     const { rows: drafts } = await query(`select lane, draft_step, count(*)::int as n from host_offers where state = 'draft' and lane is not null group by 1, 2`);
     const byStep = {};
     for (const k of KINDS) byStep[k] = (SEQ[k] ?? []).map((step) => ({ step, n: drafts.find((d) => d.lane === k && d.draft_step === step)?.n ?? 0 }));
+    // What each approved event waits on, from two queries however many there are (Codex, 3 Oct 2026).
     const waiting = new Map();
-    for (const e of rows.filter((x) => x.state === 'approved')) {
-      const o = await repo.offerById(e.id);
-      waiting.set(e.id, waitingFor(o, await repo.hostById(o.host_id)));
+    const approvedIds = rows.filter((x) => x.state === 'approved').map((x) => x.id);
+    if (approvedIds.length) {
+      const { rows: offers } = await query('select * from host_offers where id = any($1::uuid[])', [approvedIds]);
+      const { rows: hosts } = await query('select * from hosts where id = any($1::uuid[])', [[...new Set(offers.map((o) => o.host_id))]]);
+      const hostOf = new Map(hosts.map((h) => [h.id, h]));
+      for (const o of offers) waiting.set(o.id, waitingFor(o, hostOf.get(o.host_id)));
     }
     res.json({
       rows: rows.map((e) => ({ id: e.id, title: e.title, host: e.host, kind: e.lane, lane: e.lane, waitingOn: waiting.get(e.id) ?? null, state: e.called_off_at ? 'called_off' : e.state, visibility: e.visibility === 'public' ? 'Public' : 'Private', booked: e.booked, min: e.min_count, max: e.max_count, decidesBy: ymd(e.decides_at), next: ymd(e.next_date), priceMode: e.price_mode })),
@@ -582,7 +588,7 @@ router.post('/money/payouts/:id/retry', requireOwnerSignedIn('retry a payout'), 
     if (!UUID.test(String(req.params.id))) throw refuse(404, 'not_found', 'No such payout.');
     const { rows: [p] } = await query(`update host_payouts set state = 'scheduled', hold_reason = null, updated_at = now() where id = $1 and state = 'failed' returning id`, [req.params.id]);
     if (!p) throw refuse(404, 'not_found', 'That payout isn’t waiting on a person.');
-    await logChange({ subjectKind: 'payout', subjectId: p.id, field: 'retry', after: { state: 'scheduled' }, why: typeof req.body?.why === 'string' ? req.body.why.slice(0, 500) : null, by: by(), byLabel: 'staff' });
+    await logChange({ subjectKind: 'payout', subjectId: p.id, field: 'retry', after: { state: 'scheduled' }, why: typeof req.body?.why === 'string' ? req.body.why.slice(0, 500) : null, by: by(), byLabel: 'staff', approvalId: UUID.test(String(req.body?.approvalId ?? '')) ? req.body.approvalId : null });
     res.json({ retried: true });
   } catch (err) { next(err); }
 });
@@ -791,6 +797,8 @@ router.get('/reports/dac7', requires('view_hosting'), async (req, res, next) => 
 
 router.post('/reports/dac7', requireOwnerSignedIn('produce the DAC7 export'), async (req, res, next) => {
   try {
+    // A file is downloaded by whoever presses for it; replayed from Approvals it would be produced, logged and lost (Codex, 3 Oct 2026).
+    if (req.body?.approvalId) throw refuse(409, 'download_in_person', 'The DAC7 file downloads to whoever produces it: produce it here, signed in.');
     const year = Number(req.body?.year);
     if (!Number.isInteger(year) || year < 2024 || year > 2100) throw refuse(400, 'year', 'Which year.');
     const rows = await dac7Rows(year);

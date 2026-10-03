@@ -946,7 +946,11 @@ export async function runApprovedCall(approval, req, dispatch) {
   const token = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '') || null;
   if (!token) return { ok: false, status: 401, message: 'No owner token to run the request with.' };
   try {
-    const out = await dispatch({ method: parsed.method, path: `${parsed.path}${parsed.query || ''}`, body: parsed.method === 'GET' ? null : (approval.payload ?? {}), token });
+    // A hosting change records the approval it came from (hosting_changes.approval_id), so the replay carries its id.
+    const payload = approval.payload ?? {};
+    const body = parsed.method === 'GET' ? null
+      : parsed.path.startsWith('/api/admin/hosting/') && payload && typeof payload === 'object' && !Array.isArray(payload) ? { ...payload, approvalId: approval.id } : payload;
+    const out = await dispatch({ method: parsed.method, path: `${parsed.path}${parsed.query || ''}`, body, token });
     // A 2xx is done; a 4xx was rejected before acting (re-approvable); a 5xx may
     // have partly run, so it is indeterminate — never a safe retry (Codex, 1 Oct).
     const indeterminate = out.status >= 500;
