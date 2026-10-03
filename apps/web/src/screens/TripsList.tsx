@@ -154,9 +154,10 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
     <View style={{ flex: 1 }}>
       <View style={wide ? styles.wide : undefined}>
         {/* The Plans mic starts a new trip by voice (§4); Messages sits beside it with its unread count (guest handoff G14, 4c). */}
-        <TallBand right={<View style={{ flexDirection: 'row', gap: 6 }}>{guest ? null : <MessagesTile unread={unread} onPress={() => navigate(paths.messages())} />}<MicTile onPress={onNew} accessibilityLabel="Start a new trip" /></View>} />
+        {/* A guest's Plans is their events: no trips to start, and Messages is its own tab for them (Codex, 3 Oct 2026). */}
+        <TallBand right={guest ? undefined : <View style={{ flexDirection: 'row', gap: 6 }}><MessagesTile unread={unread} onPress={() => navigate(paths.messages())} /><MicTile onPress={onNew} accessibilityLabel="Start a new trip" /></View>} />
         <InkMenu
-          tabs={[{ key: 'day', label: 'Day trips' }, { key: 'holiday', label: 'Holidays' }, { key: 'events', label: 'Events' }]}
+          tabs={guest ? [{ key: 'events', label: 'Events' }] : [{ key: 'day', label: 'Day trips' }, { key: 'holiday', label: 'Holidays' }, { key: 'events', label: 'Events' }]}
           selected={span}
           // Choosing a span is also the way out of the bookings focus: without
           // the old `when` menu, tapping a tab is the only control left, so it
