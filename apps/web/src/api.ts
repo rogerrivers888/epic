@@ -6261,7 +6261,7 @@ export type GuestQuote = { lines: { label: string; each: number; count: number; 
 export type GuestCard = {
   /** Null on a waiting-list place, which carries `waitlistId` (and `offered` once a place is held for it). */
   id: string | null; waitlistId?: string; offered?: { expiresAt: string } | null; offerId: string; title: string | null; lane: GuestLane; photo: string | null; date: string | null; time: string | null;
-  session: { n: number; of: number } | null; chip: string; chipWords: string; numbers: { booked: number; min: number } | null; rateIt: boolean; upcoming: boolean;
+  session: { n: number; of: number } | null; dates?: string[]; chip: string; chipWords: string; numbers: { booked: number; min: number } | null; rateIt: boolean; upcoming: boolean;
   holdReleased?: boolean; refunded?: boolean;
 };
 export type GuestBookedList = {

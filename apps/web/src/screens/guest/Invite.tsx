@@ -86,7 +86,8 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
   const heads = !signedIn() ? (Number.isFinite(typed) && typed >= 1 ? Math.min(typed, 20) : Math.max(1, v.invite.heads ?? 1)) : Math.max(1, going.length);
   // Some ways of booking need a slot or sessions picked: On request, and a weekly class booked ahead only. Those
   // invitations are answered on the booking screen itself, with the invitation carried (Codex, 3 Oct 2026).
-  const needsPicking = Boolean(opt && (opt.lane === 'onrequest' || (opt.lane === 'weekly' && !opt.kinds.includes('drop_in'))));
+  // Adults only (the 18+ tick) and drop off (a contact per child) ask more than an invitation can, so they too (Codex, 3 Oct 2026).
+  const needsPicking = Boolean(opt && (opt.lane === 'onrequest' || (opt.lane === 'weekly' && !opt.kinds.includes('drop_in')) || opt.who.adultsOnly || opt.who.dropOff));
   const q = opt?.questions ?? {};
   const taken = new Set(v.taken ?? []);
   const when = `${o.startsOn ? dayWords(o.startsOn) : ''}${o.startsAt ? ` · ${o.startsAt}` : ''}`;
@@ -109,6 +110,8 @@ export function Invite({ token, webPage }: { token: string; webPage: boolean }) 
       }
       if (reply === 'no') { await api.invitedBook(token, { rsvp: 'no' }); toast.show(`${host} knows you can’t make it`); return; }
       if (needsPicking) { navigate(withQuery(paths.experienceBook(o.id), { i: token })); return; }
+      // Nobody ticked is nobody going: never a booking for one made up (Codex, 3 Oct 2026).
+      if (hh?.members?.length && !going.length) { toast.show('Choose who’s coming'); return; }
       // Ready to pay before anything is made, so a missing card never leaves a booking stranded.
       if (paidHere && (!stripe || !card.current)) { toast.show(stripe ? 'Add your card' : 'Card payments aren’t switched on yet'); return; }
       let made = pending;

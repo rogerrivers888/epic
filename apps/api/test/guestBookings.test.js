@@ -753,3 +753,28 @@ test('Codex: a paid event is not a yes without a booking, and a session already 
     assert.notEqual(e.date, new Date().toISOString().slice(0, 10), 'a started session is not offered as the next');
   } finally { await srv.close(); }
 });
+
+test('Codex: a held waiting-list place makes an event card full, and a course shows on each of its days', async () => {
+  settings.forget();
+  const { o } = await anEvent({ max: 1, waitlist: true });
+  await query(`update host_offers set venue_lat = 51.4, venue_lng = -0.62 where id = $1`, [o.id]);
+  const b = await aPerson();
+  await query(`insert into offer_waitlist (offer_id, household_id, party, state, offer_expires_at) values ($1, $2, 1, 'offered', now() + interval '3 hours')`, [o.id, b.household.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const e = (await srv.get('/api/events/near?lat=51.39&lng=-0.62&minutes=30')).body.events.find((x) => x.id === o.id);
+    assert.equal(e.full, true, 'the one place is held for somebody');
+    assert.equal(e.needs, null);
+  } finally { await srv.close(); }
+
+  const { o: c } = await anEvent({ lane: 'course', sessions: 3 });
+  const p = await aPerson();
+  const sp = await server(p.account);
+  try {
+    const r = await sp.send('POST', `/api/experiences/${c.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1, children: [] } });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const card = (await sp.get('/api/booked')).body.upcoming.find((x) => x.id === r.body.booking.id);
+    assert.equal(card.dates.length, 3, 'every session’s day');
+  } finally { await sp.close(); }
+});

@@ -709,6 +709,8 @@ function card(b, now) {
     date: nextS ? ymd(nextS.on_date) : b.requested_date ? ymd(b.requested_date) : b.sessionsList[0] ? ymd(b.sessionsList[0].on_date) : null,
     time: nextS ? hm(nextS.starts_at) : hm(b.requested_time),
     session: (b.lane === 'course' || b.lane === 'weekly') && idx && all > 1 ? { n: idx, of: all } : null,
+    // Every date still booked, so a trip's day finds a course's later sessions too (Codex, 3 Oct 2026).
+    dates: [...new Set(live.map((x) => ymd(x.on_date)))],
     chip: chip.chip, chipWords: chip.words,
     numbers: b.min_count && chip.chip === 'waiting' ? { booked: nextS?.booked ?? 0, min: b.min_count } : null,
     rateIt: Boolean(lastEnd && lastEnd <= now.getTime() && !b.rated_at && b.state !== 'cancelled'),
@@ -762,6 +764,9 @@ router.get('/events/near', async (req, res, next) => {
               nxt.id as session_id, nxt.on_date, nxt.starts_at, nxt.max_count as session_max,
               coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                          where bs.session_id = nxt.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')), 0)::int as booked,
+              -- A place offered from the waiting list is held, as the booking path counts it (Codex, 3 Oct 2026).
+              coalesce((select sum(w.party) from offer_waitlist w where (w.session_id = nxt.id or (w.session_id is null and w.offer_id = o.id))
+                           and w.state = 'offered' and w.offer_expires_at > now()), 0)::int as held,
               (select round(avg(r.stars)::numeric, 1)::float from host_reviews r where r.host_id = o.host_id and r.side = 'guest' and not r.hidden and r.publish_on <= current_date) as rating,
               (select count(*)::int from host_reviews r where r.host_id = o.host_id and r.side = 'guest' and not r.hidden and r.publish_on <= current_date) as reviews,
               (select count(*)::int from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and (s.on_date > current_date or (s.on_date = current_date and (s.starts_at is null or s.starts_at > (now() at time zone coalesce(o.time_zone, 'Europe/London'))::time)))) as ahead
@@ -779,7 +784,7 @@ router.get('/events/near', async (req, res, next) => {
       estimated: true, minutes,
       events: rows.map((r) => {
         const most = r.session_max ?? r.max_count ?? null;
-        const left = most != null ? Math.max(0, most - r.booked) : null;
+        const left = most != null ? Math.max(0, most - r.booked - (r.held ?? 0)) : null;
         return {
           id: r.id, title: r.title, lane: r.lane, photo: mediaRef(r.photo_ids?.[0]), mood: moodOf(r.what_category, `${r.what_label ?? ''} ${r.title ?? ''}`),
           date: ymd(r.on_date), time: hm(r.starts_at), sessionsAhead: r.ahead, // Found by its place with no point to measure from: no journey time, rather than a made-up one (Codex, 3 Oct 2026).

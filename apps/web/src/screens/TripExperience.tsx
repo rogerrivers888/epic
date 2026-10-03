@@ -191,7 +191,7 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // An event booked for a day of this trip sits on that day, beside the places (guest handoff, "bookings on a trip's day").
   const [booked, setBooked] = useState<GuestCard[]>([]);
   useEffect(() => { api.guestBooked().then((r) => setBooked(r.upcoming.filter((c) => c.id))).catch(() => setBooked([])); }, []);
-  const bookedToday = day?.date ? booked.filter((c) => c.date === day.date) : [];
+  const bookedToday = day?.date ? booked.filter((c) => (c.dates?.length ? c.dates.includes(day.date!) : c.date === day.date)) : [];
   const show = (showRaw ?? 'all') as ShortTab;
 
   // The detour band and the selected day travel with the moves between stages,
