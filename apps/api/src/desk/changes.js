@@ -9,7 +9,7 @@
 
 import { query } from '../db.js';
 
-// Messages and Automations: template edits and restores, and automation switches, locks and rules (K16, migration 374).
+// Messages and Automations: template edits and restores, and automation switches, locks and rules (K16, migration 380).
 export const AREAS = ['Categories', 'Subcategories', 'Facts', 'Mapping', 'Defaults', 'Collections', 'Fact automations', 'Markets', 'Messages', 'Automations'];
 
 const bad = (message) => Object.assign(new Error(message), { status: 400, code: 'bad_request' });

@@ -1,6 +1,6 @@
 /**
  * Automations as records (K16; design handover §6; Roger's conditions, 3 Oct
- * 2026): seeded switched on in migration 374 so nothing that runs today stops,
+ * 2026): seeded switched on in migration 380 so nothing that runs today stops,
  * the child-safety and lapsed-checks pauses always on with no switch, the
  * Payments chat's automations "Run by Payments", and suspensions locked until
  * Host Terms.
@@ -42,7 +42,7 @@ async function server(access) {
 
 const row = async (key) => (await query('select * from automations where key = $1', [key])).rows[0];
 
-test('migration 374 seeds the design’s 22 automations, exactly as the code lists them', async () => {
+test('migration 380 seeds the design’s 22 automations, exactly as the code lists them', async () => {
   const { rows } = await query('select * from automations');
   const seeded = new Map(rows.map((r) => [r.key, r]));
   assert.equal(automations.AUTOMATION_SEEDS.length, 22);

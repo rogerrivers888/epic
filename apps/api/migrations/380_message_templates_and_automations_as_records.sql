@@ -148,7 +148,7 @@ create index if not exists automation_runs_at_idx on automation_runs (at desc);
 create index if not exists automation_runs_subject_idx on automation_runs (subject_kind, subject_id);
 
 insert into automations (key, area, name, trigger, rules, template_keys, no_template, is_on, locked, lock_kind, lock_reason, step_locks, logic, owner_chat, honours_switch, updated_by)
-select v.*, 'Epic (migration 374)' from (values
+select v.*, 'Epic (migration 380)' from (values
   ('hide_contact_details', 'safety', 'Hide contact details', 'chat.contact_hidden', '{}'::jsonb, array['contact_details_hidden']::text[], null, true, false, null, null, '{}'::jsonb, 'routes/chat.js — phone numbers and e-mail addresses in messages before a booking', null, false),
   ('strikes', 'safety', 'Strikes', 'host.strike', '{"warningAt":1,"finalWarningAt":2,"suspendedAt":3,"expiryMonths":12,"lateChangesForStrike":3,"lateChangeWindowDays":90}'::jsonb, array['strike_warning', 'strike_final_warning', 'strike_suspension']::text[], null, true, false, null, null, '{"suspended":"Waits for Host Terms"}'::jsonb, 'The rules engine (sources/rulesEngine.js)', null, false),
   ('child_safety_pause', 'safety', 'Child safety pause', 'safety.child_safety_report', '{}'::jsonb, array['children_paused']::text[], null, true, true, 'always_on', 'Always on: a report about a child’s safety always pauses that host’s events with children; only a person closing the safety item lifts it (Roger, 3 Oct 2026).', '{}'::jsonb, 'sources/safetyHolds.js childSafetyReported', null, false),

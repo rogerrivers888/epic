@@ -60,7 +60,7 @@ const RUN_BY_PAYMENTS = 'Run by Payments';
  *
  *   · Seeded switched on (Roger, 3 Oct 2026: "seed every automation record
  *     switched on, in the same migration, so nothing that runs today stops").
- *     The rows are written by migration 374, not by code on first use; this
+ *     The rows are written by migration 380, not by code on first use; this
  *     list is what the migration wrote, and test/automations.test.js holds
  *     the two together.
  *   · Child-safety pause and the lapsed-checks pause are always on: no switch,
