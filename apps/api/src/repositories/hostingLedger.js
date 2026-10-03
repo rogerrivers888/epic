@@ -78,7 +78,8 @@ export async function sessionsEndedWithoutPayout({ now = new Date(), limit = 200
         and ((coalesce(s.ends_on, s.on_date) + coalesce(s.ends_at, s.starts_at, time '23:59'))
                at time zone coalesce(o.time_zone, 'Europe/London')) <= $1
         and exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
-                     where bs.session_id = s.id and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded'))
+                     where bs.session_id = s.id and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded')
+                       and b.charge_model = 'destination')
       order by 5 limit $2`,
     [now, limit],
   );
@@ -92,7 +93,10 @@ export async function paidBookingsOfSession(sessionId, client = null) {
     `select b.id, b.charged_pence, b.refunded_pence, b.host_pence, b.confirmed_happened,
             array(select bs2.session_id::text from booking_sessions bs2 where bs2.booking_id = b.id and bs2.state in ('booked', 'forfeited')) as session_ids
        from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
-      where bs.session_id = $1 and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded')`,
+      where bs.session_id = $1 and bs.state in ('booked', 'forfeited') and b.payment_state in ('charged', 'partially_refunded')
+        -- Only money that reached the host's own balance (L1). A booking charged the old way, on Epic's balance,
+        -- is never paid out from the host's: those rows wait to be voided (owner, 3 Oct 2026).
+        and b.charge_model = 'destination'`,
     [sessionId],
   );
   return rows;
@@ -138,10 +142,12 @@ export async function schedulePayout({ sessionId, offerId, hostId, endsAt, relea
 /** Payouts whose release time has come, or that are held and may have cleared. */
 export async function payoutsDue({ now = new Date(), limit = 100 } = {}) {
   const { rows } = await query(
-    `select p.*, h.household_id, h.stripe_account_id, h.payouts_state, h.tax_reference, h.paused,
+    `select p.*, h.household_id, h.stripe_account_id, h.payouts_state, h.tax_reference, h.paused, h.stripe_account_model, h.stripe_payouts_manual,
             ((coalesce(s.ends_on, s.on_date) + coalesce(s.ends_at, s.starts_at, time '23:59'))
                at time zone coalesce(o.time_zone, 'Europe/London')) as session_ends_at,
             exists (select 1 from hosting_complaints k where k.session_id = p.session_id and k.state = 'open') as complaint_open,
+            exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+                     where bs.session_id = p.session_id and b.dispute_state = 'open') as dispute_open,
             exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                      where bs.session_id = p.session_id and bs.state = 'booked' and b.confirmed_happened = 'yes') as guest_confirmed,
             exists (select 1 from booking_sessions bs join host_reviews r on r.booking_id = bs.booking_id
@@ -174,7 +180,7 @@ export async function claimPayout(id, { by }) {
       [id, by],
     );
     if (!p) return null;
-    await c.query(`update booking_tips set payout_id = $1 where host_id = $2 and state = 'paid' and payout_id is null`, [id, p.host_id]);
+    await c.query(`update booking_tips set payout_id = $1 where host_id = $2 and state = 'paid' and payout_id is null and charge_model = 'destination'`, [id, p.host_id]);
     // Every tip this payout carries, including any put on it when it was made.
     const { rows: [{ pence: tipsPence }] } = await c.query(`select coalesce(sum(amount_pence), 0)::int as pence from booking_tips where payout_id = $1`, [id]);
     const { rows: [withTips] } = await c.query('update host_payouts set tips_pence = $2 where id = $1 returning *', [id, tipsPence]);
@@ -192,22 +198,49 @@ export async function holdPayout(id, reason) {
   return row ?? null;
 }
 
-export async function finishPayout(id, { state, stripeTransfer = null, mode = 'test' }) {
+/** A released payout's outcome: 'paid' with Stripe's Payout id (made on the host's own account), or 'failed'. */
+export async function finishPayout(id, { state, stripePayout = null, mode = 'test' }) {
   const { rows: [row] } = await query(
-    `update host_payouts set state = $2, stripe_transfer = coalesce($3, stripe_transfer), mode = $4, updated_at = now()
+    `update host_payouts set state = $2, stripe_payout = coalesce($3, stripe_payout), mode = $4, updated_at = now()
       where id = $1 and state = 'released' returning *`,
-    [id, state, stripeTransfer, mode],
+    [id, state, stripePayout, mode],
   );
+  return row ?? null;
+}
+
+/**
+ * Stripe's word on a payout after it was made (the Connect webhook): one that
+ * bounced at the host's bank is failed, for a person to look at; one that
+ * landed stays paid. Matched on the account as well as the id, so another
+ * host's event can never touch it.
+ */
+export async function markPayoutOutcome({ stripePayout, accountId, paid, failure = null }) {
+  if (paid) return null;
+  const { rows: [row] } = await query(
+    `update host_payouts p set state = 'failed', hold_reason = $3, updated_at = now()
+       from hosts h
+      where p.stripe_payout = $1 and h.id = p.host_id and h.stripe_account_id = $2 and p.state = 'paid' returning p.*`,
+    [stripePayout, accountId, failure ? `payout_failed:${String(failure).slice(0, 40)}` : 'payout_failed'],
+  );
+  return row ?? null;
+}
+
+/** A chargeback opened or closed on a booking's payment. Open, the session's payout waits (L3). */
+export async function markDispute({ paymentIntent, open, status = null }) {
+  const state = open ? 'open' : status === 'won' ? 'won' : status === 'lost' ? 'lost' : null;
+  if (!state) return null;
+  const { rows: [row] } = await query('update experience_bookings set dispute_state = $2 where stripe_payment_intent = $1 returning id', [paymentIntent, state]);
   return row ?? null;
 }
 
 /** Ledger rows Stripe has a record of, from the last `days` days, to reconcile. */
 export async function rowsToReconcile({ days = 3, limit = 500 } = {}) {
   const { rows } = await query(
-    `select id, kind, amount_pence, state, stripe_ref, household_id, stripe_match
-       from hosting_payments
-      where stripe_ref is not null and mode = 'test' and updated_at > now() - make_interval(days => $1)
-      order by updated_at desc limit $2`,
+    // A payout lives on the host's own account, so its account comes with it.
+    `select p.id, p.kind, p.amount_pence, p.state, p.stripe_ref, p.household_id, p.stripe_match, h.stripe_account_id
+       from hosting_payments p left join hosts h on h.id = p.host_id
+      where p.stripe_ref is not null and p.mode = 'test' and p.updated_at > now() - make_interval(days => $1)
+      order by p.updated_at desc limit $2`,
     [days, limit],
   );
   return rows;
@@ -239,7 +272,7 @@ export async function scheduleTipPayouts({ now = new Date(), releaseHours = 72 }
   const { rows } = await query(
     `select host_id, array_agg(id) as ids, sum(amount_pence)::int as pence, min(created_at) as first_at
        from booking_tips t
-      where t.state = 'paid' and t.payout_id is null and t.created_at <= $1::timestamptz - make_interval(hours => $2::int)
+      where t.state = 'paid' and t.payout_id is null and t.charge_model = 'destination' and t.created_at <= $1::timestamptz - make_interval(hours => $2::int)
         and not exists (select 1 from host_payouts p where p.host_id = t.host_id and p.state in ('scheduled', 'held'))
       group by host_id`,
     [now, releaseHours],

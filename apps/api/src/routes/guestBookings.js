@@ -372,6 +372,8 @@ async function book({ offerId, body, household, account, invite = null }) {
       const price = priceFor(o, when.kind, { adults: check.adults, children: check.children }, when.sessionIds.length);
       const paid = price.valuePence > 0 && paidThroughEpic(o);
       if (paid && !stripe.stripeStatus().ready) throw refuse(503, 'payments_not_open', 'Paying for events opens soon.');
+      // L1: the guest's money goes into the host's own Stripe account, so a paid booking needs one that can take it.
+      if (paid && !hostCanBeCharged(host)) throw refuse(409, 'host_not_ready', 'This host can’t take payments just now.');
       // The host-link rate only with the host's own token, or the event's own link — never because the request says so (Codex, 2 Oct 2026).
       const hostLink = typeof body.hostLink === 'string' ? body.hostLink.slice(0, 64) : null;
       const viaHostLink = Boolean((hostLink && host.link_token && hostLink === host.link_token) || (linkToken && o.link_token && linkToken === o.link_token));
@@ -384,15 +386,16 @@ async function book({ offerId, body, household, account, invite = null }) {
         `insert into experience_bookings
            (offer_id, host_id, household_id, heads, party, state, amount_pence, booking_kind, request_state, respond_by,
             requested_date, requested_time, requested_length_min, payment_state, refund_policy, refund_terms, answers, adult_confirmed,
-            source, via_host_link, price_lines, gross_pence, discount_pence, value_pence, fee_rate_pct, fee_reason, fee_pence, host_pence)
-         values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,'none',$14,$15::jsonb,$16::jsonb,$17,$18,$19,$20::jsonb,$21,$22,$23,$24,$25,$26,$27)
+            source, via_host_link, price_lines, gross_pence, discount_pence, value_pence, fee_rate_pct, fee_reason, fee_pence, host_pence, charge_model)
+         values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,'none',$14,$15::jsonb,$16::jsonb,$17,$18,$19,$20::jsonb,$21,$22,$23,$24,$25,$26,$27,$28)
          returning *`,
         [o.id, host.id, household.id, check.heads, JSON.stringify([...Array(check.adults)].map(() => ({ child: false })).concat(party.children.map((k) => ({ name: k.name, child: true })))),
           paid || asked ? 'pending' : 'confirmed', price.valuePence, when.kind, asked ? 'asked' : null, asked ? new Date(Date.now() + askHours * 3_600_000) : null,
           when.slot?.date ?? null, when.slot?.time ?? null, when.slot?.length ?? null,
           policy, JSON.stringify(policy ? s.refund_terms?.[policy] ?? null : null), JSON.stringify(cleanAnswers(body.answers, o.guest_questions)), party.adultConfirmed,
           invite ? 'invite' : viaHostLink ? 'link' : ['search', 'profile', 'collection', 'web'].includes(body.source) ? body.source : 'search', viaHostLink,
-          JSON.stringify(price.lines), price.grossPence, price.discountPence, price.valuePence, fee.ratePct, fee.reason, fee.feePence, fee.hostPence],
+          JSON.stringify(price.lines), price.grossPence, price.discountPence, price.valuePence, fee.ratePct, fee.reason, fee.feePence, fee.hostPence,
+          paid ? 'destination' : null],
       );
       for (const id of when.sessionIds) await c.query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, id]);
       // A one-session booking names its session too, so each weekly session is its own rated event on the fee ladder (Codex, 2 Oct 2026).
@@ -420,7 +423,10 @@ async function book({ offerId, body, household, account, invite = null }) {
     }
     let pi;
     try {
-      pi = await stripe.paymentIntent({ amountPence: b.value_pence, bookingId: b.id, offerId: o.id, householdId: b.household_id, hold: asked, email: account?.email ?? null, idempotencyKey: `booking-${b.id}` });
+      pi = await stripe.paymentIntent({
+        amountPence: b.value_pence, destination: host.stripe_account_id, applicationFeePence: b.fee_pence ?? 0,
+        bookingId: b.id, offerId: o.id, householdId: b.household_id, hold: asked, email: account?.email ?? null, idempotencyKey: `booking-${b.id}`,
+      });
     } catch (err) {
       // Stripe said no or couldn't be reached: the places go back at once rather than waiting on a payment that can't start (Codex, 2 Oct 2026).
       await query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'payment_setup_failed' where id = $1 and state = 'pending'`, [b.id]);
@@ -448,6 +454,13 @@ async function restoreWaitlist(bookingId) {
     [bookingId],
   );
 }
+
+/**
+ * Can a guest's card be charged to this host's account (L1)? An account made
+ * the L1 way, that Stripe says can take card payments. An account from before
+ * this build took money on Epic's balance and is never charged to again.
+ */
+export const hostCanBeCharged = (h) => Boolean(h?.stripe_account_id && h.stripe_account_model === 'v2' && h.stripe_charges_enabled);
 
 /** A booking is on: the guest and the host are told. */
 async function confirmed(b, o, host) {
@@ -536,7 +549,12 @@ async function applyTipIntent(pi) {
   }
   if (pi.status !== 'succeeded') return null;
   const { rows: [t] } = await query(`update booking_tips set state = 'paid' where id = $1 and stripe_ref = $2 and state = 'pending' returning *`, [tipId, pi.id]);
-  if (!t) return null;
+  if (!t) return refundLateTip(tipId, pi);
+  return creditTip(t, pi);
+}
+
+/** A tip that is paid: on the ledger, and the host told. */
+async function creditTip(t, pi) {
   await ledger.record({ kind: 'tip', bookingId: t.booking_id, offerId: t.offer_id, hostId: t.host_id, householdId: t.household_id, amountPence: t.amount_pence + t.admin_fee_pence, epicPence: t.admin_fee_pence, hostPence: t.amount_pence, state: 'succeeded', stripeRef: pi.id, mode: 'test', reason: 'tip' });
   const h = await repo.hostById(t.host_id);
   await notifications.notify({ householdId: h.household_id, kind: 'new_tip', title: `A £${(t.amount_pence / 100).toFixed(2)} tip`, link: '/host/reviews?tab=tips', dedupeKey: `tip:${t.id}` }).catch(() => null);
@@ -546,6 +564,38 @@ async function applyTipIntent(pi) {
 async function tipFeeRule() {
   const t = (await settingsRepo.current()).tip_admin_fee;
   return t && Number.isFinite(Number(t.pct)) && Number.isFinite(Number(t.minPence)) ? { pct: Number(t.pct), minPence: Number(t.minPence) } : null;
+}
+
+/**
+ * A tip charged after it had been given up on: its card failed, or it was left,
+ * and the guest may have tipped again since. Money taken on a tip that is no
+ * longer the booking's tip is neither the host's nor Epic's, so it goes back
+ * in full, on a refund line that says why (Hosting v7 handover, owner's
+ * decision, 3 Oct 2026: "refund it automatically … reason 'duplicate tip'").
+ * Queued like every refund, once — the idempotency key is the tip's own.
+ */
+async function refundLateTip(tipId, pi) {
+  // No other tip on the booking (the guest only tried this card again): it is the tip after all, and counts.
+  // The unique index on one live tip a booking makes this lose cleanly to a second tip made at the same moment.
+  const { rows: [revived] } = await query(
+    `update booking_tips t set state = 'paid' where t.id = $1 and t.stripe_ref = $2 and t.state = 'failed'
+       and not exists (select 1 from booking_tips o where o.booking_id = t.booking_id and o.id <> t.id and o.state in ('pending', 'paid'))
+     returning *`,
+    [tipId, pi.id],
+  ).catch((err) => { if (err.code === '23505') return { rows: [] }; throw err; });
+  if (revived) return creditTip(revived, pi);
+  const { rows: [t] } = await query(`select * from booking_tips where id = $1 and stripe_ref = $2 and state = 'failed'`, [tipId, pi.id]);
+  if (!t || !t.booking_id) return null;
+  const amount = Number(pi.amount_received ?? 0);
+  if (amount <= 0) return null;
+  await query(
+    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, epic_pence, host_pence,
+                                   state, mode, reason, cause, idem_key, refund_of, tip_id)
+     select 'refund', $1, $2, $3, $4, $5, 0, 0, 'pending', 'test', 'duplicate tip', 'duplicate_tip', $6, $7, $8
+      where not exists (select 1 from hosting_payments where idem_key = $6)`,
+    [t.booking_id, t.offer_id, t.host_id, t.household_id, amount, `duplicate_tip:${t.id}`, pi.id, t.id],
+  );
+  return t.id;
 }
 
 router.post('/booked/:id/payment', async (req, res, next) => {
@@ -1160,6 +1210,9 @@ router.post('/booked/:id/tip', async (req, res, next) => {
     const fee = tipFee(amount, s);
     if (fee == null) throw refuse(503, 'fees_not_set', 'Tips open once Epic has finished setting its fees.');
     if (!stripe.stripeStatus().ready) throw refuse(503, 'payments_not_open', 'Paying for events opens soon.');
+    // The tip is a destination charge too (K3b, L1): all of it to the host's own account, the admin fee as Epic's application fee.
+    const tipHost = await repo.hostById(b.host_id);
+    if (!hostCanBeCharged(tipHost)) throw refuse(409, 'host_not_ready', 'This host can’t take tips just now.');
     // A tip started and left (the payment sheet closed) frees the booking after half an hour — its PaymentIntent is
     // cancelled first, so it can never be paid alongside a new one (Codex, 2 Oct 2026).
     const { rows: [stale] } = await query(`select * from booking_tips where booking_id = $1 and state = 'pending' and created_at < now() - interval '30 minutes'`, [b.id]);
@@ -1173,7 +1226,7 @@ router.post('/booked/:id/tip', async (req, res, next) => {
     }
     // One a booking, held by the database: a double tap can't make two (Codex, 2 Oct 2026).
     const { rows: [t] } = await query(
-      `insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence) values ($1, $2, $3, $4, $5, $6)
+      `insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence, charge_model) values ($1, $2, $3, $4, $5, $6, 'destination')
        on conflict (booking_id) where state in ('pending', 'paid') do nothing returning *`,
       [b.id, b.offer_id, b.host_id, household.id, amount, fee],
     );
@@ -1190,7 +1243,7 @@ router.post('/booked/:id/tip', async (req, res, next) => {
       throw refuse(409, 'tipped', 'You’ve tipped on this one.');
     }
     let pi;
-    try { pi = await stripe.paymentIntent({ amountPence: amount + fee, bookingId: b.id, offerId: b.offer_id, householdId: household.id, idempotencyKey: `tip-${t.id}`, kind: 'tip', tipId: t.id }); }
+    try { pi = await stripe.paymentIntent({ amountPence: amount + fee, destination: tipHost.stripe_account_id, applicationFeePence: fee, bookingId: b.id, offerId: b.offer_id, householdId: household.id, idempotencyKey: `tip-${t.id}`, kind: 'tip', tipId: t.id }); }
     catch (err) {
       // A tip that never reached Stripe is not a tip: the guest may try again (Codex, 2 Oct 2026).
       await query(`update booking_tips set state = 'failed' where id = $1 and stripe_ref is null`, [t.id]);

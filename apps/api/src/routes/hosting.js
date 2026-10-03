@@ -1067,6 +1067,10 @@ router.post('/host/offers/:id/resume', async (req, res, next) => {
 router.post('/host/offers/:id/cancel', async (req, res, next) => {
   try {
     const { host, offer } = await myOffer(req.params.id);
+    // A lane event is cancelled from its own page, whose refunds go through Stripe (bookingMoney.cancelSessions).
+    // This older path only marks bookings refunded; on a lane event it would tell guests they had their money back
+    // when nothing had moved (Hosting v7 handover, 3 Oct 2026).
+    notALane(offer);
     const note = str(req.body?.note, 300) ?? `${host.name} called this off.`;
     const { offer: ended, bookings } = await repo.cancelOfferAndRefund(offer.id, note);
     const told = await tellBooked(bookings, `${offer.title ?? 'Your booking'} has been called off. ${note} Anything paid is refunded to the card it was paid with.`);

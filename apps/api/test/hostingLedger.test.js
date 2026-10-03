@@ -137,8 +137,10 @@ async function aPaidSession({ endedHoursAgo = 2, tax = 'QQ123456C', ready = true
   const { household: h } = await aHousehold(query);
   const { household: guest } = await aHousehold(query);
   const { rows: [host] } = await query(
-    `insert into hosts (household_id, name, tax_reference, stripe_account_id, payouts_state) values ($1, 'Tom', $2, $3, $4) returning *`,
-    [h.id, tax, ready ? 'acct_test_9' : null, ready ? 'ready' : 'none'],
+    // An account made the L1 way: Accounts v2, card payments on, manual payouts (register L, 3 Oct 2026).
+    `insert into hosts (household_id, name, tax_reference, stripe_account_id, payouts_state, stripe_account_model, stripe_charges_enabled, stripe_payouts_manual)
+     values ($1, 'Tom', $2, $3, $4, $5, $6, $6) returning *`,
+    [h.id, tax, ready ? 'acct_test_9' : null, ready ? 'ready' : 'none', ready ? 'v2' : null, ready],
   );
   const { rows: [offer] } = await query(`insert into host_offers (host_id, shape, lane, state, title) values ($1, 'series', 'course', 'live', 'Swim') returning *`, [host.id]);
   const ended = new Date(Date.now() - endedHoursAgo * 3_600_000);
@@ -150,8 +152,8 @@ async function aPaidSession({ endedHoursAgo = 2, tax = 'QQ123456C', ready = true
     sessions.push(s);
   }
   const { rows: [b] } = await query(
-    `insert into experience_bookings (offer_id, host_id, household_id, payment_state, charged_pence, host_pence, fee_pence, value_pence)
-     values ($1, $2, $3, 'charged', 10000, 8000, 2000, 10000) returning *`,
+    `insert into experience_bookings (offer_id, host_id, household_id, payment_state, charged_pence, host_pence, fee_pence, value_pence, charge_model)
+     values ($1, $2, $3, 'charged', 10000, 8000, 2000, 10000, 'destination') returning *`,
     [offer.id, host.id, guest.id],
   );
   for (const s of sessions) await query(`insert into booking_sessions (booking_id, session_id) values ($1, $2)`, [b.id, s.id]);
@@ -167,20 +169,20 @@ test('a payout is made once per session, released 72 hours on, and never twice',
   assert.equal(payouts.length, 1, 'one row a session, however often the job runs');
   assert.equal(payouts[0].amount_pence, 8000);
   const transfers = [];
-  const transfer = async (t) => { transfers.push(t); return { id: `tr_${transfers.length}` }; };
+  const transfer = async (t) => { transfers.push(t); return { id: `po_${transfers.length}` }; };
   const status = () => ({ ready: true, mode: 'test' });
-  await money.releasePayouts({ transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
   assert.equal(transfers.length, 0, 'two hours after: waiting');
 
   // A guest says it happened: released early (the setting is on).
   await query(`update experience_bookings set confirmed_happened = 'yes' where id = $1`, [booking.id]);
-  await money.releasePayouts({ transfer, status });
-  await money.releasePayouts({ transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
   assert.equal(transfers.length, 1, 'once');
-  assert.deepEqual([transfers[0].amountPence, transfers[0].destination, transfers[0].idempotencyKey], [8000, 'acct_test_9', `payout-${payouts[0].id}`]);
+  assert.deepEqual([transfers[0].amountPence, transfers[0].accountId, transfers[0].idempotencyKey], [8000, 'acct_test_9', `payout-${payouts[0].id}`]);
   const { rows: [paid] } = await query('select * from host_payouts where id = $1', [payouts[0].id]);
-  assert.deepEqual([paid.state, paid.released_by, paid.stripe_transfer], ['paid', 'guest_confirmed', 'tr_1']);
-  const { rows: [row] } = await query(`select * from hosting_payments where kind = 'payout' and stripe_ref = 'tr_1'`);
+  assert.deepEqual([paid.state, paid.released_by, paid.stripe_payout], ['paid', 'guest_confirmed', 'po_1']);
+  const { rows: [row] } = await query(`select * from hosting_payments where kind = 'payout' and stripe_ref = 'po_1'`);
   assert.equal(row.host_id, host.id);
   const { rows: told } = await query(`select * from notifications where household_id = $1 and kind = 'payout_sent'`, [host.household_id]);
   assert.equal(told.length, 1);
@@ -189,15 +191,15 @@ test('a payout is made once per session, released 72 hours on, and never twice',
 test('a complaint, missing tax or an unfinished Stripe account holds a payout, and the host is told once', async () => {
   settings.forget();
   const transfers = [];
-  const transfer = async (t) => { transfers.push(t); return { id: `tr_x${transfers.length}` }; };
+  const transfer = async (t) => { transfers.push(t); return { id: `po_x${transfers.length}` }; };
   const status = () => ({ ready: true, mode: 'test' });
   const a = await aPaidSession({ endedHoursAgo: 100 });
   await query(`insert into hosting_complaints (session_id, booking_id, host_id, reason) values ($1, $2, $3, 'It never started')`, [a.sessions[0].id, a.booking.id, a.host.id]);
   const b = await aPaidSession({ endedHoursAgo: 100, tax: null });
   const c = await aPaidSession({ endedHoursAgo: 100, ready: false });
   await money.schedulePayouts();
-  await money.releasePayouts({ transfer, status });
-  await money.releasePayouts({ transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
   const held = async (x) => (await query('select state, hold_reason from host_payouts where session_id = $1', [x.sessions[0].id])).rows[0];
   assert.deepEqual(await held(a), { state: 'held', hold_reason: 'complaint' });
   assert.deepEqual(await held(b), { state: 'held', hold_reason: 'tax_details' });
@@ -208,13 +210,13 @@ test('a complaint, missing tax or an unfinished Stripe account holds a payout, a
 
   // Resolved: it goes.
   await query(`update hosting_complaints set state = 'resolved' where session_id = $1`, [a.sessions[0].id]);
-  await money.releasePayouts({ transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
   assert.equal((await held(a)).state, 'paid');
 
   // Stripe not ready (a live key, or none): nothing moves at all.
   const d = await aPaidSession({ endedHoursAgo: 100 });
   await money.schedulePayouts();
-  const r = await money.releasePayouts({ transfer, status: () => ({ ready: false }) });
+  const r = await money.releasePayouts({ payout: transfer, status: () => ({ ready: false }) });
   assert.equal(r.skipped, 'stripe_not_ready');
   assert.equal((await held(d)).state, 'scheduled');
 });
@@ -222,18 +224,18 @@ test('a complaint, missing tax or an unfinished Stripe account holds a payout, a
 test('the owner releases a held payout over a complaint, never over missing tax details', async () => {
   settings.forget();
   const transfers = [];
-  const transfer = async (t) => { transfers.push(t); return { id: `tr_o${transfers.length}` }; };
+  const transfer = async (t) => { transfers.push(t); return { id: `po_o${transfers.length}` }; };
   const status = () => ({ ready: true, mode: 'test' });
   const a = await aPaidSession({ endedHoursAgo: 2 });
   await query(`insert into hosting_complaints (session_id, booking_id, host_id, reason) values ($1, $2, $3, 'Late start')`, [a.sessions[0].id, a.booking.id, a.host.id]);
   const b = await aPaidSession({ endedHoursAgo: 100, tax: null });
   await money.schedulePayouts();
-  await money.releasePayouts({ transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
   const row = async (x) => (await query('select id, state, released_by from host_payouts where session_id = $1', [x.sessions[0].id])).rows[0];
   assert.equal(transfers.filter((t) => [a, b].some((x) => x.host.id === t.hostId)).length, 0, 'not due, and a complaint is open');
   // The owner's Release (hostingAdmin): scheduled now, released_by owner — before the 72 hours and over the complaint.
   for (const x of [a, b]) await query(`update host_payouts set state = 'scheduled', release_at = now(), released_by = 'owner', hold_reason = null where id = $1`, [(await row(x)).id]);
-  await money.releasePayouts({ transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
   assert.deepEqual([(await row(a)).state, (await row(a)).released_by], ['paid', 'owner']);
   assert.equal((await row(b)).state, 'held', 'no tax details, no transfer, whoever says so');
   assert.equal((await row(b)).released_by, null, 'held again, the owner’s release is spent');
@@ -242,7 +244,7 @@ test('the owner releases a held payout over a complaint, never over missing tax 
   await query(`insert into hosting_complaints (session_id, booking_id, host_id, reason) values ($1, $2, $3, 'Raised after')`, [a.sessions[0].id, a.booking.id, a.host.id]);
   // As the Retry route leaves it (hostingAdmin.test checks the route itself).
   await query(`update host_payouts set state = 'scheduled', hold_reason = null, released_by = null where id = $1`, [(await row(a)).id]);
-  await money.releasePayouts({ transfer, status });
+  await money.releasePayouts({ payout: transfer, status });
   assert.equal((await row(a)).state, 'held');
 });
 
@@ -282,14 +284,14 @@ test('an incident can’t be deleted', async () => {
   await assert.rejects(() => query('delete from session_incidents where id = $1', [i.id]), /never deleted/);
 });
 
-test('Codex: a payout claimed by a run that died is picked up again, with the same transfer key', async () => {
+test('Codex: a payout claimed by a run that died is picked up again, with the same payout key', async () => {
   settings.forget();
   const { sessions: [s] } = await aPaidSession({ endedHoursAgo: 100 });
   await money.schedulePayouts();
   const { rows: [p] } = await query('select * from host_payouts where session_id = $1', [s.id]);
   await query(`update host_payouts set state = 'released', released_by = 'time', updated_at = now() - interval '20 minutes' where id = $1`, [p.id]);
   const keys = [];
-  await money.releasePayouts({ transfer: async (t) => { keys.push(t.idempotencyKey); return { id: 'tr_resumed' }; }, status: () => ({ ready: true }) });
+  await money.releasePayouts({ payout: async (t) => { keys.push(t.idempotencyKey); return { id: 'po_resumed' }; }, status: () => ({ ready: true }) });
   assert.equal(keys.filter((k) => k === `payout-${p.id}`).length, 1, 'once, with its own key');
   assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'paid');
 });
@@ -300,7 +302,7 @@ test('Codex: Stripe unreachable leaves a payout released for the next run, not f
   await money.schedulePayouts();
   const { rows: [p] } = await query('select * from host_payouts where session_id = $1', [s.id]);
   await query(`update host_payouts set release_at = now() - interval '1 hour' where id = $1`, [p.id]);
-  await money.releasePayouts({ transfer: async () => { throw Object.assign(new Error('x'), { code: 'stripe_unreachable' }); }, status: () => ({ ready: true }) });
+  await money.releasePayouts({ payout: async () => { throw Object.assign(new Error('x'), { code: 'stripe_unreachable' }); }, status: () => ({ ready: true }) });
   assert.equal((await query('select state from host_payouts where id = $1', [p.id])).rows[0].state, 'released');
 });
 
@@ -326,11 +328,57 @@ test('Codex: a tip that comes after the last payout gets a payout of its own', a
   const { host, offer, booking } = await aPaidSession({ endedHoursAgo: 300 });
   await money.schedulePayouts();
   await query(`update host_payouts set state = 'paid' where host_id = $1`, [host.id]);
-  await query(`insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence, state, created_at) values ($1, $2, $3, $4, 500, 30, 'paid', now() - interval '100 hours')`, [booking.id, offer.id, host.id, booking.household_id]);
+  await query(`insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence, charge_model, state, created_at) values ($1, $2, $3, $4, 500, 30, 'destination', 'paid', now() - interval '100 hours')`, [booking.id, offer.id, host.id, booking.household_id]);
   await money.schedulePayouts();
   const keys = [];
-  await money.releasePayouts({ transfer: async (t) => { keys.push(t); return { id: 'tr_tip' }; }, status: () => ({ ready: true }) });
+  await money.releasePayouts({ payout: async (t) => { keys.push(t); return { id: 'po_tip' }; }, status: () => ({ ready: true }) });
   const mine = keys.filter((t) => t.hostId === host.id);
   assert.equal(mine.length, 1);
   assert.equal(mine[0].amountPence, 500, 'the tip, whole');
+});
+
+test('L3: a released payout is a Payout on the host’s own account; a chargeback or a non-manual account holds it; uncleared money waits', async () => {
+  settings.forget();
+  const status = () => ({ ready: true, mode: 'test' });
+  const row = async (sessionId) => (await query('select * from host_payouts where session_id = $1', [sessionId])).rows[0];
+
+  // An open chargeback holds the payout, and the owner's Release does not override the guest's bank.
+  const a = await aPaidSession({ endedHoursAgo: 100 });
+  await query(`update experience_bookings set dispute_state = 'open' where id = $1`, [a.booking.id]);
+  await money.schedulePayouts();
+  await query(`update host_payouts set released_by = 'owner' where session_id = $1`, [a.sessions[0].id]);
+  const made = [];
+  await money.releasePayouts({ payout: async (p) => { made.push(p); return { id: `po_${made.length}` }; }, status });
+  assert.deepEqual([(await row(a.sessions[0].id)).state, (await row(a.sessions[0].id)).hold_reason], ['held', 'dispute']);
+  assert.equal(made.filter((p) => p.accountId === a.host.stripe_account_id).length, 0);
+
+  // Won: it goes, as a Payout on the host's own account for the released amount only.
+  await query(`update experience_bookings set dispute_state = 'won' where id = $1`, [a.booking.id]);
+  await money.releasePayouts({ payout: async (p) => { made.push(p); return { id: `po_${made.length}` }; }, status });
+  const aRow = await row(a.sessions[0].id);
+  const paid = made.find((p) => p.payoutId === aRow.id);
+  assert.ok(paid, 'paid once the dispute is closed');
+  assert.deepEqual([paid.accountId, paid.amountPence], [a.host.stripe_account_id, 8000]);
+  assert.equal((await row(a.sessions[0].id)).stripe_payout, `po_${made.length}`);
+
+  // An account Stripe shows off manual payouts is held for a person rather than paid.
+  const b = await aPaidSession({ endedHoursAgo: 100 });
+  await query(`update hosts set stripe_payouts_manual = false where id = $1`, [b.host.id]);
+  await money.schedulePayouts();
+  await money.releasePayouts({ payout: async (p) => { made.push(p); return { id: `po_${made.length}` }; }, status });
+  assert.deepEqual([(await row(b.sessions[0].id)).state, (await row(b.sessions[0].id)).hold_reason], ['held', 'not_manual']);
+
+  // Money in the host's balance that has not cleared yet: the payout waits, released, for the next run — not failed.
+  const c = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  await money.releasePayouts({ payout: async () => { throw Object.assign(new Error('x'), { code: 'funds_pending' }); }, status });
+  assert.equal((await row(c.sessions[0].id)).state, 'released');
+});
+
+test('L1: a booking charged the old way, on Epic’s balance, is never paid out from the host’s', async () => {
+  settings.forget();
+  const old = await aPaidSession({ endedHoursAgo: 100 });
+  await query(`update experience_bookings set charge_model = null where id = $1`, [old.booking.id]);
+  await money.schedulePayouts();
+  assert.equal((await query('select count(*)::int as n from host_payouts where session_id = $1', [old.sessions[0].id])).rows[0].n, 0, 'no payout row: those rows wait to be voided');
 });

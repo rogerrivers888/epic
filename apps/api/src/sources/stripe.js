@@ -1,10 +1,23 @@
 /**
- * Stripe, for hosting (Epic hosting v7, RULINGS › Payments).
+ * Stripe, for hosting (Epic hosting v7, RULINGS › Payments; register L, 3 Oct 2026).
  *
- *   · Payouts are Stripe Connect's hosted onboarding (an Express account and an
- *     account link). Epic never collects a sort code or an account number.
- *   · Verified is Stripe Identity: a hosted verification session, passport or
- *     UK driving licence plus a selfie. Epic sees the result, never the document.
+ *   · **Epic never holds booking money (L1).** A guest's payment is a
+ *     destination charge: `transfer_data.destination` and `on_behalf_of` are the
+ *     host's own connected account, and Epic's fee is the application fee
+ *     (L2). Separate charges and transfers — the guest's money on Epic's
+ *     balance, passed on later — is the escrow pattern the FCA says needs
+ *     authorisation, so this file has no way to make a transfer at all.
+ *   · Epic holds the timing, not the money (L3): every host account is on
+ *     manual payouts, set here at creation, and a released payout is a Payout
+ *     made on the host's own account for the released amount only.
+ *   · Host accounts are Accounts v2 (`/v2/core/accounts`): Stripe refuses v1
+ *     creation for this platform. Express dashboard, Epic collects fees and
+ *     carries losses, Stripe collects the details through its hosted form
+ *     (L6). Payout settings are v1-only, so the schedule is set through v1.
+ *   · Verified is Stripe Identity: passport plus a selfie (L7). For a host
+ *     with an account it is tied to the account's Person (`related_person`),
+ *     which Stripe only allows before the first onboarding link is made.
+ *     Epic sees the result, never the document.
  *   · The private host's £10 and joining Pro are a hosted Checkout.
  *
  * **Test mode only.** Going live, or anything that spends money — an Identity
@@ -21,8 +34,10 @@
 import crypto from 'node:crypto';
 import * as providerCalls from '../repositories/providerCalls.js';
 
-const BASE = (process.env.STRIPE_API_BASE || 'https://api.stripe.com').replace(/\/$/, '') + '/v1';
+const ROOT = () => (process.env.STRIPE_API_BASE || 'https://api.stripe.com').replace(/\/$/, '');
 const PROVIDER = 'stripe';
+/** Accounts v2 is versioned on its own; payments stay on the v1 version this file was written against. */
+const V2_VERSION = () => process.env.STRIPE_API_VERSION_V2 || '2026-09-30.endive';
 
 export class StripeNotReady extends Error {
   constructor(code, message) { super(message); this.status = 503; this.code = code; }
@@ -68,15 +83,19 @@ export function formEncode(obj, prefix = '') {
  * Stripe's own short code for the back office and says something plain to the
  * caller; a raw body never reaches a phone.
  */
-async function call(method, path, params, { householdId = null, purpose, idempotencyKey = null } = {}) {
+async function call(method, path, params, { householdId = null, purpose, idempotencyKey = null, account = null, v2 = false } = {}) {
   assertReady();
   const started = Date.now();
-  const headers = { authorization: `Bearer ${process.env.STRIPE_SECRET_KEY.trim()}`, 'stripe-version': process.env.STRIPE_API_VERSION || '2024-06-20' };
-  let url = `${BASE}${path}`;
+  const headers = { authorization: `Bearer ${process.env.STRIPE_SECRET_KEY.trim()}`, 'stripe-version': v2 ? V2_VERSION() : (process.env.STRIPE_API_VERSION || '2024-06-20') };
+  // A v2 path carries its own version prefix; a v1 path is under /v1.
+  let url = `${ROOT()}${v2 ? path : `/v1${path}`}`;
   let body;
-  if (method === 'GET') { const q = formEncode(params); if (q) url += `?${q}`; }
+  if (v2) { if (method !== 'GET') { headers['content-type'] = 'application/json'; body = JSON.stringify(params ?? {}); } }
+  else if (method === 'GET') { const q = formEncode(params); if (q) url += `?${q}`; }
   else { headers['content-type'] = 'application/x-www-form-urlencoded'; body = formEncode(params); }
   if (idempotencyKey) headers['idempotency-key'] = idempotencyKey;
+  // Acting on the host's own account (a payout from their balance): Stripe's Connect header.
+  if (account) headers['stripe-account'] = account;
   let res; let j;
   try {
     res = await fetch(url, { method, headers, body });
@@ -99,36 +118,128 @@ async function call(method, path, params, { householdId = null, purpose, idempot
 // payouts: Connect, hosted onboarding
 // ---------------------------------------------------------------------------
 
-export function createConnectAccount({ email, householdId, hostId }) {
-  return call('POST', '/accounts', {
-    type: 'express', country: 'GB', email: email ?? undefined, business_type: 'individual',
-    capabilities: { transfers: { requested: true }, card_payments: { requested: true } },
-    metadata: { epic_host_id: hostId },
-  }, { householdId, purpose: 'host.payouts.account', idempotencyKey: `acct-${hostId}` });
+/**
+ * What Epic already knows about the host, in the shape Accounts v2 takes it.
+ * Only what was given to Epic (email, date of birth, the legal name split at
+ * its last space) — anything missing is left for Stripe's own form. Pre-filling
+ * is only possible before the first onboarding link (Stripe, sandbox 3 Oct 2026).
+ */
+export function prefillIndividual({ email = null, legalName = null, dateOfBirth = null } = {}) {
+  const ind = {};
+  if (email) ind.email = email;
+  const parts = String(legalName ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) { ind.given_name = parts.slice(0, -1).join(' '); ind.surname = parts[parts.length - 1]; }
+  const d = dateOfBirth ? new Date(dateOfBirth) : null;
+  if (d && !Number.isNaN(d.getTime())) ind.date_of_birth = { day: d.getUTCDate(), month: d.getUTCMonth() + 1, year: d.getUTCFullYear() };
+  return ind;
 }
 
+/** The body that makes a host's account (L2, L6, L11): exported so a test can hold it to the rules. */
+export function connectAccountBody({ hostId, email = null, legalName = null, dateOfBirth = null, displayName = null }) {
+  return {
+    contact_email: email ?? undefined,
+    display_name: displayName ?? undefined,
+    dashboard: 'express',
+    // Express needs Epic to collect fees and carry losses; Stripe still collects the host's details (L6).
+    defaults: { responsibilities: { fees_collector: 'application', losses_collector: 'application' } },
+    identity: { country: 'gb', entity_type: 'individual', individual: prefillIndividual({ email, legalName, dateOfBirth }) },
+    // Merchant, not recipient: the host is merchant of record on a destination charge with on_behalf_of (L2).
+    // Guests' statements read "EPIC* <host>" (L11).
+    configuration: { merchant: { capabilities: { card_payments: { requested: true } }, statement_descriptor: { prefix: 'EPIC' } } },
+    metadata: { epic_host_id: hostId },
+  };
+}
+
+/**
+ * A host's connected account, created in the background (L6): Accounts v2,
+ * then manual payouts set explicitly through v1 (L3) — the dashboard switch
+ * that stops hosts changing it is Stripe-side, and this does not rely on it.
+ * Returns `{ id, personId }`: the Person is what Identity is tied to (L7).
+ */
+export async function createConnectAccount({ email, householdId, hostId, legalName = null, dateOfBirth = null, displayName = null }) {
+  const a = await call('POST', '/v2/core/accounts', connectAccountBody({ hostId, email, legalName, dateOfBirth, displayName }),
+    { householdId, purpose: 'host.payouts.account', idempotencyKey: `acct-v2-${hostId}`, v2: true });
+  await setManualPayouts(a.id, { householdId });
+  const v1 = await retrieveAccount(a.id, { householdId });
+  return { id: a.id, personId: v1?.individual?.id ?? null, account: v1 };
+}
+
+/** Manual payouts (L3): money waits in the host's own balance until Epic releases it. */
+export function setManualPayouts(accountId, { householdId = null } = {}) {
+  return call('POST', `/accounts/${encodeURIComponent(accountId)}`, { settings: { payouts: { schedule: { interval: 'manual' } } } },
+    { householdId, purpose: 'host.payouts.schedule', idempotencyKey: `manual-payouts-${accountId}` });
+}
+
+/** Stripe's hosted form. Only what is due now (L6); the bank details Stripe asks for when it needs them. */
 export function accountLink({ accountId, refreshUrl, returnUrl, householdId }) {
-  return call('POST', '/account_links', { account: accountId, refresh_url: refreshUrl, return_url: returnUrl, type: 'account_onboarding' }, { householdId, purpose: 'host.payouts.link' });
+  return call('POST', '/account_links', {
+    account: accountId, refresh_url: refreshUrl, return_url: returnUrl, type: 'account_onboarding',
+    collection_options: { fields: 'currently_due' },
+  }, { householdId, purpose: 'host.payouts.link' });
 }
 
 export function retrieveAccount(accountId, { householdId } = {}) {
   return call('GET', `/accounts/${encodeURIComponent(accountId)}`, null, { householdId, purpose: 'host.payouts.read' });
 }
 
-/** Ready to be paid: Stripe has what it needs and payouts are switched on. */
-export const accountReady = (a) => Boolean(a?.details_submitted && a?.payouts_enabled);
+/**
+ * Ready to be booked and paid: Stripe has what it needs, a guest's card can be
+ * charged to the account, and payouts are switched on. A destination charge
+ * needs card payments on the host's account, so payouts alone are not enough.
+ */
+export const accountReady = (a) => Boolean(a?.details_submitted && a?.charges_enabled && a?.payouts_enabled);
+
+/** Manual payouts held: what the payout job checks before it trusts an account (L3). */
+export const payoutsManual = (a) => a?.settings?.payouts?.schedule?.interval === 'manual';
+
+/** A host row's patch from Stripe's view of their account: the payouts state the checklist reads, and the facts below. */
+export function hostPatchFromAccount(a) {
+  const f = accountFacts(a);
+  return {
+    payoutsState: accountReady(a) ? 'ready' : 'pending',
+    stripeChargesEnabled: f.chargesEnabled, stripePayoutsEnabled: f.payoutsEnabled,
+    stripePayoutsManual: f.payoutsManual, stripeRequirements: f.requirements,
+  };
+}
+
+/** The only facts Epic keeps about a host's account (brief §2): never bank details. */
+export function accountFacts(a) {
+  return {
+    chargesEnabled: Boolean(a?.charges_enabled),
+    payoutsEnabled: Boolean(a?.payouts_enabled),
+    requirements: {
+      currentlyDue: a?.requirements?.currently_due ?? [],
+      eventuallyDue: a?.requirements?.eventually_due ?? [],
+      pastDue: a?.requirements?.past_due ?? [],
+      disabledReason: a?.requirements?.disabled_reason ?? null,
+    },
+    payoutsManual: payoutsManual(a),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Verified: Identity
 // ---------------------------------------------------------------------------
 
-export function identitySession({ returnUrl, hostId, householdId }) {
-  return call('POST', '/identity/verification_sessions', {
+/**
+ * Passport and a selfie (L7). A UK photocard licence only while the setting
+ * that allows it is on — it is off (owner, 3 Oct 2026). `relatedPerson` ties
+ * the check to the host's Stripe Person so Stripe's own checks accept it; Stripe
+ * refuses it once an onboarding link has been made, so it is made first.
+ */
+export function identitySessionBody({ returnUrl, hostId, relatedPerson = null, allowDrivingLicence = false }) {
+  return {
     type: 'document',
-    options: { document: { allowed_types: ['passport', 'driving_license'], require_matching_selfie: true } },
+    options: { document: { allowed_types: allowDrivingLicence ? ['passport', 'driving_license'] : ['passport'], require_matching_selfie: true } },
+    ...(relatedPerson?.account && relatedPerson?.person ? { related_person: { account: relatedPerson.account, person: relatedPerson.person } } : {}),
     return_url: returnUrl,
     metadata: { epic_host_id: hostId },
-  }, { householdId, purpose: 'host.identity.session' });
+  };
+}
+
+export function identitySession({ returnUrl, hostId, householdId, relatedPerson = null, allowDrivingLicence = false }) {
+  return call('POST', '/identity/verification_sessions', identitySessionBody({ returnUrl, hostId, relatedPerson, allowDrivingLicence }),
+    { householdId, purpose: 'host.identity.session' });
 }
 
 export function retrieveIdentity(sessionId, { householdId } = {}) {
@@ -168,26 +279,44 @@ export function expireCheckout(id, { householdId } = {}) {
 export const checkoutPaid = (s) => s?.payment_status === 'paid';
 
 // ---------------------------------------------------------------------------
-// guests' payments: separate charges and transfers (hosting v4 §5)
+// guests' payments: destination charges to the host's own account (L1, L2)
 //
-// Epic takes the guest's payment on its own account, and the host's share goes
-// to their Connect account as a transfer when the session's payout is released
-// (72 hours after it, with no complaint). An Ask to book is a card *held* —
-// a manual-capture PaymentIntent — captured on accept and cancelled on decline
-// or timeout. Every call carries an idempotency key built from Epic's own ids,
-// so a retry can never charge, refund or pay twice.
+// The guest's money goes straight into the host's Stripe balance; Epic's fee
+// comes back to Epic as the application fee, and nothing else ever sits on
+// Epic's balance. The host's balance is on manual payouts, so Epic still decides
+// *when* it is paid out (72 hours after the session, with no complaint) — it
+// holds the timing, never the money (L3). An Ask to book is a card *held* — a
+// manual-capture PaymentIntent, the same destination charge — captured on
+// accept and cancelled on decline or timeout. Every call carries an idempotency
+// key built from Epic's own ids, so a retry can never charge, refund or pay twice.
 // ---------------------------------------------------------------------------
 
-/** A guest's payment for a booking. `hold` holds the card without charging it. */
-export function paymentIntent({ amountPence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey, kind = 'booking', tipId = null }) {
-  return call('POST', '/payment_intents', {
+/**
+ * The body of a guest's payment. Refuses outright without the host's account:
+ * a booking or tip charged to Epic's own balance is the one thing L1 forbids,
+ * so there is no fallback that would make one.
+ */
+export function paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, kind = 'booking', tipId = null }) {
+  if (!/^acct_/.test(String(destination ?? ''))) throw Object.assign(new Error('This host can’t take payments yet.'), { status: 409, code: 'host_not_ready' });
+  const fee = Math.round(Number(applicationFeePence));
+  if (!Number.isInteger(fee) || fee < 0 || fee > amountPence) throw Object.assign(new Error('Epic’s fee on this booking is not right.'), { status: 500, code: 'bad_application_fee' });
+  return {
     amount: amountPence, currency: 'gbp',
     automatic_payment_methods: { enabled: true },
     capture_method: hold ? 'manual' : 'automatic',
     receipt_email: email ?? undefined,
-    transfer_group: `booking_${bookingId}`,
-    metadata: { epic_kind: kind, epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId, ...(tipId ? { epic_tip_id: tipId } : {}) },
-  }, { householdId, purpose: kind === 'tip' ? 'booking.tip' : hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
+    // L2: a destination charge with the host as merchant of record, Epic's fee as the application fee.
+    transfer_data: { destination },
+    on_behalf_of: destination,
+    ...(fee > 0 ? { application_fee_amount: fee } : {}),
+    metadata: { epic_kind: kind, epic_booking_id: bookingId, epic_offer_id: offerId, epic_household_id: householdId, epic_charge_model: 'destination', ...(tipId ? { epic_tip_id: tipId } : {}) },
+  };
+}
+
+/** A guest's payment for a booking or a tip. `hold` holds the card without charging it. */
+export function paymentIntent({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold = false, email = null, idempotencyKey, kind = 'booking', tipId = null }) {
+  const body = paymentIntentBody({ amountPence, destination, applicationFeePence, bookingId, offerId, householdId, hold, email, kind, tipId });
+  return call('POST', '/payment_intents', body, { householdId, purpose: kind === 'tip' ? 'booking.tip' : hold ? 'booking.hold' : 'booking.charge', idempotencyKey });
 }
 
 export function retrievePaymentIntent(id, { householdId } = {}) {
@@ -204,29 +333,58 @@ export function cancelPayment(id, { householdId, idempotencyKey }) {
   return call('POST', `/payment_intents/${encodeURIComponent(id)}/cancel`, {}, { householdId, purpose: 'booking.release', idempotencyKey });
 }
 
-/** Give money back on a charged payment. `cause` is Epic's own word for why, kept in Stripe's metadata. */
-export function refund({ paymentIntentId, amountPence, cause, bookingId, householdId, idempotencyKey }) {
-  return call('POST', '/refunds', {
+/**
+ * Give money back on a destination charge. The money comes back out of the
+ * host's balance (`reverse_transfer`), and Epic's fee is given back in the same
+ * proportion (`refund_application_fee`, K11) — a full refund leaves both at
+ * nought, a part refund leaves each with the same share of what is kept.
+ * `cause` is Epic's own word for why, kept in Stripe's metadata.
+ */
+export function refundBody({ paymentIntentId, amountPence, cause, bookingId, destination = true }) {
+  return {
     payment_intent: paymentIntentId, amount: amountPence,
+    // A payment from before L1 (charged on Epic's own balance) has no transfer or fee to unwind.
+    ...(destination ? { reverse_transfer: true, refund_application_fee: true } : {}),
     metadata: { epic_kind: 'refund', epic_booking_id: bookingId, epic_cause: cause },
-  }, { householdId, purpose: 'booking.refund', idempotencyKey });
+  };
+}
+
+export function refund({ paymentIntentId, amountPence, cause, bookingId, householdId, idempotencyKey, destination = true }) {
+  return call('POST', '/refunds', refundBody({ paymentIntentId, amountPence, cause, bookingId, destination }), { householdId, purpose: 'booking.refund', idempotencyKey });
 }
 
 export function retrieveRefund(id, { householdId } = {}) {
   return call('GET', `/refunds/${encodeURIComponent(id)}`, null, { householdId, purpose: 'booking.refund.read' });
 }
 
-/** The host's share, to their Connect account, when a payout is released. */
-export function transfer({ amountPence, destination, payoutId, hostId, householdId, idempotencyKey }) {
-  return call('POST', '/transfers', {
-    amount: amountPence, currency: 'gbp', destination,
-    transfer_group: `payout_${payoutId}`,
-    metadata: { epic_kind: 'payout', epic_payout_id: payoutId, epic_host_id: hostId },
-  }, { householdId, purpose: 'host.payout.transfer', idempotencyKey });
+/**
+ * A released payout (L3): a Payout made on the host's own account, from their
+ * own balance, for the released amount only. Never a transfer from Epic.
+ * Stripe refusing for want of available funds is `funds_pending` — the money
+ * is there but not cleared yet — and the payout waits rather than failing.
+ */
+export async function payout({ accountId, amountPence, payoutId, hostId, householdId, idempotencyKey }) {
+  if (!/^acct_/.test(String(accountId ?? ''))) throw Object.assign(new Error('This host has no Stripe account.'), { status: 409, code: 'host_not_ready' });
+  try {
+    return await call('POST', '/payouts', {
+      amount: amountPence, currency: 'gbp',
+      metadata: { epic_kind: 'payout', epic_payout_id: payoutId, epic_host_id: hostId },
+    }, { householdId, purpose: 'host.payout', idempotencyKey, account: accountId });
+  } catch (err) {
+    if (err.detail === 'balance_insufficient') throw Object.assign(new Error('The money for this payout hasn’t cleared at Stripe yet.'), { status: 409, code: 'funds_pending' });
+    throw err;
+  }
 }
 
-export function retrieveTransfer(id, { householdId } = {}) {
-  return call('GET', `/transfers/${encodeURIComponent(id)}`, null, { householdId, purpose: 'host.payout.read' });
+export function retrievePayout(id, { accountId, householdId } = {}) {
+  return call('GET', `/payouts/${encodeURIComponent(id)}`, null, { householdId, purpose: 'host.payout.read', account: accountId });
+}
+
+/** What the host's own balance holds: available (can be paid out now) and pending, in pence. */
+export async function hostBalance(accountId, { householdId } = {}) {
+  const b = await call('GET', '/balance', null, { householdId, purpose: 'host.balance.read', account: accountId });
+  const gbp = (list) => (list ?? []).filter((x) => x.currency === 'gbp').reduce((n, x) => n + Number(x.amount ?? 0), 0);
+  return { availablePence: gbp(b.available), pendingPence: gbp(b.pending) };
 }
 
 /**
@@ -240,18 +398,23 @@ export function stripeView(obj) {
   switch (obj.object) {
     case 'payment_intent': return { amountPence: obj.amount_received ?? 0, ok: obj.status === 'succeeded', held: obj.status === 'requires_capture' };
     case 'refund': return { amountPence: obj.amount ?? 0, ok: obj.status === 'succeeded' };
-    case 'transfer': return { amountPence: (obj.amount ?? 0) - (obj.amount_reversed ?? 0), ok: !obj.reversed };
+    case 'payout': return { amountPence: obj.amount ?? 0, ok: ['paid', 'in_transit', 'pending'].includes(obj.status) };
     case 'checkout.session': return { amountPence: obj.amount_total ?? 0, ok: obj.payment_status === 'paid' };
     default: return null;
   }
 }
 
-/** Read whatever a ledger reference points at, by its prefix. Null for an unknown prefix. */
-export function retrieveRef(ref, { householdId } = {}) {
+/**
+ * Read whatever a ledger reference points at, by its prefix. Null for an
+ * unknown prefix — and for a transfer (`tr_`), which only the old model
+ * made: those rows are void, not something to check against (owner, 3 Oct 2026).
+ * A payout lives on the host's own account, so it needs that account.
+ */
+export function retrieveRef(ref, { householdId, accountId = null } = {}) {
   const r = String(ref ?? '');
   if (r.startsWith('pi_')) return retrievePaymentIntent(r, { householdId });
   if (r.startsWith('re_')) return retrieveRefund(r, { householdId });
-  if (r.startsWith('tr_')) return retrieveTransfer(r, { householdId });
+  if (r.startsWith('po_')) return accountId ? retrievePayout(r, { accountId, householdId }) : null;
   if (r.startsWith('cs_')) return retrieveCheckout(r, { householdId });
   return null;
 }
@@ -260,11 +423,16 @@ export function retrieveRef(ref, { householdId } = {}) {
 // webhooks
 // ---------------------------------------------------------------------------
 
+/** The signing secrets Doppler holds: the platform endpoint's and, once made, the Connect endpoint's. */
+export const webhookSecrets = () => [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET].map((s) => String(s ?? '').trim()).filter(Boolean);
+
 /**
  * Stripe's signature: `t=<ts>,v1=<hmac>` over `${t}.${raw}` with the endpoint
  * secret, inside a five-minute tolerance. Constant-time compare.
  */
-export function verifyWebhook(raw, header, secret = process.env.STRIPE_WEBHOOK_SECRET, { now = Date.now(), toleranceS = 300 } = {}) {
+export function verifyWebhook(raw, header, secret = webhookSecrets(), { now = Date.now(), toleranceS = 300 } = {}) {
+  // Two endpoints, two secrets: Epic's own events, and the hosts' accounts' (payouts, account changes) on the Connect one.
+  if (Array.isArray(secret)) return secret.some((s) => verifyWebhook(raw, header, s, { now, toleranceS }));
   if (!secret || !header) return false;
   const parts = Object.fromEntries(String(header).split(',').map((p) => p.split('=')).filter((p) => p.length === 2));
   const t = Number(parts.t);

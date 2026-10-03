@@ -34,8 +34,10 @@ const fake = http.createServer((req, res) => {
     const json = (o, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     if (req.url === '/bank.json') return json({ 'england-and-wales': { events: [{ date: '2026-12-25', title: 'Christmas Day' }, { date: '2026-12-28', title: 'Boxing Day' }, { date: '2027-01-01', title: 'New Year’s Day' }] } });
     if (req.url.startsWith('/openai/responses')) return json({ model: 'gpt-5-mini', usage: { input_tokens: 400, output_tokens: 120 }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(modelAnswer) }] }] });
-    if (req.url === '/v1/accounts' && req.method === 'POST') return json({ id: 'acct_test_1' });
-    if (req.url.startsWith('/v1/accounts/')) return json({ id: 'acct_test_1', details_submitted: true, payouts_enabled: true });
+    // Accounts v2 makes the host's account; v1 sets and reads its payout schedule (register L, 3 Oct 2026).
+    if (req.url === '/v2/core/accounts' && req.method === 'POST') return json({ id: 'acct_test_1', object: 'v2.core.account' });
+    if (req.url === '/v1/accounts' && req.method === 'POST') return json({ error: { code: 'invalid_request_error', message: 'Accounts v1 creation is refused' } }, 400);
+    if (req.url.startsWith('/v1/accounts/')) return json({ id: 'acct_test_1', details_submitted: true, charges_enabled: true, payouts_enabled: true, individual: { id: 'person_test_1' }, settings: { payouts: { schedule: { interval: 'manual' } } }, requirements: { currently_due: [], eventually_due: [], past_due: [] } });
     if (req.url === '/v1/account_links') return json({ url: 'https://connect.stripe.test/onboard' });
     if (req.url === '/v1/identity/verification_sessions' && req.method === 'POST') return json({ id: 'vs_test_1', url: 'https://verify.stripe.test/start' });
     if (req.url.startsWith('/v1/identity/verification_sessions/')) return json({ id: 'vs_test_1', status: 'verified' });
@@ -421,6 +423,14 @@ test('public: Verified and the video block review; Checked and tax wait; then it
       r = await srv.send('POST', '/api/host/lanes/payouts', { offerId: o.id });
       assert.equal(r.body.url, 'https://connect.stripe.test/onboard');
       assert.match(calls.filter((c) => c.url === '/v1/account_links').at(-1).body, /return_url=https%3A%2F%2Fapp\.epic\.test%2Fhost%2Foffers%2F/, 'they come back to the checklist');
+      // L3/L6: the account is made by Accounts v2 and put on manual payouts explicitly, before Stripe's form opens.
+      const made = calls.findIndex((c) => c.url === '/v2/core/accounts' && c.method === 'POST');
+      const manual = calls.findIndex((c) => c.url === '/v1/accounts/acct_test_1' && c.method === 'POST' && /settings%5Bpayouts%5D%5Bschedule%5D%5Binterval%5D=manual/.test(c.body));
+      const link = calls.findIndex((c) => c.url === '/v1/account_links');
+      assert.ok(made >= 0 && manual > made && link > manual, 'made, then manual payouts, then the hosted form');
+      assert.equal(calls.filter((c) => c.url === '/v1/accounts' && c.method === 'POST').length, 0, 'never Accounts v1 creation');
+      const h1 = await repo.hostByHousehold(h.id);
+      assert.deepEqual([h1.stripe_account_model, h1.stripe_person_id, h1.stripe_payouts_manual], ['v2', 'person_test_1', true]);
       r = await srv.send('POST', `/api/host/lanes/offers/${o.id}/sync`);
       assert.equal(r.body.offer.checklist.find((i) => i.key === 'verified').done, true);
       assert.equal(r.body.offer.checklist.find((i) => i.key === 'payouts').done, true);
@@ -466,17 +476,27 @@ test('Stripe’s webhook: admitted by its signature, test mode only', async () =
   const srv = await server(await anAccount(h, member));
   try {
     const host = await repo.insertHost(h.id, { name: 'Hooked' });
-    await repo.updateHost(host.id, { stripeAccountId: `acct_${host.id.slice(0, 8)}`, payoutsState: 'pending' });
-    const event = (livemode) => JSON.stringify({ type: 'account.updated', livemode, data: { object: { id: `acct_${host.id.slice(0, 8)}`, details_submitted: true, payouts_enabled: true } } });
+    await repo.updateHost(host.id, { stripeAccountId: `acct_${host.id.slice(0, 8)}`, payoutsState: 'pending', stripeAccountModel: 'v2' });
+    let n = 0;
+    const event = (livemode, id = `evt_${host.id.slice(0, 8)}_${(n += 1)}`) => JSON.stringify({ id, type: 'account.updated', livemode, data: { object: { id: `acct_${host.id.slice(0, 8)}`, details_submitted: true, charges_enabled: true, payouts_enabled: true, settings: { payouts: { schedule: { interval: 'manual' } } } } } });
     const sign = (body, secret = 'whsec_test') => { const t = Math.floor(Date.now() / 1000); return `t=${t},v1=${crypto.createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`; };
     let body = event(false);
     assert.equal((await srv.raw('/api/stripe/webhook', body, { 'content-type': 'application/json', 'stripe-signature': sign(body, 'whsec_wrong') })).status, 400);
     body = event(true);
     assert.equal((await srv.raw('/api/stripe/webhook', body, { 'content-type': 'application/json', 'stripe-signature': sign(body) })).body.ignored, 'live');
     assert.equal((await repo.hostById(host.id)).payouts_state, 'pending');
-    body = event(false);
+    body = event(false, `evt_${host.id.slice(0, 8)}_once`);
     assert.equal((await srv.raw('/api/stripe/webhook', body, { 'content-type': 'application/json', 'stripe-signature': sign(body) })).status, 200);
-    assert.equal((await repo.hostById(host.id)).payouts_state, 'ready');
+    const ready = await repo.hostById(host.id);
+    assert.deepEqual([ready.payouts_state, ready.stripe_charges_enabled, ready.stripe_payouts_manual], ['ready', true, true], 'only the facts the brief allows, never a bank detail');
+    // Stripe delivers at least once: the same event again is recognised and not applied twice.
+    await repo.updateHost(host.id, { payoutsState: 'pending' });
+    const again = await srv.raw('/api/stripe/webhook', body, { 'content-type': 'application/json', 'stripe-signature': sign(body) });
+    assert.deepEqual([again.status, again.body.duplicate], [200, true]);
+    assert.equal((await repo.hostById(host.id)).payouts_state, 'pending', 'a second delivery changes nothing');
+    // An event without Stripe's id is not one Epic can hold to once-only.
+    const bare = JSON.stringify({ type: 'account.updated', livemode: false, data: { object: {} } });
+    assert.equal((await srv.raw('/api/stripe/webhook', bare, { 'content-type': 'application/json', 'stripe-signature': sign(bare) })).status, 400);
   } finally { await srv.close(); }
 });
 
@@ -543,7 +563,7 @@ test('a Checkout paid before Epic wrote it down is still recorded by the webhook
   const srv = await server(await readyHost(h, member));
   try {
     const offer = await filledOneoff(srv);
-    const body = JSON.stringify({ type: 'checkout.session.completed', livemode: false, data: { object: { id: 'cs_race_1', mode: 'payment', status: 'complete', payment_status: 'paid', amount_total: 1000, metadata: { epic_kind: 'event', epic_offer_id: offer.id, epic_household_id: h.id } } } });
+    const body = JSON.stringify({ id: 'evt_cs_race_1', type: 'checkout.session.completed', livemode: false, data: { object: { id: 'cs_race_1', mode: 'payment', status: 'complete', payment_status: 'paid', amount_total: 1000, metadata: { epic_kind: 'event', epic_offer_id: offer.id, epic_household_id: h.id } } } });
     const t = Math.floor(Date.now() / 1000);
     const sig = `t=${t},v1=${crypto.createHmac('sha256', 'whsec_test').update(`${t}.${body}`).digest('hex')}`;
     assert.equal((await srv.raw('/api/stripe/webhook', body, { 'content-type': 'application/json', 'stripe-signature': sig })).status, 200);
@@ -572,5 +592,12 @@ test('the older offer routes refuse a lane offer: it is sent only through its ow
     assert.equal((await p.json()).error, 'use_lane_setup');
     const d = await fetch(`${base}/api/host/offers/${offer.id}`, { method: 'DELETE' });
     assert.equal((await d.json()).error, 'use_lane_setup', 'nor deleted from the old door');
+    // Nor called off from the old door: its "refund" moves no money, so on a lane event it would tell guests they
+    // had been paid back when nothing had moved (Hosting v7 handover, 3 Oct 2026). The repository refuses too.
+    await query(`update host_offers set state = 'live' where id = $1`, [offer.id]);
+    const c = await fetch(`${base}/api/host/offers/${offer.id}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal((await c.json()).error, 'use_lane_setup', 'not called off from the old door');
+    await assert.rejects(repo.cancelOfferAndRefund(offer.id, 'x'), (e) => e.code === 'use_lane_setup');
+    assert.equal((await query('select state, cancelled_at from host_offers where id = $1', [offer.id])).rows[0].cancelled_at, null, 'and nothing was ended');
   } finally { await srv.close(); await new Promise((r) => s.close(r)); }
 });

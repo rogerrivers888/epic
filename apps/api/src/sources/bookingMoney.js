@@ -118,8 +118,11 @@ export function shareOf(booking, losing) {
   return { amount: Math.min(left, Math.floor((Number(booking.charged_pence ?? 0) * n) / all)), whole: false };
 }
 
-const guestLink = () => '/trips';
-const hostLink = (offerId) => `/host/offers/${offerId}`;
+// A guest's money news opens the booking itself (routes.ts › booking), not the Plans list. A host's opens the
+// event's own page (routes.ts › hostEvent) — the lane event page, whose cancel sheet runs the lane refund path —
+// never the old per-offer screen, whose "Call it off" is not for a lane event (Hosting v7 handover, 3 Oct 2026).
+const guestLink = (bookingId) => `/bookings/${encodeURIComponent(bookingId)}`;
+const hostLink = (offerId, { sheet = null } = {}) => `/host/events/${encodeURIComponent(offerId)}${sheet ? `?sheet=${sheet}` : ''}`;
 
 async function tell(list) {
   for (const n of list) await notifications.notify(n).catch((err) => console.error(`epic-api: notification ${n.kind} — ${err.message}`));
@@ -161,7 +164,7 @@ export async function cancelSessions({ offerId, hostId, sessionIds = null, reaso
       if (row) refunds.push(row);
       await c.query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, losing]);
       if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'host', cancel_cause = 'host_cancelled' where id = $1`, [b.id]);
-      told.push({ householdId: b.household_id, kind: 'cancelled', title: `${offer.title ?? 'Your booking'}: cancelled by the host`, body: row ? 'You get a full refund.' : null, link: guestLink(), dedupeKey: `cancelled:${b.id}:${[...losing].sort().join(',')}` });
+      told.push({ householdId: b.household_id, kind: 'cancelled', title: `${offer.title ?? 'Your booking'}: cancelled by the host`, body: row ? 'You get a full refund.' : null, link: guestLink(b.id), dedupeKey: `cancelled:${b.id}:${[...losing].sort().join(',')}` });
     }
     // The whole event is over when nothing is left still to come — past rows never kept it live (Codex, 2 Oct 2026).
     const whole = all.filter((x) => !ids.includes(x.id) && sessionStart(x, offer) > now).length === 0;
@@ -262,7 +265,7 @@ export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = 
       return {
       householdId: b.household_id, kind: 'date_changed', title: `${offer.title ?? 'Your booking'} has moved`,
       body: [`New date: ${mine.to.date}${mine.to.time ? ` at ${mine.to.time}` : ''}. If it no longer works, cancel for a full refund.`, ownMoved].filter(Boolean).join('\n\n'),
-      link: guestLink(), dedupeKey: `date_changed:${b.id}:${moved.map((m) => `${m.id}@${m.to.date}T${m.to.time ?? ''}`).join(',')}`,
+      link: guestLink(b.id), dedupeKey: `date_changed:${b.id}:${moved.map((m) => `${m.id}@${m.to.date}T${m.to.time ?? ''}`).join(',')}`,
       };
     });
     await logChange({ subjectKind: 'session', subjectId: moved.map((m) => m.id).join(','), field: 'date', before: moved.map((m) => m.from), after: moved.map((m) => m.to), why: scope === 'this' ? 'This session only' : 'This and all after it', by, byLabel: 'host' }, c);
@@ -334,7 +337,7 @@ async function decideOne(offerId, sessionId, now) {
         const row = await owe(c, b, { amountPence: amount, cause: 'called_off', key: `called_off:${b.id}:${[...losing].sort().join(',')}`, wholeBooking: whole });
         await c.query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, losing]);
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'called_off' where id = $1`, [b.id]);
-        told.push({ householdId: b.household_id, kind: 'called_off', title: `${offer.title ?? 'Your booking'} isn’t going ahead`, body: [`It needed ${min} and had ${heads}.${row ? ' You get a full refund.' : ''}`, ownOff].filter(Boolean).join('\n\n'), link: guestLink(), dedupeKey: `called_off:${b.id}:${ids.join(',')}` });
+        told.push({ householdId: b.household_id, kind: 'called_off', title: `${offer.title ?? 'Your booking'} isn’t going ahead`, body: [`It needed ${min} and had ${heads}.${row ? ' You get a full refund.' : ''}`, ownOff].filter(Boolean).join('\n\n'), link: guestLink(b.id), dedupeKey: `called_off:${b.id}:${ids.join(',')}` });
       }
       // Off the catalogue too: a called-off One-off or Course ends, and keeps saying why (Codex, 2 Oct 2026).
       if (offer.lane !== 'weekly') await c.query(`update host_offers set called_off_at = now(), state = 'ended' where id = $1`, [offerId]);
@@ -354,7 +357,7 @@ async function decideOne(offerId, sessionId, now) {
         await c.query('update experience_bookings set final_price_pence = $2, settled_at = now() where id = $1', [b.id, finalEach * Number(b.heads ?? 1)]);
       }
     }
-    for (const b of bookings) told.push({ householdId: b.household_id, kind: 'decides_by_result', title: `${offer.title ?? 'Your booking'} is going ahead`, link: guestLink(), dedupeKey: `going_ahead:${b.id}:${first.id}` });
+    for (const b of bookings) told.push({ householdId: b.household_id, kind: 'decides_by_result', title: `${offer.title ?? 'Your booking'} is going ahead`, link: guestLink(b.id), dedupeKey: `going_ahead:${b.id}:${first.id}` });
     return { sessionIds: ids, outcome: 'on', heads, min, told };
   });
   await tell(out.told);
@@ -378,7 +381,7 @@ export async function warnUnderMinimum({ now = new Date(), withinHours = 48 } = 
   let told = 0;
   for (const r of rows) {
     if (r.heads >= r.min) continue;
-    const n = await notifications.notify({ householdId: r.household_id, kind: 'under_minimum', title: `${r.title ?? 'An event'} is under its minimum`, body: `${r.heads} of ${r.min} booked. It decides on ${ymd(r.decides_at)}.`, link: hostLink(r.offer_id), dedupeKey: `under_min:${r.id}` }).catch(() => null);
+    const n = await notifications.notify({ householdId: r.household_id, kind: 'under_minimum', title: `${r.title ?? 'An event'} is under its minimum`, body: `${r.heads} of ${r.min} booked. It decides on ${ymd(r.decides_at)}.`, link: hostLink(r.offer_id, { sheet: 'cancel' }), dedupeKey: `under_min:${r.id}` }).catch(() => null);
     if (n) told += 1;
   }
   return told;
@@ -398,8 +401,11 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
   const out = { sent: 0, failed: 0, waiting: 0 };
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
   const { rows } = await query(
-    `select p.*, b.stripe_payment_intent, b.charged_pence, b.refunded_pence, o.title
+    // A refund names its own PaymentIntent when it is not the booking's (a tip charged twice); otherwise the booking's.
+    `select p.*, coalesce(p.refund_of, b.stripe_payment_intent) as stripe_payment_intent, b.charged_pence, b.refunded_pence,
+            case when p.tip_id is not null then t.charge_model else b.charge_model end as charge_model, o.title
        from hosting_payments p join experience_bookings b on b.id = p.booking_id left join host_offers o on o.id = p.offer_id
+       left join booking_tips t on t.id = p.tip_id
       where p.state = 'pending' and p.kind in ('refund', 'release') and p.idem_key is not null
       order by p.created_at limit $1`,
     [limit],
@@ -413,11 +419,13 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
     try {
       const r = p.kind === 'release'
         ? await release(p.stripe_payment_intent, { householdId: p.household_id, idempotencyKey: p.idem_key })
-        : await refund({ paymentIntentId: p.stripe_payment_intent, amountPence: p.amount_pence, cause: p.cause, bookingId: p.booking_id, householdId: p.household_id, idempotencyKey: p.idem_key });
+        : await refund({ paymentIntentId: p.stripe_payment_intent, amountPence: p.amount_pence, cause: p.cause, bookingId: p.booking_id, householdId: p.household_id, idempotencyKey: p.idem_key, destination: p.charge_model === 'destination' });
       await withTransaction(async (c) => {
         const { rowCount } = await c.query(`update hosting_payments set state = 'succeeded', stripe_ref = $2, updated_at = now() where id = $1 and state = 'pending'`, [p.id, r?.id ?? null]);
         if (!rowCount) return;
         if (p.kind === 'release') await c.query(`update experience_bookings set payment_state = 'released' where id = $1`, [p.booking_id]);
+        // A tip given back is the tip's own business: the booking's money is untouched.
+        else if (p.tip_id) await c.query(`update booking_tips set state = 'refunded' where id = $1`, [p.tip_id]);
         else {
           await c.query(
             `update experience_bookings set payment_state = case when refunded_pence >= charged_pence then 'refunded' else 'partially_refunded' end
@@ -427,7 +435,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
         }
       });
       if (p.kind === 'refund') {
-        await tell([{ householdId: p.household_id, kind: 'refund_issued', title: `£${(p.amount_pence / 100).toFixed(2)} is on its way back to you`, body: p.title ?? null, link: guestLink(), dedupeKey: `refund:${p.id}` }]);
+        await tell([{ householdId: p.household_id, kind: 'refund_issued', title: `£${(p.amount_pence / 100).toFixed(2)} is on its way back to you`, body: p.title ?? null, link: guestLink(p.booking_id), dedupeKey: `refund:${p.id}` }]);
       }
       out.sent += 1;
     } catch (err) {

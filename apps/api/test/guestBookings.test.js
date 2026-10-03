@@ -24,6 +24,10 @@ const fake = http.createServer((req, res) => {
     const json = (o, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     const form = new URLSearchParams(body);
     if (req.url === '/v1/payment_intents' && req.method === 'POST') {
+      // L1, held for every test in this file: a guest's payment is a destination charge to the host's own account,
+      // with the host as merchant of record. A payment without them is refused here, so no test can pass making one.
+      const dest = form.get('transfer_data[destination]');
+      if (!/^acct_/.test(dest ?? '') || form.get('on_behalf_of') !== dest) return json({ error: { code: 'l1_no_destination', message: 'Booking money must go to the host’s account (L1).' } }, 400);
       if (failIntents) return json({ error: { code: 'api_error' } }, 500);
       n += 1;
       const meta = {}; for (const [k, v] of form) { const m = /^metadata\[(.+)\]$/.exec(k); if (m) meta[m[1]] = v; }
@@ -39,7 +43,11 @@ const fake = http.createServer((req, res) => {
       if (m[3] === 'cancel') pi.status = 'canceled';
       return json(pi);
     }
-    if (req.url === '/v1/refunds' && req.method === 'POST') return json({ id: `re_${calls.length}`, object: 'refund', status: 'succeeded', amount: Number(form.get('amount')) });
+    if (req.url === '/v1/refunds' && req.method === 'POST') {
+      // A refund of a destination charge comes back out of the host's balance, and Epic's fee in proportion (K11).
+      if (form.get('reverse_transfer') !== 'true' || form.get('refund_application_fee') !== 'true') return json({ error: { code: 'l1_refund_from_platform' } }, 400);
+      return json({ id: `re_${calls.length}`, object: 'refund', status: 'succeeded', amount: Number(form.get('amount')) });
+    }
     return json({ error: { code: 'not_found' } }, 404);
   });
 });
@@ -93,7 +101,12 @@ async function server(account) {
 
 async function anEvent({ lane = 'oneoff', price = null, priceMode = 'free', max = 10, min = null, total = null, policy = 'flexible', ageMin = null, ageMax = null, parents = null, waitlist = false, sessions = 1, firstIn = 10, money = 'epic', hostOld = true } = {}) {
   const host = await aPerson('Kate Morris');
-  const { rows: [h] } = await query(`insert into hosts (household_id, name, created_at) values ($1, 'Kate Morris', $2) returning *`, [host.household.id, hostOld ? new Date(Date.now() - 400 * 86_400_000) : new Date()]);
+  // The host's own Stripe account, made the L1 way, takes the guest's money (register L, 3 Oct 2026).
+  const { rows: [h] } = await query(
+    `insert into hosts (household_id, name, created_at, stripe_account_id, stripe_account_model, stripe_charges_enabled, stripe_payouts_manual, payouts_state)
+     values ($1, 'Kate Morris', $2, $3, 'v2', true, true, 'ready') returning *`,
+    [host.household.id, hostOld ? new Date(Date.now() - 400 * 86_400_000) : new Date(), `acct_test_${Math.random().toString(36).slice(2, 10)}`],
+  );
   const { rows: [o] } = await query(
     `insert into host_offers (host_id, shape, lane, state, title, visibility, max_count, min_count, price_pence, drop_in_pence, book_ahead_pence, price_mode, total_pence, refund_policy, age_min, age_max, parents, waitlist_on, money, free_hours, session_lengths, notice_hours)
      values ($1, $2, $3, 'live', 'Pottery', 'public', $4, $5, $6, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, '[60]'::jsonb, 0) returning *`,
@@ -795,5 +808,106 @@ test('a course card counts room across the whole run, and an event carries its k
     assert.equal(e.full, true, 'one full session fills the run');
     assert.match(e.words, /Pottery/);
     assert.match(e.words, /Wheel throwing/);
+  } finally { await srv.close(); }
+});
+
+test('L1: a host whose account was made the old way can’t be booked or tipped — nothing is charged to Epic’s balance', async () => {
+  settings.forget();
+  const { o, h } = await anEvent({ price: 3000, priceMode: 'same_each' });
+  // An account from before register L: Stripe holds it, but it took money on Epic's own balance.
+  await query(`update hosts set stripe_account_model = null where id = $1`, [h.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const before = calls.filter((c) => c.url === '/v1/payment_intents').length;
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    assert.deepEqual([r.status, r.body.error], [409, 'host_not_ready']);
+    assert.equal(calls.filter((c) => c.url === '/v1/payment_intents').length, before, 'no payment was even started');
+    assert.equal((await query('select count(*)::int as n from experience_bookings where offer_id = $1', [o.id])).rows[0].n, 0, 'and no booking written');
+  } finally { await srv.close(); }
+});
+
+test('L1: a booking is a destination charge to the host, Epic’s fee the application fee, and the booking says so', async () => {
+  settings.forget();
+  const { o, h: host } = await anEvent({ price: 5000, priceMode: 'same_each' });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const id = await paidBooking(srv, o, { kind: 'whole' });
+    const made = calls.filter((c) => c.url === '/v1/payment_intents' && c.method === 'POST').at(-1);
+    const form = new URLSearchParams(made.body);
+    const { rows: [b] } = await query('select * from experience_bookings where id = $1', [id]);
+    assert.equal(form.get('transfer_data[destination]'), host.stripe_account_id);
+    assert.equal(form.get('on_behalf_of'), host.stripe_account_id, 'the host is merchant of record (L2)');
+    assert.equal(Number(form.get('application_fee_amount')), b.fee_pence, 'Epic takes only its fee');
+    assert.equal(form.get('transfer_group'), null, 'no transfer group: nothing is passed on later');
+    assert.equal(b.charge_model, 'destination');
+  } finally { await srv.close(); }
+});
+
+test('a tip charged after the guest had tipped again is given back in full, as a duplicate tip; on its own, it counts', async () => {
+  settings.forget();
+  const { o } = await anEvent({ firstIn: 1 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    const bookingId = r.body.booking.id;
+    await query(`update offer_sessions set on_date = $2 where offer_id = $1`, [o.id, plusDays(today(), -1)]);
+    // The first tip's card fails.
+    const first = await srv.send('POST', `/api/booked/${bookingId}/tip`, { amountPence: 500 });
+    const pi1 = intents.get(first.body.pay.paymentIntent);
+    Object.assign(pi1, { status: 'requires_payment_method', last_payment_error: { code: 'card_declined' } });
+    await guest.applyPaymentIntent(pi1);
+    assert.equal((await query('select state from booking_tips where id = $1', [first.body.tip.id])).rows[0].state, 'failed');
+    // The guest tips again, and that one goes through.
+    const second = await srv.send('POST', `/api/booked/${bookingId}/tip`, { amountPence: 700 });
+    assert.equal(second.status, 201);
+    pays(second.body.pay.paymentIntent);
+    await guest.applyPaymentIntent(intents.get(second.body.pay.paymentIntent));
+    // Then the first is charged after all.
+    Object.assign(pi1, { status: 'succeeded', amount_received: pi1.amount, last_payment_error: null });
+    await guest.applyPaymentIntent(pi1);
+    await guest.applyPaymentIntent(pi1);
+    const { rows: lines } = await query(`select * from hosting_payments where tip_id = $1`, [first.body.tip.id]);
+    assert.equal(lines.length, 1, 'one refund line, however often Stripe says so');
+    assert.deepEqual([lines[0].kind, lines[0].reason, lines[0].cause, lines[0].amount_pence, lines[0].refund_of], ['refund', 'duplicate tip', 'duplicate_tip', pi1.amount, pi1.id]);
+    assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'tip' and stripe_ref = $1`, [pi1.id])).rows[0].n, 0, 'never credited to the host');
+    await engine.processRefunds();
+    const sent = calls.filter((c) => c.url === '/v1/refunds').at(-1);
+    assert.equal(new URLSearchParams(sent.body).get('payment_intent'), pi1.id, 'the late tip’s own payment, not the booking’s');
+    assert.equal((await query('select state from booking_tips where id = $1', [first.body.tip.id])).rows[0].state, 'refunded');
+    assert.equal((await query('select state from booking_tips where id = $1', [second.body.tip.id])).rows[0].state, 'paid', 'the tip the guest meant stands');
+  } finally { await srv.close(); }
+
+  // On its own — the guest only tried the same card again — the late charge is the tip, and the host has it.
+  const solo = await anEvent({ firstIn: 1 });
+  const b = await aPerson();
+  const sb = await server(b.account);
+  try {
+    const r = await sb.send('POST', `/api/experiences/${solo.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    await query(`update offer_sessions set on_date = $2 where offer_id = $1`, [solo.o.id, plusDays(today(), -1)]);
+    const t = await sb.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 400 });
+    const pi = intents.get(t.body.pay.paymentIntent);
+    Object.assign(pi, { status: 'requires_payment_method', last_payment_error: { code: 'card_declined' } });
+    await guest.applyPaymentIntent(pi);
+    Object.assign(pi, { status: 'succeeded', amount_received: pi.amount, last_payment_error: null });
+    await guest.applyPaymentIntent(pi);
+    assert.equal((await query('select state from booking_tips where id = $1', [t.body.tip.id])).rows[0].state, 'paid');
+    assert.equal((await query(`select count(*)::int as n from hosting_payments where tip_id = $1`, [t.body.tip.id])).rows[0].n, 0, 'nothing refunded');
+  } finally { await sb.close(); }
+});
+
+test('a guest’s money news opens the booking itself, not the Plans list', async () => {
+  settings.forget();
+  const flex = await anEvent({ price: 4000, priceMode: 'same_each', firstIn: 5 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const id = await paidBooking(srv, flex.o, { kind: 'whole' });
+    await srv.send('POST', `/api/booked/${id}/cancel`, {});
+    await engine.processRefunds();
+    const { rows } = await query(`select link from notifications where household_id = $1 and kind = 'refund_issued'`, [a.household.id]);
+    assert.deepEqual(rows.map((x) => x.link), [`/bookings/${id}`]);
   } finally { await srv.close(); }
 });

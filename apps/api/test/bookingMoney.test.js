@@ -177,6 +177,11 @@ test('decides-by: under the minimum it is called off with full refunds; the host
   assert.deepEqual((await pendingFor(offer.id)).map((p) => [p.amount_pence, p.cause]), [[4000, 'called_off']]);
   assert.equal((await query('select state from experience_bookings where id = $1', [bookings[0].id])).rows[0].state, 'cancelled');
   assert.equal((await query(`select count(*)::int as n from notifications where kind = 'event_called_off' and household_id = $1`, [hostHousehold.id])).rows[0].n, 1);
+  // Each side opens the right page: the guest their booking, the host the event's own page — never the old per-offer
+  // screen, whose "Call it off" is not for a lane event (Hosting v7 handover, 3 Oct 2026).
+  const link = async (kind, household) => (await query(`select link from notifications where kind = $1 and household_id = $2`, [kind, household])).rows.map((x) => x.link);
+  assert.deepEqual(await link('event_called_off', hostHousehold.id), [`/host/events/${offer.id}`]);
+  assert.deepEqual(await link('called_off', bookings[0].household_id), [`/bookings/${bookings[0].id}`]);
   assert.equal((await engine.decideDue()).filter((x) => x.sessionIds.includes(sessions[0].id)).length, 0, 'decided once');
 });
 
@@ -189,14 +194,17 @@ test('decides-by: depends on numbers gives back the difference once it is going 
   const { rows } = await query('select final_price_pence from experience_bookings where offer_id = $1 order by heads', [offer.id]);
   assert.deepEqual(rows.map((x) => x.final_price_pence), [12000, 18000]);
   assert.equal((await query(`select count(*)::int as n from notifications where kind = 'decides_by_result' and household_id = $1`, [bookings[0].household_id])).rows[0].n, 1);
+  assert.equal((await query(`select link from notifications where kind = 'decides_by_result' and household_id = $1`, [bookings[0].household_id])).rows[0].link, `/bookings/${bookings[0].id}`, 'going ahead opens the booking');
 });
 
 test('the host hears once when an event is under its minimum close to decides-by', async () => {
   settings.forget();
-  const { hostHousehold } = await anEvent({ min: 8, decidesInHours: 20, guests: [{ heads: 3, charged: 3000 }] });
+  const { hostHousehold, offer } = await anEvent({ min: 8, decidesInHours: 20, guests: [{ heads: 3, charged: 3000 }] });
   await engine.warnUnderMinimum();
   await engine.warnUnderMinimum();
   assert.equal((await query(`select count(*)::int as n from notifications where kind = 'under_minimum' and household_id = $1`, [hostHousehold.id])).rows[0].n, 1);
+  // It opens the event's own page with its cancel sheet, which runs the lane refund path.
+  assert.equal((await query(`select link from notifications where kind = 'under_minimum' and household_id = $1`, [hostHousehold.id])).rows[0].link, `/host/events/${offer.id}?sheet=cancel`);
 });
 
 test('Codex: a time move keeps the session’s length across midnight, and a weekly deadline follows the new time', async () => {

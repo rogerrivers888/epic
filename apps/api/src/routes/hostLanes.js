@@ -33,6 +33,7 @@ import { extract as extractWith, openaiEnabled, tokenCost, transcribe, minuteCos
 import { pdfText } from '../sources/menuRead.js';
 import { bankHolidays } from '../sources/bankHolidays.js';
 import * as stripe from '../sources/stripe.js';
+import * as hostingSettings from '../repositories/hostingSettings.js';
 import { cancelSessions, changeDate, CANCEL_REASONS } from '../sources/bookingMoney.js';
 import { linkUrl, mediaRef, ownHost, sendInvites } from './hosting.js';
 import {
@@ -768,11 +769,19 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
     await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-payouts:${first.id}`]);
     const host = await repo.hostById(first.id);
     const back = `${appUrl()}/host/offers/${encodeURIComponent(str(req.body?.offerId, 40) ?? '')}/publish?back=payouts`;
-    let accountId = host.stripe_account_id;
+    // An account from before this build (no model) took money the old way and is not used again: the host gets a
+    // new one, made the L1 way, on manual payouts (owner, 3 Oct 2026: void the old, recreate under the new model).
+    let accountId = host.stripe_account_model === 'v2' ? host.stripe_account_id : null;
     if (!accountId) {
-      const a = await stripe.createConnectAccount({ email: account?.email, householdId: household.id, hostId: host.id });
+      const a = await stripe.createConnectAccount({
+        email: account?.email, householdId: household.id, hostId: host.id,
+        legalName: host.legal_name, dateOfBirth: host.date_of_birth, displayName: host.name,
+      });
       accountId = a.id;
-      await repo.updateHost(host.id, { stripeAccountId: accountId, stripeMode: 'test', payoutsState: 'pending' });
+      await repo.updateHost(host.id, {
+        stripeAccountId: accountId, stripeMode: 'test', stripeAccountModel: 'v2', stripePersonId: a.personId,
+        ...stripe.hostPatchFromAccount(a.account),
+      });
     }
     const link = await stripe.accountLink({ accountId, refreshUrl: back, returnUrl: back, householdId: household.id });
     res.json({ url: link.url });
@@ -783,7 +792,7 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** POST /host/lanes/verify {offerId} — Stripe Identity: passport or UK driving licence, plus a selfie. Epic sees the result, never the document. */
+/** POST /host/lanes/verify {offerId} — Stripe Identity: a passport (a UK licence only while that setting is on), plus a selfie. Epic sees the result, never the document. */
 router.post('/host/lanes/verify', async (req, res, next) => {
   try {
     const { household, account } = await me();
@@ -804,7 +813,8 @@ router.post('/host/lanes/verify', async (req, res, next) => {
       // Stripe is still reading what was sent: wait for it, never start a second check (Codex, 2 Oct 2026).
       if (open?.status === 'processing') return res.json({ url: null, processing: true });
     }
-    const s = await stripe.identitySession({ returnUrl: back, hostId: host.id, householdId: household.id });
+    const cfg = await hostingSettings.current();
+    const s = await stripe.identitySession({ returnUrl: back, hostId: host.id, householdId: household.id, allowDrivingLicence: cfg.identity_driving_licence === true });
     await repo.updateHost(host.id, { identitySessionId: s.id, identityState: 'pending', stripeMode: 'test' });
     res.json({ url: s.url });
     } finally {
@@ -821,9 +831,9 @@ router.post('/host/lanes/offers/:id/sync', async (req, res, next) => {
     let host = await repo.hostByHousehold(household.id);
     let current = offer;
     if (stripe.stripeStatus().ready) {
-      if (host.stripe_account_id && host.payouts_state !== 'ready') {
+      if (host.stripe_account_id && host.stripe_account_model === 'v2' && host.payouts_state !== 'ready') {
         const a = await stripe.retrieveAccount(host.stripe_account_id, { householdId: household.id });
-        host = await repo.updateHost(host.id, { payoutsState: stripe.accountReady(a) ? 'ready' : 'pending' });
+        host = await repo.updateHost(host.id, stripe.hostPatchFromAccount(a));
       }
       if (host.identity_session_id && host.identity_state !== 'verified') {
         const s = await stripe.retrieveIdentity(host.identity_session_id, { householdId: household.id });
@@ -1052,11 +1062,40 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
   let event;
   try { event = JSON.parse(raw.toString('utf8')); } catch { return res.status(400).json({ error: 'bad_body' }); }
   if (event?.livemode) return res.status(200).json({ ignored: 'live' });
+  if (typeof event?.id !== 'string' || !event.id.startsWith('evt_')) return res.status(400).json({ error: 'bad_body' });
+  // Once per event: Stripe delivers at least once, so a second delivery of one already applied is a no-op.
+  // A delivery that failed half-way is not marked processed, so Stripe's retry runs it again. Two deliveries
+  // arriving at once can both run: everything applyStripeEvent does is itself safe to do twice.
   try {
+    const { rows: [seen] } = await query(
+      `insert into stripe_events (id, type, account, livemode) values ($1, $2, $3, false)
+       on conflict (id) do update set received_at = stripe_events.received_at returning processed_at`,
+      [event.id, String(event.type ?? '').slice(0, 100), typeof event.account === 'string' ? event.account : null],
+    );
+    if (seen?.processed_at) return res.json({ received: true, duplicate: true });
+    await applyStripeEvent(event);
+    await query('update stripe_events set processed_at = now(), fault = null where id = $1', [event.id]);
+    res.json({ received: true });
+  } catch (err) {
+    await query('update stripe_events set fault = $2 where id = $1', [event.id, String(err.code ?? err.message ?? 'error').slice(0, 200)]).catch(() => null);
+    res.status(500).json({ error: 'not_recorded' });
+  }
+});
+
+/** What one Stripe event changes. Exported for the tests; the route above is the only caller. */
+export async function applyStripeEvent(event) {
     const obj = event?.data?.object ?? {};
     if (event.type === 'account.updated' && obj.id) {
       const host = await repo.hostByStripeAccount(obj.id);
-      if (host) await repo.updateHost(host.id, { payoutsState: stripe.accountReady(obj) ? 'ready' : 'pending' });
+      if (host) await repo.updateHost(host.id, stripe.hostPatchFromAccount(obj));
+    } else if ((event.type === 'payout.paid' || event.type === 'payout.failed') && obj.id && typeof event.account === 'string') {
+      // A released payout reaching the host's bank, or bouncing: the host's own account's event (Connect endpoint).
+      const { markPayoutOutcome } = await import('../repositories/hostingLedger.js');
+      await markPayoutOutcome({ stripePayout: obj.id, accountId: event.account, paid: event.type === 'payout.paid', failure: obj.failure_code ?? null });
+    } else if ((event.type === 'charge.dispute.created' || event.type === 'charge.dispute.closed') && obj.payment_intent) {
+      // A chargeback is the guest's bank's decision (L3); while it is open the booking's payout waits, like a complaint.
+      const { markDispute } = await import('../repositories/hostingLedger.js');
+      await markDispute({ paymentIntent: obj.payment_intent, open: event.type === 'charge.dispute.created', status: obj.status ?? null });
     } else if (event.type?.startsWith('identity.verification_session.') && obj.id) {
       const host = await repo.hostByIdentitySession(obj.id);
       if (host) { const state = stripe.identityState(obj); await repo.updateHost(host.id, { identityState: state, identityVerifiedAt: state === 'verified' ? new Date() : null }); }
@@ -1090,11 +1129,7 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
         if (pay.offer_id) await repo.updateOffer(pay.offer_id, { privateFeeState: kind === 'pro' ? 'included' : 'paid' });
       }
     }
-    res.json({ received: true });
-  } catch (err) {
-    res.status(500).json({ error: 'not_recorded' });
-  }
-});
+}
 
 // ---------------------------------------------------------------------------
 // Hosting v4: once it is out — change a date, cancel (handover §5)

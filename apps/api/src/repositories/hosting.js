@@ -84,8 +84,11 @@ const HOST_COLUMNS = {
   stripeAccountId: 'stripe_account_id', stripeMode: 'stripe_mode', payoutsState: 'payouts_state', identityState: 'identity_state',
   identitySessionId: 'identity_session_id', identityVerifiedAt: 'identity_verified_at', checkedState: 'checked_state',
   dbsNumber: 'dbs_number', insuranceMediaId: 'insurance_media_id', checkedSubmittedAt: 'checked_submitted_at',
+  // Payments (register L, migration 368): what Epic keeps about the host's own account — never a bank detail.
+  stripePersonId: 'stripe_person_id', stripeChargesEnabled: 'stripe_charges_enabled', stripePayoutsEnabled: 'stripe_payouts_enabled',
+  stripePayoutsManual: 'stripe_payouts_manual', stripeAccountModel: 'stripe_account_model',
 };
-const HOST_JSON = { credentials: 'credentials', languages: 'languages', childrenAges: 'children_ages', referees: 'referees' };
+const HOST_JSON = { credentials: 'credentials', languages: 'languages', childrenAges: 'children_ages', referees: 'referees', stripeRequirements: 'stripe_requirements' };
 
 /** A PATCH touches only what it names. */
 export async function updateHost(id, patch) {
@@ -509,13 +512,18 @@ export async function updateBooking(id, patch, client) {
   return rows[0];
 }
 
-/** Every booking on an offer is refunded and cancelled in one go: the host called it off. */
+/**
+ * Every booking on an older (non-lane) offer is marked refunded and cancelled in one go: the host called it off.
+ * Never a lane event: this moves no money, and a lane event's refunds go through Stripe (bookingMoney.cancelSessions).
+ * The update only matches a non-lane offer, so no caller can reach a lane event through it.
+ */
 export async function cancelOfferAndRefund(offerId, note) {
   return withTransaction(async (client) => {
     const { rows: offers } = await client.query(
-      `update host_offers set state = 'ended', cancelled_at = now(), cancelled_note = $2, updated_at = now() where id = $1 returning *`,
+      `update host_offers set state = 'ended', cancelled_at = now(), cancelled_note = $2, updated_at = now() where id = $1 and lane is null returning *`,
       [offerId, note ?? null],
     );
+    if (!offers.length) throw Object.assign(new Error('Carry on with this one from its own page.'), { status: 409, code: 'use_lane_setup' });
     const { rows: bookings } = await client.query(
       `update experience_bookings
           set state = 'cancelled', cancelled_at = now(), cancelled_by = 'host',

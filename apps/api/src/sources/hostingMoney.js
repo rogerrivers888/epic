@@ -7,8 +7,11 @@
  *   payouts      Each ended session gets one payout row; it is released
  *                `payout_release` hours later when nobody has complained, or
  *                sooner on a guest's "yes, it happened" or a review (setting,
- *                on). A complaint, missing tax details or an unfinished Stripe
- *                account hold it, and the host is told once per reason.
+ *                on). A complaint, an open chargeback, missing tax details or
+ *                an unfinished Stripe account hold it, and the host is told
+ *                once per reason. The money is already in the host's own
+ *                Stripe balance (L1); releasing it is a Payout made on their
+ *                account, never a transfer from Epic's (L3).
  *   reconcile    Stripe is the source of truth: every recent ledger row with a
  *                Stripe reference is read back and compared. A mismatch is
  *                recorded, marked on the row and logged for the back office.
@@ -27,6 +30,8 @@ const HELD_WORDS = {
   tax_details: 'Add your NI number or UTR to be paid.',
   stripe_incomplete: 'Finish setting up payouts with Stripe to be paid.',
   not_set: 'Payouts are waiting on a setting Epic has not set yet.',
+  dispute: 'A guest’s bank is looking at a payment for this session. The payout waits until it decides.',
+  not_manual: 'Epic is checking your Stripe payout settings. The payout waits until that is done.',
   no_end: 'This session has no end time, so its payout waits for a person to check it.',
 };
 
@@ -45,10 +50,10 @@ export async function schedulePayouts({ now = new Date() } = {}) {
 
 /**
  * Release what is due. Each payout is decided by `payoutDecision`, claimed
- * before the transfer, and the transfer carries the payout's id as its
- * idempotency key so a retry after a crash is the same transfer.
+ * before the Payout, and the Payout carries the payout's id as its
+ * idempotency key so a retry after a crash is the same Payout.
  */
-export async function releasePayouts({ now = new Date(), transfer = stripe.transfer, status = stripe.stripeStatus } = {}) {
+export async function releasePayouts({ now = new Date(), payout = stripe.payout, status = stripe.stripeStatus } = {}) {
   const out = { released: 0, held: 0, failed: 0, waiting: 0 };
   if (!status().ready) return { ...out, skipped: 'stripe_not_ready' };
   const s = await settings.current();
@@ -57,13 +62,20 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
     const decided = payoutDecision({
       endsAt: p.session_ends_at ?? p.release_at, now,
       complaintOpen: p.complaint_open, guestConfirmed: p.guest_confirmed, reviewed: p.reviewed,
-      taxMissing: !p.tax_reference, stripeReady: p.payouts_state === 'ready' && Boolean(p.stripe_account_id),
+      taxMissing: !p.tax_reference,
+      // Only an account made the L1 way holds the money this payout is for.
+      stripeReady: p.payouts_state === 'ready' && Boolean(p.stripe_account_id) && p.stripe_account_model === 'v2',
     }, s);
     // The owner released it by hand (hostingAdmin, Release): that overrides the clock and a complaint's hold, never a
-    // missing Stripe account or tax details — no transfer can be made without those.
-    const ownerSaid = p.released_by === 'owner' && (decided.state === 'wait' || ['complaint', 'not_set', 'no_end'].includes(decided.reason));
-    const d = ownerSaid ? { state: 'release', by: 'owner' }
+    // missing Stripe account or tax details — no payout can be made without those.
+    const ownerSaid = p.released_by === 'owner' && (decided.state === 'wait' || (decided.state === 'held' && ['complaint', 'not_set', 'no_end'].includes(decided.reason)));
+    let d = ownerSaid ? { state: 'release', by: 'owner' }
       : p.state === 'released' && decided.state !== 'held' ? { state: 'release', by: p.released_by ?? 'time' } : decided;
+    // Last, whatever said release: a chargeback is the guest's bank's to decide (L3), so an open one holds the
+    // payout and no owner's Release overrides it; and manual payouts are what keeps Epic holding the timing, so an
+    // account found otherwise is held for a person rather than paid.
+    if (d.state === 'release' && p.dispute_open) d = { state: 'held', reason: 'dispute' };
+    else if (d.state === 'release' && !p.stripe_payouts_manual) d = { state: 'held', reason: 'not_manual' };
     if (d.state === 'wait') { out.waiting += 1; continue; }
     if (d.state === 'held') {
       const changed = await ledger.holdPayout(p.id, d.reason);
@@ -76,15 +88,15 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
       }
       continue;
     }
-    // A payout claimed by a run that died before it finished is picked up again: the transfer carries the
-    // payout's own idempotency key, so Stripe answers with the same transfer, never a second one (Codex, 2 Oct 2026).
+    // A payout claimed by a run that died before it finished is picked up again: the Payout carries the
+    // payout's own idempotency key, so Stripe answers with the same Payout, never a second one (Codex, 2 Oct 2026).
     const claimed = p.state === 'released' ? p : await ledger.claimPayout(p.id, { by: d.by });
     if (!claimed) continue; // another run has it
     const amount = claimed.amount_pence + claimed.tips_pence;
     try {
-      const t = await transfer({ amountPence: amount, destination: p.stripe_account_id, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: `payout-${p.id}` });
-      await ledger.finishPayout(p.id, { state: 'paid', stripeTransfer: t.id, mode: 'test' });
-      await ledger.record({ kind: 'payout', hostId: p.host_id, offerId: p.offer_id, sessionId: p.session_id, householdId: p.household_id, payoutId: p.id, amountPence: amount, hostPence: amount, state: 'succeeded', stripeRef: t.id, mode: 'test', reason: d.by });
+      const po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: `payout-${p.id}` });
+      await ledger.finishPayout(p.id, { state: 'paid', stripePayout: po.id, mode: 'test' });
+      await ledger.record({ kind: 'payout', hostId: p.host_id, offerId: p.offer_id, sessionId: p.session_id, householdId: p.household_id, payoutId: p.id, amountPence: amount, hostPence: amount, state: 'succeeded', stripeRef: po.id, mode: 'test', reason: d.by });
       await notifications.notify({
         householdId: p.household_id, kind: 'payout_sent', title: `£${(amount / 100).toFixed(2)} is on its way`,
         link: '/host/offers', dedupeKey: `payout_sent:${p.id}`,
@@ -92,9 +104,11 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
       out.released += 1;
     } catch (err) {
       // Stripe unreachable — or a reply lost after Stripe accepted it: the payout stays released, and the next
-      // run tries again with the same key, so it is the same transfer (Codex, 2 Oct 2026). Only a definite
+      // run tries again with the same key, so it is the same Payout (Codex, 2 Oct 2026). Only a definite
       // refusal marks it failed for a person to look at.
       if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
+      // The money is in the host's balance but has not cleared yet: wait, released, and try again next run.
+      if (err.code === 'funds_pending') { out.waiting += 1; continue; }
       await ledger.finishPayout(p.id, { state: 'failed' });
       console.error(`epic-api: payout ${p.id} failed — ${err.code ?? err.message}`);
       out.failed += 1;
@@ -125,7 +139,7 @@ export async function reconcile({ days = 3, read = stripe.retrieveRef, status = 
   for (const row of rows) {
     let view = null;
     try {
-      const obj = await read(row.stripe_ref, { householdId: row.household_id });
+      const obj = await read(row.stripe_ref, { householdId: row.household_id, accountId: row.stripe_account_id ?? null });
       view = obj ? stripe.stripeView(obj) : null;
     } catch { view = null; }
     const match = compareRow(row, view);
