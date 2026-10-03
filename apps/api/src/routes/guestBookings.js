@@ -16,6 +16,7 @@
  *   POST   /api/booked/:id/keep                   the host moved the date; Keep my place
  *   PATCH  /api/booked/:id/answers                until 24h before
  *   POST   /api/booked/:id/happened|rate|tip      after the event
+ *   POST   /api/booked/:id/tip/payment            Stripe said yes to the tip: read it back
  *   GET    /api/payments                          every payment, refund and tip
  *   POST   /api/invited/:token/book               an invitation answered by a household on Epic
  *   POST   /api/host/lanes/requests/:id/accept|decline   the host's answer to an Ask to book
@@ -1030,6 +1031,19 @@ router.post('/booked/:id/rate', async (req, res, next) => {
  * all of it; the guest pays Epic's admin fee on top. Tips never touch the
  * rating, the fee step or ranking.
  */
+/** POST /api/booked/:id/tip/payment — Stripe said yes to a tip: read it back and apply it (the webhook's twin, as for a booking). */
+router.post('/booked/:id/tip/payment', async (req, res, next) => {
+  try {
+    const { household } = await me();
+    const b = await ownBooking(req.params.id, household.id);
+    const { rows: [t] } = await query(`select * from booking_tips where booking_id = $1 and household_id = $2 and stripe_ref is not null order by created_at desc limit 1`, [b.id, household.id]);
+    if (!t) throw refuse(409, 'nothing_to_pay', 'There’s no tip on this one.');
+    if (t.state !== 'paid') await applyTipIntent(await stripe.retrievePaymentIntent(t.stripe_ref, { householdId: household.id }));
+    const { rows: [now] } = await query('select state from booking_tips where id = $1', [t.id]);
+    res.json({ state: now.state });
+  } catch (err) { next(err); }
+});
+
 router.post('/booked/:id/tip', async (req, res, next) => {
   try {
     const { household } = await me();

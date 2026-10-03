@@ -25,7 +25,7 @@ import {
   AMBER, Buttons, Chips, DEEP_GREEN, Field, Foot, GoingAhead, GUEST_RED, GuestPage, GuestSheet, INACTIVE, INK, INK_MUTED, Kick, LIME, LIME_TINT, Notice, Para,
   PriceLines, Rows, Seg, Stars, Waiting, dayWords, firstName, gbp, useToast,
 } from './kit';
-import { CardBox, confirmWithCard, finishWithBank, loadStripe } from './pay';
+import { CardBox, confirmWithCard, finishWithBank, loadStripe, type PayOutcome } from './pay';
 
 const POLICY: Record<string, string> = { flexible: 'Flexible', moderate: 'Moderate', strict: 'Strict' };
 const at = (d: string, t: string | null) => `${dayWords(d)}${t ? ` · ${t}` : ''}`;
@@ -238,7 +238,7 @@ export function After({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   // What has already been saved this visit, so a retry after a failed tip doesn't send it twice;
   // and the tip's own payment, so trying again confirms the same one rather than asking for a second.
-  const done = useRef<{ happened: boolean; rated: boolean; tip: { clientSecret: string; amount: number } | null }>({ happened: false, rated: false, tip: null });
+  const done = useRef<{ happened: boolean; rated: boolean; tip: { clientSecret: string; amount: number; taken?: boolean } | null }>({ happened: false, rated: false, tip: null });
   const stripe = useRef<any>(null);
   const card = useRef<any>(null);
   useEffect(() => { api.guestBooking(id).then((r) => setB(r.booking)).catch((e) => setError(e?.message ?? 'That booking didn’t load.')); }, [id]);
@@ -281,7 +281,8 @@ export function After({ id }: { id: string }) {
           if (!r.pay.clientSecret) { toast.show('Paying isn’t ready yet'); return; }
           done.current.tip = { clientSecret: r.pay.clientSecret, amount };
         }
-        let out = await confirmWithCard(stripe.current, done.current.tip.clientSecret, card.current);
+        // Already taken by Stripe on an earlier press: only the read-back is left to do.
+        let out: PayOutcome = done.current.tip.taken ? { state: 'paid', paymentIntent: '' } : await confirmWithCard(stripe.current, done.current.tip.clientSecret, card.current);
         // A bank that wants to check it's you: Stripe shows its own step, then the payment is read again.
         if (out.state === 'bank') out = await finishWithBank(stripe.current, done.current.tip.clientSecret);
         if (out.state !== 'paid') {
@@ -289,6 +290,10 @@ export function After({ id }: { id: string }) {
           if (out.state !== 'bank' && out.state !== 'processing') done.current.tip = null;
           toast.show(out.state === 'bank' ? 'Approve the tip in your banking app, then send again' : out.state === 'processing' ? 'Your bank is still processing the tip' : out.message); return;
         }
+        done.current.tip.taken = true;
+        // Sent only once Epic has the tip, so the host is credited and told now, not when the webhook arrives (Codex, 3 Oct 2026).
+        const r = await api.guestTipPaid(b.id).catch(() => null);
+        if (!r || r.state !== 'paid') { toast.show('Paid · we’re confirming the tip'); return; }
       }
       setSent({ tip: amount });
     } catch (e: any) { toast.show(e instanceof ApiError ? e.message : 'That didn’t send.'); } finally { setBusy(false); }

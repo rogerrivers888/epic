@@ -54,10 +54,10 @@ function fromMember(m: Member, me: string | null): Who {
   };
 }
 
-export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null }) {
+export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: Experience | null }) {
   const { navigate, back } = useRouter();
   const toast = useToast();
-  const [offer, setOffer] = useState<Experience | null>(null);
+  const [offer, setOffer] = useState<Experience | null>(initial?.id === id ? initial : null);
   const [opt, setOpt] = useState<GuestOptions | null>(null);
   const [hh, setHh] = useState<HouseholdResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +91,7 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
   const [pending, setPending] = useState<{ bookingId: string; clientSecret: string } | null>(null);
 
   useEffect(() => {
-    api.experience(id, inviteToken, linkToken).then((r) => setOffer(r.offer)).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
+    if (initial?.id !== id) api.experience(id, inviteToken, linkToken).then((r) => setOffer(r.offer)).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
     api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch((e) => setError(e?.message ?? 'That event isn’t taking bookings.'));
     if (signedIn() && !webPage) api.household().then(setHh).catch(() => setHh({ me: null, household: null as any, members: [] } as unknown as HouseholdResponse));
     loadStripe().then(async (s) => {
@@ -237,8 +237,10 @@ export function Book({ id, webPage, linkToken, inviteToken }: { id: string; webP
     // A decline ends that booking on the server (its places go back), so Try again makes a fresh one with every
     // answer still filled in — never a second go at the payment of a booking that's gone (Codex, 3 Oct 2026).
     // Tell the server now, so the declined booking lets its places go before the next try (Codex, 3 Oct 2026).
-    await api.guestPaid(bookingId, '').catch(() => null);
-    setPending(null);
+    // An incomplete card (a validation error) leaves the same booking open: keep it, so Try again pays that one
+    // rather than booking a second time (Codex, 3 Oct 2026).
+    const r = await api.guestPaid(bookingId, '').catch(() => null);
+    if (r && r.state === 'cancelled') setPending(null);
     setSheet({ kind: out.state, message: out.message });
   };
 

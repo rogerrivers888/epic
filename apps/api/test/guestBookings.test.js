@@ -357,7 +357,9 @@ test('after the event: did it happen (a complaint holds the payout), rate once, 
     const pi = intents.get(tip.body.pay.paymentIntent);
     assert.equal(pi.metadata.epic_kind, 'tip');
     pays(pi.id);
-    await guest.applyPaymentIntent(pi);
+    // The page reads the tip back itself, rather than waiting on the webhook (Codex, 3 Oct 2026).
+    const back = await srv.send('POST', `/api/booked/${id}/tip/payment`, {});
+    assert.equal(back.body.state, 'paid', JSON.stringify(back.body));
     const { rows: [t] } = await query('select state from booking_tips where booking_id = $1', [id]);
     assert.equal(t.state, 'paid');
     const { rows: [row] } = await query(`select host_pence, epic_pence from hosting_payments where kind = 'tip' and booking_id = $1`, [id]);

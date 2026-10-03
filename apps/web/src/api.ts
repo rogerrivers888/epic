@@ -2840,6 +2840,7 @@ export const api = {
   guestAnswers: (id: string, answers: Record<string, unknown>) => patch<{ answers: Record<string, unknown> }>(`/api/booked/${encodeURIComponent(id)}/answers`, { answers }),
   guestHappened: (id: string, answer: 'yes' | 'no' | 'wrong', reason?: string | null) => post<{ recorded: string }>(`/api/booked/${encodeURIComponent(id)}/happened`, { answer, reason: reason ?? null }),
   guestRate: (id: string, body: { stars: number; hostStars?: number | null; text?: string | null; byProxy?: boolean }) => post<{ id: string }>(`/api/booked/${encodeURIComponent(id)}/rate`, body),
+  guestTipPaid: (id: string) => post<{ state: string }>(`/api/booked/${encodeURIComponent(id)}/tip/payment`, {}),
   guestTip: (id: string, amountPence: number) => post<{ tip: { id: string; amountPence: number; feePence: number; totalPence: number }; pay: { clientSecret: string | null; paymentIntent: string } }>(`/api/booked/${encodeURIComponent(id)}/tip`, { amountPence }),
   guestPayments: () => request<{ payments: GuestPayment[]; capped: boolean }>('/api/payments'),
   guestMessages: () => request<{ threads: { offerId: string; bookingId: string | null; topicId: string | null; title: string | null; host: string; photo: string | null; last: string; at: string; unread: number }[]; unread: number; capped: boolean }>('/api/messages'),

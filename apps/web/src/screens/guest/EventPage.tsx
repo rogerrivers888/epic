@@ -101,9 +101,9 @@ function freeWords(opt: GuestOptions | null): string | null {
   return `${parts.join(' · ')}${order.length > 2 ? ' and more' : ''} · pick a time when you ask`;
 }
 
-export function EventPage({ id, webPage, linkToken, inviteToken }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null }) {
+export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: { offer: Experience; payments: PaymentsConfig } | null }) {
   const { navigate, back, path } = useRouter();
-  const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(null);
+  const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(initial?.offer.id === id ? initial : null);
   const [opt, setOpt] = useState<GuestOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<'ask' | 'account' | null>(null);
@@ -112,7 +112,7 @@ export function EventPage({ id, webPage, linkToken, inviteToken }: { id: string;
   const toast = useToast();
 
   useEffect(() => {
-    api.experience(id, inviteToken, linkToken).then(setData).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
+    if (initial?.offer.id !== id) api.experience(id, inviteToken, linkToken).then(setData).catch((e) => setError(e?.message ?? 'That event didn’t load.'));
     api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => setOpt(null));
   }, [id, linkToken, inviteToken]);
 
