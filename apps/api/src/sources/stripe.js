@@ -444,7 +444,7 @@ export async function ensureMembershipPrice({ planKey, name, amountPence, interv
 }
 
 /** Joining: a month free, the card taken now, the household's own customer. */
-export function membershipCheckoutBody({ customerId, priceId, householdId, planKey, successUrl, cancelUrl, trialDays = 30 }) {
+export function membershipCheckoutBody({ customerId, priceId, householdId, planKey, successUrl, cancelUrl, trialDays = 30, pressKey = null }) {
   const meta = { epic_kind: 'membership', epic_household_id: householdId, epic_plan: planKey };
   return {
     mode: 'subscription',
@@ -452,7 +452,8 @@ export function membershipCheckoutBody({ customerId, priceId, householdId, planK
     line_items: [{ price: priceId, quantity: 1 }],
     payment_method_collection: 'always',
     success_url: successUrl, cancel_url: cancelUrl,
-    metadata: meta,
+    // Which press opened it, on the session only: a later press closes the sessions before its own, never after.
+    metadata: pressKey ? { ...meta, epic_press: pressKey } : meta,
     subscription_data: { metadata: meta, ...(trialDays > 0 ? { trial_period_days: trialDays } : {}) },
   };
 }

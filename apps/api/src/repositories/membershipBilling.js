@@ -238,10 +238,13 @@ export async function claimCheckout(householdId) {
      update households h set membership_checkout_at = clock_timestamp()
        from was
       where h.id = was.id and (h.membership_checkout_at is null or h.membership_checkout_at < now() - interval '2 minutes')
-     returning was.membership_checkout_id as previous, h.membership_checkout_at::text as lease`,
+     returning was.membership_checkout_id as previous, h.membership_checkout_at::text as lease,
+               to_char(h.membership_checkout_at at time zone 'UTC', 'YYYYMMDDHH24MISSUS') as order_key`,
     [householdId],
   );
-  return r ? { claimed: true, previous: r.previous ?? null, lease: r.lease } : { claimed: false };
+  // order_key: the same instant as fixed-width text, written on the press's own session so a later press can tell
+  // which open sessions came before it.
+  return r ? { claimed: true, previous: r.previous ?? null, lease: r.lease, orderKey: r.order_key } : { claimed: false };
 }
 
 /**

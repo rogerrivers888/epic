@@ -80,13 +80,16 @@ export async function startCheckout({ householdId, email, name, planKey }) {
     // Only while this press still holds the slot: one that outlived it would close the newer press's session (Codex).
     if (!(await billing.holdsCheckout(householdId, slot.lease))) throw refuse(409, 'checkout_opening', 'Opening the payment page already — give it a moment.');
     for (const open of await stripe.openCheckouts(customerId, { householdId })) {
-      if (open?.metadata?.epic_kind === 'membership') await stripe.expireCheckout(open.id, { householdId });
+      // Only sessions opened by an earlier press (or before presses were marked): one a newer press opened while this
+      // one stalled is that press's, and is left open (Codex, 3 Oct 2026).
+      const press = open?.metadata?.epic_press;
+      if (open?.metadata?.epic_kind === 'membership' && (!press || press < slot.orderKey)) await stripe.expireCheckout(open.id, { householdId });
     }
     const { priceId } = await priceFor(planKey);
     // One trial a household: a household that has had a membership before pays from the first day.
     const before = await billing.latestMembership(householdId);
     session = await stripe.membershipCheckout({
-      customerId, priceId, householdId, planKey,
+      customerId, priceId, householdId, planKey, pressKey: slot.orderKey,
       trialDays: before ? 0 : TRIAL_DAYS,
       successUrl: `${appUrl()}/settings?membership=joined`,
       cancelUrl: `${appUrl()}/settings?membership=not-yet`,

@@ -582,3 +582,19 @@ test('a press that lost its slot closes nobody else’s session', async () => {
   await query("update households set membership_checkout_at = now() where id = $1", [household.id]);
   assert.equal(await billing.holdsCheckout(household.id, slot.lease), false);
 });
+
+test('a press closes only the sessions opened before it, never a newer press’s', async () => {
+  const { account } = await aMember();
+  const srv = await server(account);
+  try {
+    openSessions = [
+      { id: 'cs_older', metadata: { epic_kind: 'membership', epic_press: '20000101000000000000' } },
+      { id: 'cs_newer', metadata: { epic_kind: 'membership', epic_press: '99991231235959999999' } },
+    ];
+    calls.length = 0;
+    assert.equal((await srv.send('POST', '/api/membership/checkout', { plan: 'solo' })).status, 200);
+    assert.ok(calls.some((c) => c.url === '/v1/checkout/sessions/cs_older/expire'));
+    assert.equal(calls.some((c) => c.url === '/v1/checkout/sessions/cs_newer/expire'), false);
+    assert.match(calls.find((c) => c.url === '/v1/checkout/sessions' && c.method === 'POST').body, /metadata\[epic_press\]=\d{20}/);
+  } finally { openSessions = []; await srv.close(); }
+});
