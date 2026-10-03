@@ -800,3 +800,18 @@ test('Codex: overlapping account reads apply in the order they began, and an acc
   assert.equal(later.stripe_requirements.everSubmitted, true);
   assert.equal(stripe.accountTrouble(later.stripe_requirements)?.reason, 'requirements.past_due');
 });
+
+test('Codex: a read already under way when an account is marked closed never puts it back', async () => {
+  const stripe = await import('../src/sources/stripe.js');
+  const { applyAccountFacts } = await import('../src/routes/hostLanes.js');
+  const { household: h } = await aHousehold(query);
+  const host = await repo.insertHost(h.id, { name: 'Closed Mid-Read' });
+  await repo.updateHost(host.id, { stripeAccountId: 'acct_midread', stripeAccountModel: 'v2' });
+  const well = { id: 'acct_midread', details_submitted: true, charges_enabled: true, payouts_enabled: true, settings: { payouts: { schedule: { interval: 'manual' } } }, capabilities: { card_payments: 'active', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: null } };
+  const slow = applyAccountFacts(host.id, async () => { await new Promise((r) => setTimeout(r, 80)); return stripe.hostPatchFromAccount(well); });
+  await new Promise((r) => setTimeout(r, 10));
+  await applyAccountFacts(host.id, { stripeRequirements: { disabledReason: 'account_closed', detailsSubmitted: false }, stripeChargesEnabled: false, stripePayoutsEnabled: false, payoutsState: 'pending' });
+  await slow;
+  const now = await repo.hostById(host.id);
+  assert.deepEqual([now.stripe_requirements.disabledReason, now.payouts_state], ['account_closed', 'pending']);
+});

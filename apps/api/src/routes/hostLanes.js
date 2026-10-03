@@ -1132,22 +1132,31 @@ webhookRouter.post('/stripe/webhook', express.raw({ type: () => true, limit: '1m
  * and a log that fails takes the update with it, to be retried (Codex, 3 Oct 2026). The back office raises it for a
  * person (Safety › Stripe account trouble) and the payment problems log takes the history. Nothing goes to the host.
  */
+/**
+ * A stamp for when a read of a host's account began: microseconds, and a counter so two reads in the same instant
+ * still differ. A tie is treated as stale (Codex, 3 Oct 2026).
+ */
+let stampCount = 0;
+const readStamp = () => Math.round((performance.timeOrigin + performance.now()) * 1000) * 1000 + ((stampCount = (stampCount + 1) % 1000));
+
 export async function applyAccountFacts(hostId, patchOrRead) {
   // Given a read, Stripe is asked first — never while a database connection is held, since the read's own metering
   // needs one (Codex, 3 Oct 2026) — and the read is stamped with when it began. Under the host row's lock it is then
   // stored only if no read that began later has been stored already, so overlapping deliveries can't put an older
   // view back over a newer one.
-  const readAt = Date.now();
+  const readAt = readStamp();
   const read = typeof patchOrRead === 'function' ? await patchOrRead() : patchOrRead;
   return withTransaction(async (c) => {
     const { rows: [was] } = await c.query('select * from hosts where id = $1 for update', [hostId]);
     if (!was) return null;
     const prev = was.stripe_requirements ?? {};
-    if (typeof patchOrRead === 'function' && Number(prev.readAt ?? 0) > readAt) return was;
+    // A read that began no later than what is stored is stale: dropped. A direct update (an account closed) is not a
+    // read but is stamped all the same, so a read already under way can't put the account back (Codex, 3 Oct 2026).
+    if (typeof patchOrRead === 'function' && Number(prev.readAt ?? 0) >= readAt) return was;
     // Once sign-up was finished it stays finished for the trouble watch: Stripe un-marks it when new requirements go
     // overdue, which is exactly the account the watch must keep showing (Codex, 3 Oct 2026).
     const patch = read.stripeRequirements
-      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted), ...(typeof patchOrRead === 'function' ? { readAt } : {}) } }
+      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted), readAt: typeof patchOrRead === 'function' ? readAt : readStamp() } }
       : read;
     const before = stripe.accountTrouble(prev);
     const now = stripe.accountTrouble(patch.stripeRequirements ?? prev);
