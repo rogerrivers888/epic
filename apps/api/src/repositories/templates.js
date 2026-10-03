@@ -141,7 +141,9 @@ export async function saveVersion(key, { channels, name = null, category = null,
     const { rows: [cur] } = await c.query('select channels from message_template_versions where template_key = $1 and version = $2', [t.key, t.current_version]);
     const nm = name != null && String(name).trim() ? String(name).trim().slice(0, 200) : t.name;
     const next = await writeVersion(c, t, { channels: tidy, note: note == null ? null : String(note).slice(0, 500), who, accountId });
-    await c.query('update message_templates set current_version = $2, name = $3, category = $4, updated_at = now() where key = $1', [t.key, next, nm, cat]);
+    // Words a sender still holds its own copy of are no longer a mirror of it once edited (Codex, 3 Oct 2026).
+    const state = t.state === 'mirrors_code' ? 'edited' : t.state;
+    await c.query('update message_templates set current_version = $2, name = $3, category = $4, state = $5, updated_at = now() where key = $1', [t.key, next, nm, cat, state]);
     await logChange({
       client: c, who, area: 'Messages', what: `Edited the “${nm}” message (version ${next})`,
       before: JSON.stringify({ version: t.current_version, category: t.category, channels: cur?.channels ?? null }),
@@ -167,7 +169,7 @@ export async function restoreVersion(key, version, { who, accountId = null, note
     const tidy = validateChannels(t.trigger, old.channels, { category: t.category });
     const { rows: [cur] } = await c.query('select channels from message_template_versions where template_key = $1 and version = $2', [t.key, t.current_version]);
     const next = await writeVersion(c, t, { channels: tidy, note: note ?? `Restored version ${v}`, restoredFrom: v, who, accountId });
-    await c.query('update message_templates set current_version = $2, updated_at = now() where key = $1', [t.key, next]);
+    await c.query("update message_templates set current_version = $2, state = case when state = 'mirrors_code' then 'edited' else state end, updated_at = now() where key = $1", [t.key, next]);
     await logChange({
       client: c, who, area: 'Messages', what: `Restored version ${v} of the “${t.name}” message (now version ${next})`,
       before: JSON.stringify({ version: t.current_version, channels: cur?.channels ?? null }), after: JSON.stringify({ version: next, channels: tidy }),
@@ -243,20 +245,50 @@ async function addressFor(to = {}) {
 }
 
 /**
- * Whether this address said yes to marketing. The only record of a yes today
- * is a sign-up on epic.day (interest_signups, with the words it was shown); an
- * account has no marketing consent of its own yet, and SMS has none at all.
+ * Whether this address said yes to this marketing message — asked of the
+ * sign-up it was given for (Codex, 3 Oct 2026): "Tell me when" of a "Tell me
+ * when" alert not unsubscribed from (guide_alerts, migration 373), the launch
+ * list of a sign-up on epic.day (interest_signups). An account has no
+ * marketing consent of its own yet, and SMS has none at all.
  */
-export async function hasMarketingConsent(email) {
+export async function hasMarketingConsent(email, trigger = 'interest.signed_up') {
   if (!email) return false;
-  const { rows: [r] } = await query('select 1 as yes from interest_signups where lower(email) = lower($1) limit 1', [String(email)]);
+  const sql = {
+    'tell_me_when.match': 'select 1 as yes from guide_alerts where lower(email) = lower($1) and unsubscribed_at is null limit 1',
+    'interest.signed_up': 'select 1 as yes from interest_signups where lower(email) = lower($1) limit 1',
+  }[trigger];
+  if (!sql) return false;
+  const { rows: [r] } = await query(sql, [String(email)]);
   return Boolean(r);
 }
 
-async function logSend({ t, channel, purpose, toKind, toRef, result, by }) {
+async function logSend({ t, version = t.version, channel, purpose, toKind, toRef, result, by, dedupeKey = null }) {
   await query(
-    `insert into message_sends (template_key, version, channel, purpose, to_kind, to_ref, result, by_account) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
-    [t.key, t.version, channel, purpose, toKind, toRef, JSON.stringify(result ?? {}), by],
+    `insert into message_sends (template_key, version, channel, purpose, to_kind, to_ref, result, by_account, dedupe_key) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+     on conflict do nothing`,
+    [t.key, version, channel, purpose, toKind, toRef, JSON.stringify(result ?? {}), by, dedupeKey],
+  ).catch((err) => console.error(`epic-api: message log — ${err.message}`));
+}
+
+/**
+ * Claim a once-only send before it goes: true when this key has not sent this
+ * template on this channel, and the claim is written; false when it has.
+ * E-mail and SMS deliveries are kept to their key as in-app ones are (Codex, 3 Oct 2026).
+ */
+async function claim(t, channel, dedupeKey, toKind, toRef, by) {
+  if (!dedupeKey) return true;
+  const { rows } = await query(
+    `insert into message_sends (template_key, version, channel, purpose, to_kind, to_ref, result, by_account, dedupe_key)
+     values ($1, $2, $3, 'deliver', $4, $5, '{"claimed":true}'::jsonb, $6, $7) on conflict do nothing returning id`,
+    [t.key, t.version, channel, toKind, toRef, by, dedupeKey],
+  );
+  return rows.length > 0;
+}
+/** Write what became of a claimed send onto its claim. */
+async function settle(t, channel, dedupeKey, result) {
+  await query(
+    `update message_sends set result = $4::jsonb where template_key = $1 and channel = $2 and dedupe_key = $3 and purpose = 'deliver'`,
+    [t.key, channel, dedupeKey, JSON.stringify(result ?? {})],
   ).catch((err) => console.error(`epic-api: message log — ${err.message}`));
 }
 
@@ -299,7 +331,7 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
     if (want.some((c) => c !== 'email')) throw refuse(403, 'no_consent', 'A marketing message goes by e-mail only: nobody has said yes to it anywhere else.');
     if (!fieldsOf(parse(t.channels.email.body)).has(UNSUBSCRIBE_FIELD)) throw refuse(409, 'needs_unsubscribe', `“${t.name}” is marketing and its e-mail has no unsubscribe link yet, so it cannot be sent from here.`);
     if (empty(values[UNSUBSCRIBE_FIELD])) throw refuse(400, 'needs_unsubscribe', 'A marketing e-mail needs its unsubscribe link filled in.');
-    if (!(await hasMarketingConsent(addr.email))) throw refuse(403, 'no_consent', 'That address has not said yes to marketing from Epic.');
+    if (!(await hasMarketingConsent(addr.email, t.trigger))) throw refuse(403, 'no_consent', 'That address has not said yes to marketing from Epic.');
   }
   const out = renderChannels(t.channels, values, want);
   const sent = {};
@@ -317,13 +349,21 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   if (want.includes('email')) {
     if (!addr.email) sent.email = { sent: false, reason: 'no_address' };
     else if (await hostSwitchedOff(t, to.householdId)) sent.email = { sent: false, reason: 'switched_off' };
-    else sent.email = await senders.mail({ to: addr.email, subject: out.email.subject, text: out.email.body, purpose: `template_${t.key}` }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));
-    await logSend({ t, channel: 'email', purpose: 'deliver', toKind: 'email', toRef: addr.email, result: sent.email, by });
+    else if (!(await claim(t, 'email', dedupeKey, 'email', addr.email, by))) sent.email = { sent: false, reason: 'already_sent' };
+    else {
+      sent.email = await senders.mail({ to: addr.email, subject: out.email.subject, text: out.email.body, purpose: `template_${t.key}` }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));
+      if (dedupeKey) await settle(t, 'email', dedupeKey, sent.email);
+    }
+    if (!dedupeKey) await logSend({ t, channel: 'email', purpose: 'deliver', toKind: 'email', toRef: addr.email, result: sent.email, by });
   }
   if (want.includes('sms')) {
     if (!addr.mobile) sent.sms = { sent: false, reason: 'no_address' };
-    else sent.sms = await senders.sms({ to: addr.mobile, text: out.sms.body }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));
-    await logSend({ t, channel: 'sms', purpose: 'deliver', toKind: 'mobile', toRef: addr.mobile, result: sent.sms, by });
+    else if (!(await claim(t, 'sms', dedupeKey, 'mobile', addr.mobile, by))) sent.sms = { sent: false, reason: 'already_sent' };
+    else {
+      sent.sms = await senders.sms({ to: addr.mobile, text: out.sms.body }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));
+      if (dedupeKey) await settle(t, 'sms', dedupeKey, sent.sms);
+    }
+    if (!dedupeKey) await logSend({ t, channel: 'sms', purpose: 'deliver', toKind: 'mobile', toRef: addr.mobile, result: sent.sms, by });
   }
   return { template: t.key, version: t.version, channels: sent };
 }
@@ -351,12 +391,12 @@ export async function sendTest(key, { account, channels = null, channelsDraft = 
       sent.email = account.email
         ? await senders.mail({ to: account.email, subject: r.subject, text: r.body, purpose: 'template_test' }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }))
         : { sent: false, reason: 'no_address', message: 'Your account has no e-mail address.' };
-      await logSend({ t, channel: 'email', purpose: 'test', toKind: 'self', toRef: account.email ?? null, result: sent.email, by: account.id });
+      await logSend({ t, version: version ?? t.version, channel: 'email', purpose: 'test', toKind: 'self', toRef: account.email ?? null, result: sent.email, by: account.id });
     } else {
       sent.sms = account.mobile
         ? await senders.sms({ to: account.mobile, text: r.body }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }))
         : { sent: false, reason: 'no_address', message: 'Your account has no mobile number.' };
-      await logSend({ t, channel: 'sms', purpose: 'test', toKind: 'self', toRef: account.mobile ?? null, result: sent.sms, by: account.id });
+      await logSend({ t, version: version ?? t.version, channel: 'sms', purpose: 'test', toKind: 'self', toRef: account.mobile ?? null, result: sent.sms, by: account.id });
     }
   }
   return { template: t.key, version: version ?? t.version, draft: Boolean(channelsDraft), channels: sent };

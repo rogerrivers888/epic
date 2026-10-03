@@ -194,3 +194,10 @@ test('the log: a run is written, counted, listed, and undone only where undoing 
   assert.equal(capped.limit, 1);
   assert.equal(typeof capped.capped, 'boolean');
 });
+
+test('undoing a lapsed-checks pause before the hold exists says so in words, not a database error (Codex, 3 Oct 2026)', async () => {
+  const { rows: [has] } = await query(`select 1 as yes from information_schema.columns where table_name = 'host_offers' and column_name = 'held_from'`);
+  const run = await automations.logRun({ automation: 'checks_lapse_pause', subjectKind: 'host', subjectId: crypto.randomUUID(), rule: 'Insurance ended', did: 'Paused 1 drop-off event', undo: { events: [{ id: crypto.randomUUID() }] } });
+  await assert.rejects(automations.undoRun(run.id, { by: crypto.randomUUID() }), { code: 'nothing_to_undo' });
+  assert.ok(has === undefined || has.yes === 1);
+});

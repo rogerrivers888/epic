@@ -332,6 +332,9 @@ registerUndo('morning_after', { refusal: 'A message that has been sent cannot be
 registerUndo('checks_lapse_pause', {
   person: true,
   async fn(run, { by, client: c }) {
+    // The hold columns arrive with the hosting chat's child-safety batch; until then there is nothing held to put back.
+    const { rows: [has] } = await c.query(`select 1 as yes from information_schema.columns where table_name = 'host_offers' and column_name = 'held_from'`);
+    if (!has) throw refuse(409, 'nothing_to_undo', 'No event is held for lapsed checks yet: the hold arrives with the child-safety work.');
     const events = Array.isArray(run.undo?.events) ? run.undo.events : [];
     let back = 0;
     for (const e of events) {

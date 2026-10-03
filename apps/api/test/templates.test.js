@@ -104,3 +104,39 @@ test('a marketing template says how to stop them before it can be sent', async (
   assert.match(t.channels.email.body, /\{\{unsubscribeUrl\}\}/);
   assert.equal(t.channelStatus.push.available, false);
 });
+
+test('an edited mirror says it is edited, not what the sender says (Codex, 3 Oct 2026)', async () => {
+  const t = await templates.getTemplate('refund_issued');
+  assert.equal(t.state, 'mirrors_code');
+  const saved = await templates.saveVersion('refund_issued', { channels: t.channels }, { who: 'Roger' });
+  assert.equal(saved.state, 'edited');
+});
+
+test('e-mail and SMS deliveries keep to their once-only key; a test is logged under the version it sent', async () => {
+  const sent = [];
+  const was = { ...templates.senders };
+  templates.senders.mail = async (m) => { sent.push(m); return { sent: true }; };
+  try {
+    const a = await templates.deliver({ templateKey: 'renewal_failed', fields: { plan: 'Household', amount: '8.99', retryOn: 'Tuesday', updateUrl: 'https://epic.day/x' }, to: { email: 'm@example.com' }, dedupeKey: 'renewal:abc' });
+    const b = await templates.deliver({ templateKey: 'renewal_failed', fields: { plan: 'Household', amount: '8.99', retryOn: 'Tuesday', updateUrl: 'https://epic.day/x' }, to: { email: 'm@example.com' }, dedupeKey: 'renewal:abc' });
+    assert.equal(a.channels.email.sent, true);
+    assert.deepEqual(b.channels.email, { sent: false, reason: 'already_sent' });
+    assert.equal(sent.length, 1);
+
+    const t = await templates.getTemplate('rating_dropped');
+    const { rows: [acct] } = await query("insert into accounts (email, role, status, name) values ('roger-test@example.com', 'owner', 'active', 'Roger') returning id, email");
+    await templates.sendTest('rating_dropped', { account: { id: acct.id, email: acct.email }, version: 1, channels: ['email'] });
+    const { rows: [log] } = await query("select version from message_sends where template_key = 'rating_dropped' and purpose = 'test' order by at desc limit 1");
+    assert.equal(log.version, 1);
+    assert.ok(t.version >= 1);
+  } finally { Object.assign(templates.senders, was); }
+});
+
+test('marketing consent is asked of the sign-up the message is for', async () => {
+  await query(`insert into guide_alerts (email, subcategory, place_typed, place_key, within_miles, locale, consent_wording) values ('alert@example.com', 'pottery', 'Bath', 'bath', 10, 'en-GB', 'Yes')`);
+  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match'), true);
+  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'interest.signed_up'), false);
+  await query(`update guide_alerts set unsubscribed_at = now() where email = 'alert@example.com'`);
+  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match'), false);
+  assert.equal(await templates.hasMarketingConsent('alert@example.com', 'booking.confirmed'), false);
+});

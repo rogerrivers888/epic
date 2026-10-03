@@ -58,7 +58,8 @@ create table if not exists message_templates (
   updated_at         timestamptz not null default now(),
   constraint message_templates_category_check check (category in ('transactional', 'marketing')),
   constraint message_templates_kind_check check (kind in ('automatic', 'reply')),
-  constraint message_templates_state_check check (state in ('mirrors_code', 'new_wording', 'live'))
+  -- 'edited': the owner changed words a sender still holds its own copy of — saved, and not yet what anybody reads.
+  constraint message_templates_state_check check (state in ('mirrors_code', 'new_wording', 'edited', 'live'))
 );
 
 create table if not exists message_template_versions (
@@ -83,6 +84,8 @@ create table if not exists message_sends (
   purpose        text not null,
   to_kind        text,
   to_ref         text,
+  -- A delivery's once-only key: the same key never sends the same template on the same channel twice.
+  dedupe_key     text,
   result         jsonb not null default '{}'::jsonb,
   by_account     uuid references accounts(id) on delete set null,
   at             timestamptz not null default now(),
@@ -90,6 +93,7 @@ create table if not exists message_sends (
   constraint message_sends_purpose_check check (purpose in ('test', 'deliver'))
 );
 create index if not exists message_sends_template_idx on message_sends (template_key, at desc);
+create unique index if not exists message_sends_once_idx on message_sends (template_key, channel, dedupe_key) where purpose = 'deliver' and dedupe_key is not null;
 
 create table if not exists automations (
   key             text primary key,
