@@ -38,12 +38,13 @@ const MOOD_SLUG = { fun: 'fun', food: 'food-and-drink', culture: 'culture', educ
 const slug = (s) => String(s ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 /**
- * Where an event that has left the web goes (brief §1): its subcategory page, or its category page.
- * Those pages wait on Claude Design; until `EPIC_EVENT_CATEGORY_PAGES` is on there is nowhere to send it,
- * so it is a 410 rather than a 301 to a page that is not there.
+ * Where an event that has left the index goes (brief §1): its subcategory page, or its category page.
+ * Those pages wait on Claude Design. Until `EPIC_EVENT_CATEGORY_PAGES` is on, the event's own page stays up,
+ * saying it has finished or was called off, and noindex — never a 410: a page that had traffic keeps
+ * its visitors (Roger, 3 Oct 2026).
  */
 export function leftTheWeb(ev, locale, categoryPagesOn) {
-  if (!categoryPagesOn) return { status: 410 };
+  if (!categoryPagesOn) return { status: 200, robots: 'noindex' };
   const sub = ev.subcategory ? slug(ev.subcategory) : null;
   return { status: 301, location: `/${locale}/events/${sub || MOOD_SLUG[ev.mood] || ''}`.replace(/\/$/, '') };
 }

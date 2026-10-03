@@ -32,7 +32,7 @@ async function stubApi(fn: (base: string) => Promise<void>) {
     const json = (status: number, body: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     const u = req.url ?? '';
     if (u === '/api/public/events/k7f2ab') return json(200, EVENT);
-    if (u === '/api/public/events/old123') return json(200, { code: 'old123', path: '/en-gb/event/a-past-walk-old123', status: 'expired', mood: 'outdoors', subcategory: 'Walking' });
+    if (u === '/api/public/events/old123') return json(200, { ...EVENT, code: 'old123', path: '/en-gb/event/a-past-walk-old123', title: 'A past walk', status: 'expired', ended: 'finished', mood: 'outdoors', subcategory: 'Walking' });
     if (u === '/api/public/hosts/3mq9cd') return json(200, { code: '3mq9cd', path: '/en-gb/hosts/hannah-r-3mq9cd', status: 'live', indexable: true, name: 'Hannah R.', subcategory: 'Fossil hunting', town: 'Charmouth', intro: null, events: [], finished: [], reviews: { total: 0, rating: null, items: [] } });
     if (u === '/api/public/hosts/gone99') return json(200, { code: 'gone99', path: '/en-gb/hosts/sam-t-gone99', status: 'gone' });
     if (u === '/api/public/sitemap') return json(200, { events: [{ path: EVENT.path, lastmod: '2026-10-03' }], hosts: [{ path: EVENT.host.path, lastmod: '2026-10-03' }] });
@@ -94,7 +94,11 @@ test('one address each: an old slug and the short link 301; unknown is 404; gone
     const missing = await page(base, '/en-gb/event/nothing-zzzz99');
     assert.equal(missing.status, 404);
     assert.equal(missing.headers.get('x-robots-tag'), 'noindex');
-    assert.equal((await page(base, '/en-gb/event/a-past-walk-old123')).status, 410);
+    // Past its time with the category pages off: still up, saying so, out of the index — never a 410.
+    const past = await page(base, '/en-gb/event/a-past-walk-old123');
+    assert.equal(past.status, 200);
+    assert.equal(past.headers.get('x-robots-tag'), 'noindex');
+    assert.match(await past.text(), /<meta name="robots" content="noindex" \/>/);
     assert.equal((await page(base, '/en-gb/hosts/sam-t-gone99')).status, 410, 'a host paused or removed is 410');
     const host = await page(base, '/en-gb/hosts/hannah-r-3mq9cd');
     assert.equal(host.status, 200);
@@ -122,6 +126,7 @@ test('the addresses, the heads and the app’s routes agree', () => {
   assert.equal(publicAddress('/en-gb/event/no-code'), null);
   assert.equal(publicAddress('/en-gb/host'), null, '/en-gb/host stays the become-a-host page');
   assert.deepEqual(leftTheWeb({ subcategory: null, mood: 'outdoors' }, 'en-gb', true), { status: 301, location: '/en-gb/events/outdoors' });
+  assert.deepEqual(leftTheWeb({ subcategory: 'Walking', mood: 'outdoors' }, 'en-gb', false), { status: 200, robots: 'noindex' });
   const head = eventHead({ ...EVENT, lane: 'onrequest' } as never, { appUrl: 'https://epic.day' });
   assert.equal(head.jsonld[0]['@type'], 'Service', 'On request is a Service');
   const sneaky = withHead('<html lang="en"><head><title>x</title></head></html>', { ...eventHead({ ...EVENT, title: '</script><script>alert(1)</script>' } as never, { appUrl: 'https://epic.day' }) });

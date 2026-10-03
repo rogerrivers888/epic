@@ -220,23 +220,21 @@ async function servePublic(req, res, pub, search) {
   if (r.status !== 200) { await shellWith(res, 503, req); return; }
   const page = r.body;
   const canonical = here(page.path);
+  // A host paused or removed: their page is gone (brief §1). Events never are — see below.
+  if (pub.kind === 'host' && page.status === 'gone') { await shellWith(res, 410, req); return; }
+  // An event past its 90 days finished or 30 days called off, or whose host stopped: to its subcategory page
+  // once those exist; until then its own page stays up, noindex.
+  const left = pub.kind === 'event' || pub.kind === 'short' ? (page.status === 'gone' || page.status === 'expired' ? leftTheWeb(page, locale, CATEGORY_PAGES) : null) : null;
+  if (left?.status === 301) { send(301, { location: left.location, 'cache-control': 'no-cache' }, ''); return; }
   // The short link, an old slug, any other spelling: one 301 to the page's own address.
   if (pub.kind === 'short' || pub.asked !== canonical) {
-    if (pub.kind !== 'short' && (page.status === 'gone' || page.status === 'expired')) { /* fall through to its answer below */ } else {
-      send(301, { location: canonical + (pub.kind === 'short' ? '' : search), 'cache-control': 'no-cache' }, '');
-      return;
-    }
-  }
-  if (pub.kind === 'host' && page.status === 'gone') { await shellWith(res, 410, req); return; }
-  if (page.status === 'gone' || page.status === 'expired') {
-    const out = leftTheWeb(page, locale, CATEGORY_PAGES);
-    if (out.status === 301) { send(301, { location: out.location, 'cache-control': 'no-cache' }, ''); return; }
-    await shellWith(res, 410, req);
+    send(301, { location: canonical + (pub.kind === 'short' ? '' : search), 'cache-control': 'no-cache' }, '');
     return;
   }
   let html;
   try { html = await shellHtml(); } catch { send(404, { 'content-type': 'text/plain' }, 'Not found'); return; }
   const head = pub.kind === 'host' ? hostHead(page, { appUrl: APP_URL, locale }) : eventHead(page, { appUrl: APP_URL, locale, categoryPagesOn: CATEGORY_PAGES });
+  if (left?.robots) head.robots = left.robots;
   const body = withHead(html, head, SITE.htmlLang?.[locale] ?? 'en-GB');
   const headers = { 'content-type': TYPES['.html'], 'content-length': Buffer.byteLength(body), 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin' };
   // Indexed straight away while the website is open; the gate's blanket noindex never covers a live public page.

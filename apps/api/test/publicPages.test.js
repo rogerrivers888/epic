@@ -112,7 +112,12 @@ test('finished for 90 days, called off for 30, then expired; a paused host’s e
     assert.equal(await st(await anEvent(h, { calledOffDaysAgo: 5 })), 'called_off');
     assert.equal(await st(await anEvent(h, { calledOffDaysAgo: 40 })), 'expired');
     const { h: paused } = await aHost({ paused: true });
-    assert.equal(await st(await anEvent(paused)), 'gone');
+    const pe = await anEvent(paused);
+    assert.equal(await st(pe), 'gone');
+    // Gone or expired, the page itself is still whole, and says why it ended.
+    const full = (await srv.get(`/api/public/events/${pe.public_code}`)).body;
+    assert.equal(full.ended, 'host');
+    assert.equal(full.title, 'Fossil hunting with a geologist');
     const gone = (await srv.get(`/api/public/hosts/${paused.public_code}`)).body;
     assert.equal(gone.status, 'gone');
   } finally { await srv.close(); }

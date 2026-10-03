@@ -260,7 +260,11 @@ test('cancelling: the policy agreed at booking, a full refund after a date chang
     await query(`update offer_sessions set on_date = $2, starts_at = $3, ends_at = null where offer_id = $1`, [flex.o.id, localDay(soon, 'Europe/London'), soon.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })]);
     assert.equal((await srv.get(`/api/booked/${id}/cancel-quote`)).body.pence, 0);
     // The host moved it after they booked: everything, whatever the policy.
-    await query(`update offer_sessions set changed_from = $2::jsonb where offer_id = $1`, [flex.o.id, JSON.stringify({ onDate: '2026-01-01', at: new Date().toISOString() })]);
+    // A second in the past: "Keep my place" stamps the database's own now(), and this process's clock may run a
+    // millisecond ahead of it — the move would then look newer than the keep (a red full-suite run, 3 Oct 2026).
+    // The booking goes back a minute, so the order is still booked, moved, kept.
+    await query(`update experience_bookings set created_at = created_at - interval '1 minute' where id = $1`, [id]);
+    await query(`update offer_sessions set changed_from = $2::jsonb where offer_id = $1`, [flex.o.id, JSON.stringify({ onDate: '2026-01-01', at: new Date(Date.now() - 1000).toISOString() })]);
     const moved = await srv.get(`/api/booked/${id}/cancel-quote`);
     assert.deepEqual([moved.body.pence, moved.body.cause], [4000, 'date_changed']);
     // Keep my place accepts the move: the policy applies again (Codex, 2 Oct 2026).

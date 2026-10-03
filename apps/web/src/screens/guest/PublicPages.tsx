@@ -88,7 +88,6 @@ export function PublicEventPage({ code, locale }: { code: string; locale: SiteLo
   useEffect(() => { api.publicEvent(code).then(setE).catch((x) => setError(x?.status === 404 ? 'This event isn’t on Epic.' : x?.message ?? 'That didn’t load.')); }, [code]);
   useTitle(e?.title ? `${e.title}${e.where?.area ? ` · ${e.where.area}` : ''} · Epic Events` : null);
   if (!e) return <Frame locale={locale}><Waiting error={error} /></Frame>;
-  if (e.status === 'expired' || e.status === 'gone') return <Frame locale={locale}><H1>This event has gone</H1><Para color={INK_MUTED}>It isn’t on Epic any more.</Para></Frame>;
 
   const book = () => {
     const to = paths.experienceBook(e.offerId!);
@@ -99,8 +98,10 @@ export function PublicEventPage({ code, locale }: { code: string; locale: SiteLo
   return (
     <Frame locale={locale}>
       {e.photos?.[0] ? <View style={{ marginHorizontal: -20 }}><PhotoHead uri={pic(e.photos[0])} webPage /></View> : null}
-      {e.status === 'finished' ? <Notice bg={INACTIVE} weight="800">{`This has finished${e.on ? ` · ${dayWords(e.on)}` : ''}`}</Notice> : null}
-      {e.status === 'called_off' ? <Notice bg={INACTIVE} weight="800">This one was called off</Notice> : null}
+      {/* Over, for whatever reason: the page stays up and says so (Roger, 3 Oct 2026). */}
+      {e.ended === 'finished' ? <Notice bg={INACTIVE} weight="800">{`This has finished${e.on ? ` · ${dayWords(e.on)}` : ''}`}</Notice> : null}
+      {e.ended === 'called_off' ? <Notice bg={INACTIVE} weight="800">This one was called off</Notice> : null}
+      {e.ended === 'host' ? <Notice bg={INACTIVE} weight="800">This host isn’t hosting just now</Notice> : null}
       <Tags items={[{ label: e.kind ?? 'Event', bg: INK, fg: LIME }, ...(e.subcategory ? [{ label: e.subcategory, bg: INACTIVE, fg: INK }] : [])]} />
       <H1>{e.title ?? 'An event'}</H1>
       {e.summary ? <Text style={tx(15, '400', INK_MUTED, { lineHeight: 21 })}>{e.summary}</Text> : null}

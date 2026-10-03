@@ -17,9 +17,10 @@
  *   live        public, live (or paused by the host for a while), still to come
  *   finished    its last date passed in the last 90 days — "This has finished"
  *   called_off  called off in the last 30 days — shown with alternatives
- *   expired     past those windows; the web answers 301 to its subcategory
- *               page once those pages exist (EPIC_EVENT_CATEGORY_PAGES), 410 until then
- *   gone        its host paused or stopped; same answer as expired
+ *   expired     past those windows: still shown, noindex, until its subcategory page exists — then
+ *               a 301 there (EPIC_EVENT_CATEGORY_PAGES). Never a 410: the page may have had traffic (Roger, 3 Oct 2026)
+ *   gone        its host paused or stopped; the same as expired
+ * `ended` says why it is over — finished, called_off or host — so the page can say so.
  * Drafts, events in review, private and link-only events are a 404 — they are
  * not on the web at all (a private event is only ever at /in/{token}).
  */
@@ -65,18 +66,18 @@ const LISTED = `o.lane is not null and o.visibility = 'public' and o.state in ('
 
 /** What an event's status is today, from its sessions and its host (see the file header). */
 export function eventStatus(o, host, sessions, today) {
-  if (!host || host.paused || host.stopped_at) return { status: 'gone' };
+  if (!host || host.paused || host.stopped_at) return { status: 'gone', ended: 'host' };
   const live = sessions.filter((s) => s.state !== 'cancelled');
   if (o.called_off_at) {
     const on = ymd(o.called_off_at);
-    return { status: daysBetween(on, today) > CALLED_OFF_DAYS ? 'expired' : 'called_off', on };
+    return { status: daysBetween(on, today) > CALLED_OFF_DAYS ? 'expired' : 'called_off', on, ended: 'called_off' };
   }
   const last = live.length ? ymd(live[live.length - 1].ends_on ?? live[live.length - 1].on_date) : null;
   const ahead = live.some((s) => ymd(s.ends_on ?? s.on_date) >= today);
   const ended = o.state === 'ended' || (o.lane !== 'onrequest' && live.length > 0 && !ahead);
   if (!ended) return { status: 'live' };
   const on = last ?? ymd(o.updated_at) ?? today;
-  return { status: daysBetween(on, today) > FINISHED_DAYS ? 'expired' : 'finished', on };
+  return { status: daysBetween(on, today) > FINISHED_DAYS ? 'expired' : 'finished', on, ended: 'finished' };
 }
 
 function priceOf(o) {
@@ -120,11 +121,11 @@ async function liveCards(where, params, today, limit = 4) {
 }
 
 async function reviewsOf(hostId) {
-  const [rows, total] = await Promise.all([repo.publishedReviews(hostId), repo.publishedReviewCount(hostId)]);
-  const rated = rows.filter((r) => r.stars);
+  // The rating over every published review, not the newest fifty the list carries (Codex, 3 Oct 2026).
+  const [rows, total, all] = await Promise.all([repo.publishedReviews(hostId), repo.publishedReviewCount(hostId), repo.ratingOf(hostId)]);
   return {
     total,
-    rating: rated.length ? Math.round((rated.reduce((n, r) => n + r.stars, 0) / rated.length) * 10) / 10 : null,
+    rating: all.rating == null ? null : Math.round(all.rating * 10) / 10,
     // The reviewer by first name only; the host's reply beside it.
     items: rows.slice(0, 6).map((r) => ({ stars: r.stars, text: r.text, who: r.who || null, on: ymd(r.publish_on), reply: r.reply ?? null })),
   };
@@ -141,8 +142,8 @@ router.get('/events/:code', async (req, res, next) => {
     const sessions = (await sessionsOf([o.id])).get(o.id) ?? [];
     const st = eventStatus(o, h, sessions, today);
     const mood = moodOf(o.what_category, `${o.what_label ?? ''} ${o.title ?? ''}`);
-    const base = { code: o.public_code, path: eventPath(o), status: st.status, on: st.on ?? null, mood, subcategory: o.what_label ?? null };
-    if (st.status === 'expired' || st.status === 'gone') return res.json(base);
+    // Every status gets the whole page: a page that has left the index stays readable (Roger, 3 Oct 2026).
+    const base = { code: o.public_code, path: eventPath(o), status: st.status, ended: st.ended ?? null, on: st.on ?? null, mood, subcategory: o.what_label ?? null };
     const ahead = sessions.filter((s) => s.state !== 'cancelled' && ymd(s.ends_on ?? s.on_date) >= today).slice(0, 12);
     const [reviews, moreFromHost, similar] = await Promise.all([
       reviewsOf(h.id),
@@ -191,6 +192,9 @@ async function hostPayload(h, today) {
   };
 }
 
+/** A host with nothing listed and nothing reviewed has no public page at all. */
+const hostShown = (out) => out.events.length > 0 || out.finished.length > 0 || out.reviews.total > 0;
+
 router.get('/hosts/:code', async (req, res, next) => {
   try {
     const code = String(req.params.code ?? '').toLowerCase();
@@ -199,8 +203,7 @@ router.get('/hosts/:code', async (req, res, next) => {
     if (!h) return res.status(404).json({ error: 'not_found' });
     if (h.paused || h.stopped_at) return res.json({ code: h.public_code, path: hostPath(h), status: 'gone' });
     const out = await hostPayload(h, localDay(new Date(), 'Europe/London'));
-    // A host with nothing listed and nothing reviewed has no public page at all.
-    if (!out.events.length && !out.finished.length && !out.reviews.total) return res.status(404).json({ error: 'not_found' });
+    if (!hostShown(out)) return res.status(404).json({ error: 'not_found' });
     res.json(out);
   } catch (err) { next(err); }
 });
@@ -236,8 +239,9 @@ router.get('/sitemap', async (_req, res, next) => {
 });
 
 /**
- * A photo on a public page, and only while it is on one: an event's photo while the event is shown (live,
- * finished, called off), a host's photo while their page is. Never a video, a document or anything private.
+ * A photo on a public page, and only while it is on one: an event's photo while its page is up (every listed
+ * event's page stays up), a host's photo while their page is. Only the host's own uploads (host_media) — never
+ * a video, a document, anything private, or anything from Google (J8).
  */
 router.get('/media/:id', async (req, res, next) => {
   try {
@@ -248,18 +252,11 @@ router.get('/media/:id', async (req, res, next) => {
         where ${LISTED} and o.photo_ids @> to_jsonb(array[$1::text])`,
       [id],
     );
-    let allowed = false;
-    if (offers.length) {
-      const by = await sessionsOf(offers.map((o) => o.id));
-      allowed = offers.some((o) => ['live', 'finished', 'called_off'].includes(eventStatus(o, { paused: o.host_paused, stopped_at: o.host_stopped }, by.get(o.id) ?? [], localDay(new Date(), o.time_zone ?? 'Europe/London')).status));
-    }
+    let allowed = offers.length > 0;
     if (!allowed) {
-      const { rows: [h] } = await query(
-        `select h.id from hosts h where h.photo_id::text = $1 and not coalesce(h.paused, false) and h.stopped_at is null
-            and exists (select 1 from host_offers o where o.host_id = h.id and ${LISTED})`,
-        [id],
-      );
-      allowed = Boolean(h);
+      // A host's photo exactly when their page is shown — the same test the page itself makes (Codex, 3 Oct 2026).
+      const { rows: [h] } = await query(`select * from hosts where photo_id::text = $1 and not coalesce(paused, false) and stopped_at is null`, [id]);
+      if (h) allowed = hostShown(await hostPayload(h, localDay(new Date(), 'Europe/London')));
     }
     if (!allowed) return res.status(404).end();
     const m = await repo.mediaById(id);
