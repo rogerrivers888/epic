@@ -118,8 +118,7 @@ export function shareOf(booking, losing) {
   return { amount: Math.min(left, Math.floor((Number(booking.charged_pence ?? 0) * n) / all)), whole: false };
 }
 
-// Each guest notification opens its booking page (guest handoff: "each links to the booking page").
-const guestLink = (bookingId) => (bookingId ? `/bookings/${bookingId}` : '/plans?span=events');
+const guestLink = () => '/trips';
 const hostLink = (offerId) => `/host/offers/${offerId}`;
 
 async function tell(list) {
@@ -162,7 +161,7 @@ export async function cancelSessions({ offerId, hostId, sessionIds = null, reaso
       if (row) refunds.push(row);
       await c.query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, losing]);
       if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'host', cancel_cause = 'host_cancelled' where id = $1`, [b.id]);
-      told.push({ householdId: b.household_id, kind: 'cancelled', title: `${offer.title ?? 'Your booking'}: cancelled by the host`, body: row ? 'You get a full refund.' : null, link: guestLink(b.id), dedupeKey: `cancelled:${b.id}:${[...losing].sort().join(',')}` });
+      told.push({ householdId: b.household_id, kind: 'cancelled', title: `${offer.title ?? 'Your booking'}: cancelled by the host`, body: row ? 'You get a full refund.' : null, link: guestLink(), dedupeKey: `cancelled:${b.id}:${[...losing].sort().join(',')}` });
     }
     // The whole event is over when nothing is left still to come — past rows never kept it live (Codex, 2 Oct 2026).
     const whole = all.filter((x) => !ids.includes(x.id) && sessionStart(x, offer) > now).length === 0;
@@ -263,7 +262,7 @@ export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = 
       return {
       householdId: b.household_id, kind: 'date_changed', title: `${offer.title ?? 'Your booking'} has moved`,
       body: [`New date: ${mine.to.date}${mine.to.time ? ` at ${mine.to.time}` : ''}. If it no longer works, cancel for a full refund.`, ownMoved].filter(Boolean).join('\n\n'),
-      link: guestLink(b.id), dedupeKey: `date_changed:${b.id}:${moved.map((m) => `${m.id}@${m.to.date}T${m.to.time ?? ''}`).join(',')}`,
+      link: guestLink(), dedupeKey: `date_changed:${b.id}:${moved.map((m) => `${m.id}@${m.to.date}T${m.to.time ?? ''}`).join(',')}`,
       };
     });
     await logChange({ subjectKind: 'session', subjectId: moved.map((m) => m.id).join(','), field: 'date', before: moved.map((m) => m.from), after: moved.map((m) => m.to), why: scope === 'this' ? 'This session only' : 'This and all after it', by, byLabel: 'host' }, c);
@@ -335,7 +334,7 @@ async function decideOne(offerId, sessionId, now) {
         const row = await owe(c, b, { amountPence: amount, cause: 'called_off', key: `called_off:${b.id}:${[...losing].sort().join(',')}`, wholeBooking: whole });
         await c.query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, losing]);
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'epic', cancel_cause = 'called_off' where id = $1`, [b.id]);
-        told.push({ householdId: b.household_id, kind: 'called_off', title: `${offer.title ?? 'Your booking'} isn’t going ahead`, body: [`It needed ${min} and had ${heads}.${row ? ' You get a full refund.' : ''}`, ownOff].filter(Boolean).join('\n\n'), link: guestLink(b.id), dedupeKey: `called_off:${b.id}:${ids.join(',')}` });
+        told.push({ householdId: b.household_id, kind: 'called_off', title: `${offer.title ?? 'Your booking'} isn’t going ahead`, body: [`It needed ${min} and had ${heads}.${row ? ' You get a full refund.' : ''}`, ownOff].filter(Boolean).join('\n\n'), link: guestLink(), dedupeKey: `called_off:${b.id}:${ids.join(',')}` });
       }
       // Off the catalogue too: a called-off One-off or Course ends, and keeps saying why (Codex, 2 Oct 2026).
       if (offer.lane !== 'weekly') await c.query(`update host_offers set called_off_at = now(), state = 'ended' where id = $1`, [offerId]);
@@ -355,7 +354,7 @@ async function decideOne(offerId, sessionId, now) {
         await c.query('update experience_bookings set final_price_pence = $2, settled_at = now() where id = $1', [b.id, finalEach * Number(b.heads ?? 1)]);
       }
     }
-    for (const b of bookings) told.push({ householdId: b.household_id, kind: 'decides_by_result', title: `${offer.title ?? 'Your booking'} is going ahead`, link: guestLink(b.id), dedupeKey: `going_ahead:${b.id}:${first.id}` });
+    for (const b of bookings) told.push({ householdId: b.household_id, kind: 'decides_by_result', title: `${offer.title ?? 'Your booking'} is going ahead`, link: guestLink(), dedupeKey: `going_ahead:${b.id}:${first.id}` });
     return { sessionIds: ids, outcome: 'on', heads, min, told };
   });
   await tell(out.told);
@@ -428,7 +427,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
         }
       });
       if (p.kind === 'refund') {
-        await tell([{ householdId: p.household_id, kind: 'refund_issued', title: `£${(p.amount_pence / 100).toFixed(2)} is on its way back to you`, body: p.title ?? null, link: guestLink(p.booking_id), dedupeKey: `refund:${p.id}` }]);
+        await tell([{ householdId: p.household_id, kind: 'refund_issued', title: `£${(p.amount_pence / 100).toFixed(2)} is on its way back to you`, body: p.title ?? null, link: guestLink(), dedupeKey: `refund:${p.id}` }]);
       }
       out.sent += 1;
     } catch (err) {

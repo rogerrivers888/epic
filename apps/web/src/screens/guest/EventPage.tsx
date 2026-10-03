@@ -203,7 +203,10 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const action = opt?.action ?? 'closed';
   const full = action === 'full' || action === 'waitlist';
   const bookHref = keep(paths.experienceBook(o.id));
-  const foot = action === 'book' ? <Foot price={price.big} sub={price.small} label="Book" onPress={() => navigate(bookHref)} />
+  // A place offered from the waiting list: Book, and how long it is held (Codex, 3 Oct 2026).
+  const held = opt?.waitlist.offeredUntil ? new Date(opt.waitlist.offeredUntil) : null;
+  const heldWords = held ? `Your place is held until ${held.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${held.toDateString() === new Date().toDateString() ? '' : ` ${dayWords(held.toISOString().slice(0, 10))}`}` : null;
+  const foot = action === 'book' ? <Foot price={price.big} sub={heldWords ?? price.small} label="Book" onPress={() => navigate(bookHref)} />
     : action === 'ask' ? <Foot price={price.big} sub={price.small} label="Ask to book" onPress={() => navigate(bookHref)} />
       : action === 'waitlist' ? <Foot price="Full" sub={most ? `${most} of ${most} booked` : null} label={joined != null ? `You’re #${joined} on the list` : 'Join the waiting list'} tone={joined != null ? 'grey' : 'ink'} onPress={join} />
         : action === 'full' ? <Foot price="Full" sub={most ? `${most} of ${most} booked` : null} label="Full" disabled onPress={() => {}} />

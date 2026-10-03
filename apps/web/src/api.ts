@@ -6243,7 +6243,7 @@ export type GuestOptions = {
     groups: { dropIn: { pct: number; min: number } | null; bookAhead: { pct: number; min: number } | null }; throughEpic: boolean };
   who: { ageMin: number | null; ageMax: number | null; partyMax: number | null; dropOff: boolean; adultsOnly: boolean };
   questions: Record<string, any>; refundWords: string | null;
-  waitlist: { on: boolean; offerHours: number | null }; askWindowHours: number | null;
+  waitlist: { on: boolean; offerHours: number | null; offeredUntil?: string | null }; askWindowHours: number | null;
 };
 export type GuestChild = { name?: string; age?: number | null; dob?: string | null; emergencyContact?: string | null; memberId?: string | null };
 export type GuestBookBody = {
@@ -6275,7 +6275,7 @@ export type GuestBooking = {
   dateChange: { sessions: { id: string; from: { date: string; time: string | null }; to: { date: string; time: string | null } }[] } | null;
   money: { lines: { label: string; each?: number; count?: number; pence: number }[]; grossPence: number | null; discountPence: number | null; valuePence: number | null; paidPence: number | null; heldPence: number | null; refundedPence: number | null; paymentState: string; refundPolicy: string | null;
     refunds: { pence: number; cause: string | null; state: string; at: string }[] };
-  after: { happened: string | null; rated: boolean; tipOpen: boolean } | null;
+  after: { happened: string | null; rated: boolean; tipOpen: boolean; tipFee?: { pct: number; minPence: number } | null } | null;
   dropOff: boolean; [k: string]: any;
 };
 export type GuestPayment = { id: string; kind: string; pence: number; state: string; cause: string | null; at: string; title: string | null; bookingId: string | null };

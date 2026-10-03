@@ -226,7 +226,7 @@ function EditAnswers({ booking, onClose, onSaved }: { booking: Booking; onClose:
  * After the event (G20), one screen, three steps: Did it happen? (Went wrong
  * holds the payout and opens a complaint) · Rate it (once per booking) · Leave a
  * tip (5% · 10% · 15% · Other on a paid event, £2 · £5 · £10 · Other on a free
- * one; the host keeps all of it, a 3% fee — at least 30p — on top). Send appears
+ * one; the host keeps all of it, with the fee Epic sets on top). Send appears
  * once Did it happen? is answered; then Book again and More from the host.
  */
 export function After({ id }: { id: string }) {
@@ -254,10 +254,14 @@ export function After({ id }: { id: string }) {
 
   const host = firstName(b.event.host.name);
   const paid = (b.money.paidPence ?? 0) > 0;
-  const options = paid ? [5, 10, 15].map((p) => ({ key: `${p}`, label: `${p}%`, sub: gbp(Math.round(((b.money.paidPence ?? 0) * p) / 100)), pence: Math.round(((b.money.paidPence ?? 0) * p) / 100) }))
-    : [200, 500, 1000].map((p) => ({ key: `${p}`, label: gbp(p), sub: null as string | null, pence: p }));
+  // Only choices the server takes: £1 to £500 (Codex, 3 Oct 2026).
+  const options = (paid ? [5, 10, 15].map((p) => ({ key: `${p}`, label: `${p}%`, sub: gbp(Math.round(((b.money.paidPence ?? 0) * p) / 100)) as string | null, pence: Math.round(((b.money.paidPence ?? 0) * p) / 100) }))
+    : [200, 500, 1000].map((p) => ({ key: `${p}`, label: gbp(p), sub: null as string | null, pence: p }))).filter((o) => o.pence >= 100 && o.pence <= 50_000);
   const amount = tip === 'other' ? Math.round(Number(other.replace(/[£\s]/g, '')) * 100) || 0 : tip ?? 0;
-  const fee = amount ? Math.max(30, Math.round(amount * 0.03)) : 0;
+  // The fee as the server works it out, from the rule it sends; none shown when Epic hasn't set one (tips are refused then).
+  const rule = b.after?.tipFee ?? null;
+  const fee = amount && rule ? Math.max(rule.minPence, Math.round((amount * rule.pct) / 100)) : 0;
+  const ruleWords = rule ? `A ${rule.pct}% fee, at least ${rule.minPence < 100 ? `${rule.minPence}p` : gbp(rule.minPence)}, is added on top.` : '';
   const last = b.sessions[b.sessions.length - 1];
   const head = <CompactBand title="How was it?" context={`${b.event.title ?? ''}${last ? ` · ${dayWords(last.date)}` : ''}`} onBack={() => back(paths.booking(b.id))} />;
 
@@ -325,7 +329,7 @@ export function After({ id }: { id: string }) {
       <Seg key="ts" items={[...options.map((o) => ({ key: o.key, label: o.label, sub: o.sub, on: tip === o.pence, onPress: () => setTip(tip === o.pence ? null : o.pence) })), { key: 'other', label: 'Other', sub: paid ? ' ' : null, on: tip === 'other', onPress: () => setTip(tip === 'other' ? null : 'other') }]} />,
     );
     if (tip === 'other') blocks.push(<Field key="to" value={other} onChange={setOther} placeholder="£" keyboardType="numeric" maxLength={6} />);
-    blocks.push(<Para key="tl" color={amount ? INK : INK_MUTED}>{amount ? `${gbp(amount)} tip + ${fee < 100 ? `${fee}p` : gbp(fee)} fee · ${gbp(amount)} goes to ${host}` : `100% goes to ${host}. A 3% fee, at least 30p, is added on top.`}</Para>);
+    blocks.push(<Para key="tl" color={amount ? INK : INK_MUTED}>{amount ? `${gbp(amount)} tip + ${fee < 100 ? `${fee}p` : gbp(fee)} fee · ${gbp(amount)} goes to ${host}` : `100% goes to ${host}.${ruleWords ? ` ${ruleWords}` : ''}`}</Para>);
     if (amount > 0) blocks.push(<CardBox key="card" stripe={stripe.current} onReady={(c) => { card.current = c; }} />);
   }
   return (

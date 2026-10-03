@@ -167,7 +167,11 @@ function cleanAnswers(raw, asked = {}) {
 /** GET /api/payments/config — what a guest's browser needs to pay: Stripe's publishable key, or why it can't yet. */
 publicRouter.get('/payments/config', (_req, res) => {
   const s = stripe.stripeStatus();
-  const key = stripe.publishableKey();
+  // Card payment is switched on by the Stripe integration work, not here: off until EPIC_GUEST_CARD_PAYMENTS=on,
+  // whatever keys are in Doppler (owner, 3 Oct 2026). The publishable key is read here; sources/stripe.js is theirs.
+  const on = String(process.env.EPIC_GUEST_CARD_PAYMENTS ?? '').trim().toLowerCase() === 'on';
+  const k = String(process.env.STRIPE_PUBLISHABLE_KEY ?? '').trim();
+  const key = on && s.mode === 'test' && /^pk_test_/.test(k) ? k : null;
   res.json({ ready: Boolean(s.ready && key), mode: s.mode, publishableKey: key, note: s.ready && !key ? 'Card payments are not switched on yet.' : s.note });
 });
 
@@ -180,9 +184,17 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
       const invite = typeof req.query.i === 'string' ? await repo.inviteByToken(req.query.i.slice(0, 64)) : null;
       if (!opensPrivately(e.offer, { linkToken: typeof req.query.l === 'string' ? req.query.l.slice(0, 64) : null, invite, hasBooking: await repo.holdsBooking(e.offer.id, await householdOnPublicPath(req)) })) throw refuse(404, 'not_found', 'This one is invitation only.');
     }
-    const { offer: o, sessions, host } = e;
+    const { offer: o, host } = e;
     const now = new Date();
     const s = await settingsRepo.current();
+    // A place offered to this household from the waiting list is theirs to take: not counted against them, and Book
+    // is the action until it lapses (Codex, 3 Oct 2026).
+    const asker = await householdOnPublicPath(req);
+    const { rows: mineOffered } = asker ? await query(
+      `select session_id, party, offer_expires_at from offer_waitlist where offer_id = $1 and household_id = $2 and state = 'offered' and offer_expires_at > now()`,
+      [o.id, asker],
+    ) : { rows: [] };
+    const sessions = e.sessions.map((x) => ({ ...x, reserved: Math.max(0, x.reserved - mineOffered.filter((w) => w.session_id == null || w.session_id === x.id).reduce((n, w) => n + w.party, 0)) }));
     const next = ahead(sessions, o, now);
     // Weekly sessions are booked one by one: it is full only when every session is (Codex, 2 Oct 2026).
     const lefts = next.map((x) => (placesLeft(x, o) ?? Infinity) - x.reserved);
@@ -218,7 +230,7 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
       who: { ageMin: o.age_min, ageMax: o.age_max, partyMax: o.party_max, dropOff: o.parents === 'drop_off', adultsOnly: o.age_min != null && o.age_min >= cfg.adultAge },
       questions: o.guest_questions ?? {},
       refundWords: o.refund_policy && paidThroughEpic(o) ? refundWords(o.refund_policy, cfg) : null,
-      waitlist: { on: o.waitlist_on === true, offerHours: typeof s.waitlist_offer === 'number' ? s.waitlist_offer : null },
+      waitlist: { on: o.waitlist_on === true, offerHours: typeof s.waitlist_offer === 'number' ? s.waitlist_offer : null, offeredUntil: mineOffered[0]?.offer_expires_at ?? null },
       askWindowHours: o.lane === 'onrequest' ? (typeof s.ask_to_book_window === 'number' ? s.ask_to_book_window : null) : null,
     });
   } catch (err) { next(err); }
@@ -512,7 +524,7 @@ export async function applyPaymentIntent(pi) {
   return b.id;
 }
 
-async function applyTipIntent(pi, { again = true } = {}) {
+async function applyTipIntent(pi) {
   const tipId = pi?.metadata?.epic_tip_id;
   if (!tipId || !UUID.test(tipId)) return null;
   // As for a booking: Stripe may answer before our write of the tip's reference (Codex, 2 Oct 2026).
@@ -523,50 +535,17 @@ async function applyTipIntent(pi, { again = true } = {}) {
     return null;
   }
   if (pi.status !== 'succeeded') return null;
-  // Stripe saying it succeeded wins over an earlier failure on the same payment (a decline, then the same card
-  // again): the money was taken, so the tip is paid and the host credited — unless another tip on the booking
-  // already is (Codex, 3 Oct 2026).
-  const { rows: [t] } = await query(
-    `update booking_tips set state = 'paid' where id = $1 and stripe_ref = $2 and (state = 'pending' or (state = 'failed'
-        and not exists (select 1 from booking_tips x where x.booking_id = booking_tips.booking_id and x.id <> booking_tips.id and x.state in ('pending', 'paid')))) returning *`,
-    [tipId, pi.id],
-  );
-  if (!t) return settleLateTip(pi, tipId, again);
+  const { rows: [t] } = await query(`update booking_tips set state = 'paid' where id = $1 and stripe_ref = $2 and state = 'pending' returning *`, [tipId, pi.id]);
+  if (!t) return null;
   await ledger.record({ kind: 'tip', bookingId: t.booking_id, offerId: t.offer_id, hostId: t.host_id, householdId: t.household_id, amountPence: t.amount_pence + t.admin_fee_pence, epicPence: t.admin_fee_pence, hostPence: t.amount_pence, state: 'succeeded', stripeRef: pi.id, mode: 'test', reason: 'tip' });
   const h = await repo.hostById(t.host_id);
   await notifications.notify({ householdId: h.household_id, kind: 'new_tip', title: `A £${(t.amount_pence / 100).toFixed(2)} tip`, link: '/host/reviews?tab=tips', dedupeKey: `tip:${t.id}` }).catch(() => null);
   return t.id;
 }
 
-/**
- * Stripe took a tip that had lost its place to another (failed, then charged late, after a newer tip was started).
- * The money is never left unaccounted for (Codex, 3 Oct 2026): a newer tip not yet paid is stopped and this one
- * stands; one already paid, or one Stripe won't stop, means this one is given back. A refund Stripe refuses throws,
- * so the webhook is retried rather than the charge forgotten.
- */
-async function settleLateTip(pi, tipId, again) {
-  const { rows: [mine] } = await query('select * from booking_tips where id = $1 and stripe_ref = $2', [tipId, pi.id]);
-  if (!mine || mine.state === 'paid') return null;
-  const { rows: [rival] } = await query(`select * from booking_tips where booking_id = $1 and id <> $2 and state = 'pending'`, [mine.booking_id, mine.id]);
-  if (rival && again) {
-    const stopped = !rival.stripe_ref
-      || (await stripe.cancelPayment(rival.stripe_ref, { householdId: rival.household_id, idempotencyKey: `tip-rival-${rival.id}` }).catch(() => null))?.status === 'canceled';
-    if (stopped) {
-      await query(`update booking_tips set state = 'failed' where id = $1 and state = 'pending'`, [rival.id]);
-      return applyTipIntent(pi, { again: false });
-    }
-  }
-  const key = `tip-dup-${pi.id}`;
-  const { rows: [done] } = await query('select 1 from hosting_payments where idem_key = $1', [key]);
-  if (done) return null;
-  const amount = Number(pi.amount_received || pi.amount || mine.amount_pence + mine.admin_fee_pence);
-  const r = await stripe.refund({ paymentIntentId: pi.id, amountPence: amount, cause: 'duplicate_tip', bookingId: mine.booking_id, householdId: mine.household_id, idempotencyKey: key });
-  await query(
-    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, state, mode, cause, idem_key, stripe_ref)
-     values ('refund', $1, $2, $3, $4, $5, 'succeeded', 'test', 'duplicate_tip', $6, $7) on conflict (idem_key) where idem_key is not null do nothing`,
-    [mine.booking_id, mine.offer_id, mine.host_id, mine.household_id, amount, key, r?.id ?? null],
-  );
-  return null;
+async function tipFeeRule() {
+  const t = (await settingsRepo.current()).tip_admin_fee;
+  return t && Number.isFinite(Number(t.pct)) && Number.isFinite(Number(t.minPence)) ? { pct: Number(t.pct), minPence: Number(t.minPence) } : null;
 }
 
 router.post('/booked/:id/payment', async (req, res, next) => {
@@ -692,7 +671,7 @@ export async function offerFreedPlaces({ now = new Date() } = {}) {
 async function bookingsOfHousehold(householdId) {
   const { rows } = await query(
     `select b.*, o.title, o.lane, o.photo_ids, o.min_count, o.time_zone, o.price_mode, o.total_pence, o.state as offer_state, o.host_id as offer_host,
-            exists (select 1 from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state = 'succeeded' and p.cause is distinct from 'duplicate_tip') as refund_done,
+            exists (select 1 from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state = 'succeeded') as refund_done,
             o.venue_label, o.venue, o.address_hidden, o.parents
        from experience_bookings b join host_offers o on o.id = b.offer_id
       where b.household_id = $1 and o.lane is not null
@@ -844,7 +823,7 @@ router.get('/booked/:id', async (req, res, next) => {
     const o = await repo.offerById(b.offer_id);
     const host = await repo.hostById(b.host_id);
     const { rows: kids } = await query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1 order by created_at', [b.id]);
-    const { rows: refunds } = await query(`select amount_pence, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') and cause is distinct from 'duplicate_tip' order by created_at`, [b.id]);
+    const { rows: refunds } = await query(`select amount_pence, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
     const live = b.sessionsList.filter((x) => x.held === 'booked' && x.state === 'scheduled');
     const firstAhead = live.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     const lastEnd = b.sessionsList.length ? new Date(Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime()))) : null;
@@ -876,7 +855,8 @@ router.get('/booked/:id', async (req, res, next) => {
         numbers: settlement,
         dateChange: changed.some((x) => !b.change_seen_at || new Date(x.changed_from.at) > new Date(b.change_seen_at)) ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
         money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy, refunds: refunds.map((r) => ({ pence: r.amount_pence, cause: r.cause, state: r.state, at: r.created_at })) },
-        after: lastEnd && lastEnd <= now ? { happened: b.confirmed_happened ?? null, rated: Boolean(b.rated_at), tipOpen: tipOpen(lastEnd, now) } : null,
+        // The fee rule as the server will charge it, so the screen never shows a different one (Codex, 3 Oct 2026).
+        after: lastEnd && lastEnd <= now ? { happened: b.confirmed_happened ?? null, rated: Boolean(b.rated_at), tipOpen: tipOpen(lastEnd, now), tipFee: await tipFeeRule() } : null,
         dropOff: o.parents === 'drop_off',
       },
     });

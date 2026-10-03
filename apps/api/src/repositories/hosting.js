@@ -1002,6 +1002,11 @@ export async function ratedEventsOf(hostId) {
  */
 export async function holdsBooking(offerId, householdId) {
   if (!householdId) return false;
-  const { rows: [r] } = await query(`select 1 from experience_bookings where offer_id = $1 and household_id = $2 and state <> 'cancelled' limit 1`, [offerId, householdId]);
+  // A place on its waiting list counts too: the Plans row for it must open (Codex, 3 Oct 2026).
+  const { rows: [r] } = await query(
+    `select 1 from experience_bookings where offer_id = $1 and household_id = $2 and state <> 'cancelled'
+     union all select 1 from offer_waitlist where offer_id = $1 and household_id = $2 and state in ('waiting', 'offered') limit 1`,
+    [offerId, householdId],
+  );
   return Boolean(r);
 }

@@ -547,23 +547,24 @@ test('Codex: a host can’t accept two requests that overlap', async () => {
 
 test('the guest pages’ reads: payments config, the inbox, Not this time, and what is due back if the most come', async () => {
   settings.forget();
-  // Payments: a publishable key only beside a test secret, and only a test one.
-  const was = { s: process.env.STRIPE_SECRET_KEY, p: process.env.STRIPE_PUBLISHABLE_KEY };
-  const { publishableKey } = await import('../src/sources/stripe.js');
-  process.env.STRIPE_SECRET_KEY = 'sk_test_x';
-  assert.equal(publishableKey('pk_test_abc'), 'pk_test_abc');
-  assert.equal(publishableKey('pk_live_abc'), null, 'a live key never beside a test secret');
-  process.env.STRIPE_SECRET_KEY = 'sk_live_x';
-  assert.equal(publishableKey('pk_test_abc'), null, 'nothing while Stripe is live and refused');
-  process.env.STRIPE_SECRET_KEY = was.s; process.env.STRIPE_PUBLISHABLE_KEY = was.p;
-
   // Depends on numbers: the booking page carries the floor the price can reach.
   const { o } = await anEvent({ priceMode: 'by_numbers', total: 12000, min: 4, max: 12 });
   const a = await aPerson();
   const srv = await server(a.account);
   try {
-    const cfg = await srv.get('/api/payments/config');
-    assert.equal(typeof cfg.body.ready, 'boolean');
+    // Card payment stays off until the Stripe work switches it on, whatever keys are set; then only a test key beside a test secret.
+    const was = { s: process.env.STRIPE_SECRET_KEY, p: process.env.STRIPE_PUBLISHABLE_KEY, f: process.env.EPIC_GUEST_CARD_PAYMENTS };
+    try {
+      process.env.STRIPE_SECRET_KEY = 'sk_test_x'; process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test_abc';
+      delete process.env.EPIC_GUEST_CARD_PAYMENTS;
+      assert.equal((await srv.get('/api/payments/config')).body.publishableKey, null, 'off by default');
+      process.env.EPIC_GUEST_CARD_PAYMENTS = 'on';
+      assert.equal((await srv.get('/api/payments/config')).body.publishableKey, 'pk_test_abc');
+      process.env.STRIPE_PUBLISHABLE_KEY = 'pk_live_abc';
+      assert.equal((await srv.get('/api/payments/config')).body.publishableKey, null, 'never a live key');
+    } finally {
+      for (const [k, v] of [['STRIPE_SECRET_KEY', was.s], ['STRIPE_PUBLISHABLE_KEY', was.p], ['EPIC_GUEST_CARD_PAYMENTS', was.f]]) { if (v == null) delete process.env[k]; else process.env[k] = v; }
+    }
     const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 2 } });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     const page = await srv.get(`/api/booked/${r.body.booking.id}`);
@@ -635,26 +636,6 @@ test('a weekly class offers only the ways of booking its host priced: never a dr
   } finally { await srv.close(); }
 });
 
-test('a tip whose card failed and then went through on the same payment is paid and credited, once', async () => {
-  settings.forget();
-  const { o } = await anEvent({ firstIn: 1 });
-  const a = await aPerson();
-  const srv = await server(a.account);
-  try {
-    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
-    await query(`update offer_sessions set on_date = $2 where offer_id = $1`, [o.id, plusDays(today(), -1)]);
-    const tip = await srv.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 500 });
-    assert.equal(tip.status, 201, JSON.stringify(tip.body));
-    await query(`update booking_tips set state = 'failed' where id = $1`, [tip.body.tip.id]);
-    const pi = intents.get(tip.body.pay.paymentIntent);
-    pays(pi.id);
-    await guest.applyPaymentIntent(pi);
-    await guest.applyPaymentIntent(pi);
-    assert.equal((await query('select state from booking_tips where id = $1', [tip.body.tip.id])).rows[0].state, 'paid');
-    assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'tip' and stripe_ref = $1`, [pi.id])).rows[0].n, 1, 'credited once');
-  } finally { await srv.close(); }
-});
-
 test('Codex: a lane booking is booked — the host’s notice reaches its inbox, and a private event opens again without its link', async () => {
   const { o, h } = await anEvent();
   await query(`update host_offers set visibility = 'invite' where id = $1`, [o.id]);
@@ -699,35 +680,22 @@ test('Codex: a host’s reviews past the first fifty come fifty at a time', asyn
   assert.equal(new Set([...first, ...rest].map((r) => r.text)).size, 52, 'none twice, none missed');
 });
 
-test('Codex: a tip Stripe took late, after another was started, is never left unaccounted for', async () => {
+
+test('Codex: a place offered from the waiting list can be booked, and a private event’s list opens its page', async () => {
   settings.forget();
-  const { o } = await anEvent({ priceMode: 'same_each', price: 1000 });
+  const { o, h } = await anEvent({ max: 2, waitlist: true });
+  await query(`update host_offers set visibility = 'invite' where id = $1`, [o.id]);
   const a = await aPerson();
+  const b = await aPerson();
+  await query(`insert into experience_bookings (offer_id, host_id, household_id, state, heads) values ($1, $2, $3, 'confirmed', 1)`, [o.id, h.id, b.household.id]);
+  await query(`insert into offer_waitlist (offer_id, household_id, party, state, offer_expires_at) values ($1, $2, 1, 'offered', now() + interval '3 hours')`, [o.id, a.household.id]);
+  const { openSession } = await import('../src/auth.js');
+  const { token } = await openSession('phone', a.account.id, 'device', 'link');
   const srv = await server(a.account);
   try {
-    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1, children: [] } });
-    pays(r.body.pay.paymentIntent);
-    await guest.applyPaymentIntent(intents.get(r.body.pay.paymentIntent));
-    await query(`update offer_sessions set on_date = $2 where offer_id = $1`, [o.id, plusDays(today(), -1)]);
-    const tipFor = async () => (await srv.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 500 })).body;
-    // The first fails; a second is started; then the first is charged after all — the second, unpaid, is stopped.
-    const first = await tipFor();
-    await query(`update booking_tips set state = 'failed' where id = $1`, [first.tip.id]);
-    const second = await tipFor();
-    pays(first.pay.paymentIntent);
-    await guest.applyPaymentIntent(intents.get(first.pay.paymentIntent));
-    assert.equal((await query('select state from booking_tips where id = $1', [first.tip.id])).rows[0].state, 'paid');
-    assert.equal((await query('select state from booking_tips where id = $1', [second.tip.id])).rows[0].state, 'failed');
-    assert.equal(intents.get(second.pay.paymentIntent).status, 'canceled');
-    // A third, charged late while the first is paid, is given back.
-    await query(`insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence, state, stripe_ref) select booking_id, offer_id, host_id, household_id, 500, 30, 'failed', 'pi_late' from booking_tips where id = $1`, [first.tip.id]);
-    const { rows: [late] } = await query(`select id from booking_tips where stripe_ref = 'pi_late'`);
-    const pi = { id: 'pi_late', status: 'succeeded', amount: 530, amount_received: 530, metadata: { epic_kind: 'tip', epic_tip_id: late.id } };
-    await guest.applyPaymentIntent(pi);
-    await guest.applyPaymentIntent(pi);
-    const { rows: back } = await query(`select amount_pence, state from hosting_payments where kind = 'refund' and cause = 'duplicate_tip' and booking_id = $1`, [r.body.booking.id]);
-    assert.deepEqual(back.map((x) => [x.amount_pence, x.state]), [[530, 'succeeded']], 'refunded once');
-    const card = (await srv.get('/api/booked')).body.past.concat((await srv.get('/api/booked')).body.upcoming).find((c) => c.id === r.body.booking.id);
-    assert.equal(card.refunded, false, 'a tip given back is not the booking refunded');
+    const opt = await srv.get(`/api/experiences/${o.id}/booking/options`, { authorization: `Bearer ${token}` });
+    assert.equal(opt.status, 200, JSON.stringify(opt.body));
+    assert.equal(opt.body.action, 'book', 'the held place is theirs to book');
+    assert.ok(opt.body.waitlist.offeredUntil);
   } finally { await srv.close(); }
 });

@@ -45,17 +45,6 @@ export function stripeStatus() {
   return { ready: false, mode: null, note: 'Stripe is not connected yet.' };
 }
 
-/**
- * The publishable key the guest's browser confirms a payment with (guest handoff G6–G11).
- * Public by Stripe's design, but it still comes from Doppler, and only a test key while the
- * secret is a test one — a live publishable key next to a test secret would never match.
- */
-export function publishableKey(key = process.env.STRIPE_PUBLISHABLE_KEY) {
-  const k = String(key ?? '').trim();
-  if (stripeStatus().mode !== 'test' || !/^pk_test_/.test(k)) return null;
-  return k;
-}
-
 function assertReady() {
   const s = stripeStatus();
   if (!s.ready) throw new StripeNotReady(s.mode === 'live' ? 'stripe_live_refused' : 'stripe_not_configured', s.note);
