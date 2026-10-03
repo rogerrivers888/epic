@@ -173,7 +173,7 @@ export function connectAccountBody({ hostId, email = null, legalName = null, dat
 export function wakeAccount(accountId, { householdId = null, businessUrl = null } = {}) {
   return call('POST', `/v2/core/accounts/${encodeURIComponent(accountId)}`, {
     configuration: {
-      merchant: { capabilities: { card_payments: { requested: true } }, mcc: '7999' },
+      merchant: { capabilities: { card_payments: { requested: true } }, mcc: '7999', statement_descriptor: { prefix: 'EPIC' } },
       recipient: { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } },
     },
     ...(businessUrl ? { defaults: { profile: { business_url: businessUrl } } } : {}),
@@ -193,6 +193,17 @@ export function ensureTransfers(accountId, { householdId = null } = {}) {
 }
 
 /** Has the account been asked for card payments yet? A dormant one has no capabilities at all. */
+/**
+ * Guests' statements read "EPIC* <host>" (L11). Stripe's hosted form replaces the prefix with one made from the
+ * website the host gives (sandbox, 3 Oct 2026: "TESTDAY.CO* KATE MORRI"), so it is set again whenever an account is
+ * seen without it.
+ */
+export const descriptorPrefixOk = (a) => !a?.settings?.card_payments || a.settings.card_payments.statement_descriptor_prefix === 'EPIC';
+export function restoreDescriptorPrefix(accountId, { householdId = null } = {}) {
+  return call('POST', `/v2/core/accounts/${encodeURIComponent(accountId)}`, { configuration: { merchant: { statement_descriptor: { prefix: 'EPIC' } } } },
+    { householdId, purpose: 'host.descriptor.restore', v2: true });
+}
+
 export const accountAwake = (a) => Boolean(a?.capabilities && 'card_payments' in a.capabilities);
 
 /**

@@ -847,3 +847,20 @@ test('Codex: a host whose Stripe account was closed gets a new one at payouts; t
     assert.deepEqual([now.stripe_account_id, now.stripe_void_account_id], ['acct_test_1', 'acct_closed_old']);
   } finally { await srv.close(); }
 });
+
+test('L11: a host account whose statement prefix Stripe’s form replaced gets EPIC put back; one with EPIC is left alone', async () => {
+  const { household: h } = await aHousehold(query);
+  const host = await repo.insertHost(h.id, { name: 'Prefix' });
+  await repo.updateHost(host.id, { stripeAccountId: 'acct_prefix_1', stripeAccountModel: 'v2' });
+  const { applyStripeEvent } = await import('../src/routes/hostLanes.js');
+  const acct = (prefix) => ({ id: 'acct_prefix_1', details_submitted: true, charges_enabled: true, payouts_enabled: true, settings: { payouts: { schedule: { interval: 'manual' } }, card_payments: { statement_descriptor_prefix: prefix } }, capabilities: { card_payments: 'active', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [] } });
+  const deliver = async (a) => { accountRead = a; try { await withStripe('sk_test_fake', () => applyStripeEvent({ type: 'account.updated', data: { object: a } })); } finally { accountRead = null; } };
+  calls.length = 0;
+  await deliver(acct('TESTDAY.CO'));
+  const fix = calls.find((c) => c.url === '/v2/core/accounts/acct_prefix_1' && c.method === 'POST');
+  assert.ok(fix, 'put back');
+  assert.equal(JSON.parse(fix.body).configuration.merchant.statement_descriptor.prefix, 'EPIC');
+  calls.length = 0;
+  await deliver(acct('EPIC'));
+  assert.equal(calls.some((c) => c.url === '/v2/core/accounts/acct_prefix_1' && c.method === 'POST'), false);
+});

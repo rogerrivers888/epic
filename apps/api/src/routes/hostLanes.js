@@ -1208,7 +1208,10 @@ export async function applyStripeEvent(event) {
         // Stripe's events can arrive out of order, so the account as it is now is read back and stored — never the
         // event's own snapshot, which may be older than one already applied. Unreadable: the event fails and Stripe
         // retries it (Codex, 3 Oct 2026).
-        await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(await stripe.retrieveAccount(obj.id, { householdId: host.household_id })), { accountId: obj.id });
+        let read = null;
+        await applyAccountFacts(host.id, async () => stripe.hostPatchFromAccount(read = await stripe.retrieveAccount(obj.id, { householdId: host.household_id })), { accountId: obj.id });
+        // "EPIC* <host>" on the guest's statement (L11): put back if Stripe's form replaced it.
+        if (read && !stripe.descriptorPrefixOk(read)) await stripe.restoreDescriptorPrefix(obj.id, { householdId: host.household_id }).catch((err) => console.error(`epic-api: descriptor prefix for ${obj.id} — ${err.code ?? err.message}`));
         // Stripe asking for ID from a host whose check passed is never sent to the host (L7 point 4, owner, 3 Oct
         // 2026): the requirements just stored raise it in the back office for a person (hostingAdmin › host, Safety).
       }
