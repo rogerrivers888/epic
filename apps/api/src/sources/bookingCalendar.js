@@ -9,7 +9,7 @@
  * rented is ever in it.
  *
  * Each session keeps one UID for good (`<booking>-<session>@epic.day`), and SEQUENCE rises with
- * each file, so a calendar that already holds the event updates it rather than adding a second.
+ * each change, so a calendar that already holds the event updates it rather than adding a second.
  */
 
 import { query } from '../db.js';
@@ -36,12 +36,11 @@ function fold(line) {
   out.push((first ? '' : ' ') + rest.toString('utf8'));
   return out.join('\r\n');
 }
-const stamp = (date, time) => `${date.replace(/-/g, '')}T${(time ?? '09:00').replace(':', '')}00`;
 const utcStamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 const dayAfter = (date) => { const d = new Date(`${date}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return ymd(d); };
 
 /** The calendar file for one booking, or null when it has no session still to come. */
-export async function bookingCalendar(bookingId, { now = new Date(), appUrl = '' } = {}) {
+export async function bookingCalendar(bookingId, { now = new Date(), changedAt = now, appUrl = '', from = process.env.EPIC_MAIL_FROM } = {}) {
   if (!UUID.test(String(bookingId ?? ''))) return null;
   const { rows: [b] } = await query(
     `select b.id, b.state, o.title, o.venue_label, o.venue_area, o.address_hidden, o.time_zone, o.duration_min, o.lane
@@ -65,25 +64,31 @@ export async function bookingCalendar(bookingId, { now = new Date(), appUrl = ''
   const sessions = rows.filter((s) => endOf(s) > now);
   if (!sessions.length) return null;
   const where = (b.address_hidden === false || ['confirmed', 'attended'].includes(b.state) ? b.venue_label : null) ?? b.venue_area ?? null;
-  // Rises with every file sent, so a calendar keeps the newest.
-  const sequence = Math.floor(now.getTime() / 1000);
-  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Epic//Bookings//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+  // The revision is when the change was made — the notification's own time, in tenths of a second since 2026 — so a
+  // "moved" always outranks the "booked" before it, however close together the two are sent (Codex, 3 Oct 2026).
+  const sequence = Math.max(0, Math.floor((new Date(changedAt).getTime() - Date.UTC(2026, 0, 1)) / 100));
+  // A published event names its organiser (iTIP); with no sending address it is a plain file to import instead.
+  const organiser = /([^\s<>]+@[^\s<>]+)/.exec(String(from ?? ''))?.[1] ?? null;
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Epic//Bookings//EN', 'CALSCALE:GREGORIAN', ...(organiser ? ['METHOD:PUBLISH'] : [])];
+  // Timed entries are written in UTC, so no client has to know the event's time zone (Codex, 3 Oct 2026).
+  const at = (date, time) => utcStamp(localInstant(date, time, tz));
   for (const s of sessions) {
     const date = ymd(s.on_date);
     const endDate = ymd(s.ends_on) ?? date;
     const start = hm(s.starts_at);
     const end = hm(s.ends_at);
     lines.push('BEGIN:VEVENT', `UID:${b.id}-${s.id}@epic.day`, `SEQUENCE:${sequence}`, `DTSTAMP:${utcStamp(now)}`);
+    if (organiser) lines.push(`ORGANIZER;CN=Epic:mailto:${organiser}`);
     // A one-off over several days is stored a day a session: the first day has only its start, the last only its
     // end, the days between neither (lanes.js sessionsFor). Each runs to or from midnight (Codex, 3 Oct 2026).
     if (start && end) {
-      lines.push(`DTSTART;TZID=${tz}:${stamp(date, start)}`, `DTEND;TZID=${tz}:${stamp(endDate, end)}`);
+      lines.push(`DTSTART:${at(date, start)}`, `DTEND:${at(endDate, end)}`);
     } else if (start) {
-      lines.push(`DTSTART;TZID=${tz}:${stamp(date, start)}`);
-      if (b.lane === 'oneoff') lines.push(`DTEND;TZID=${tz}:${stamp(dayAfter(endDate), '00:00')}`);
+      lines.push(`DTSTART:${at(date, start)}`);
+      if (b.lane === 'oneoff') lines.push(`DTEND:${at(dayAfter(endDate), '00:00')}`);
       else lines.push(`DURATION:PT${Math.max(15, Number(b.duration_min) || 60)}M`);
     } else if (end) {
-      lines.push(`DTSTART;TZID=${tz}:${stamp(date, '00:00')}`, `DTEND;TZID=${tz}:${stamp(endDate, end)}`);
+      lines.push(`DTSTART:${at(date, '00:00')}`, `DTEND:${at(endDate, end)}`);
     } else {
       // No time either end: an all-day entry on its date(s).
       lines.push(`DTSTART;VALUE=DATE:${date.replace(/-/g, '')}`, `DTEND;VALUE=DATE:${dayAfter(endDate).replace(/-/g, '')}`);
@@ -95,7 +100,7 @@ export async function bookingCalendar(bookingId, { now = new Date(), appUrl = ''
   }
   lines.push('END:VCALENDAR');
   const name = `${String(b.title ?? 'epic').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'epic'}.ics`;
-  return { name, content: lines.map(fold).join('\r\n') + '\r\n', contentType: 'text/calendar; charset=utf-8; method=PUBLISH' };
+  return { name, content: lines.map(fold).join('\r\n') + '\r\n', contentType: `text/calendar; charset=utf-8${organiser ? '; method=PUBLISH' : ''}` };
 }
 
 /** The booking a notification is about, from its link (`/bookings/<id>`). */

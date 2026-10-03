@@ -122,7 +122,7 @@ async function attachmentsFor(row, calendar) {
   if (!CALENDAR_KINDS.has(row.kind)) return [];
   const id = bookingOfLink(row.link);
   if (!id) return [];
-  const file = await calendar(id, { appUrl: appUrl() }).catch(() => null);
+  const file = await calendar(id, { appUrl: appUrl(), changedAt: row.created_at }).catch(() => null);
   return file ? [file] : [];
 }
 

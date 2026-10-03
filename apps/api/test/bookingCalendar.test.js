@@ -12,7 +12,10 @@ const { aHousehold, testDatabase } = await import('./helpers/db.js');
 const { query, pool } = await testDatabase();
 const notifications = await import('../src/repositories/notifications.js');
 const { bookingCalendar, bookingOfLink } = await import('../src/sources/bookingCalendar.js');
-const { plusDays, localDay } = await import('../src/domain/lanes.js');
+const { plusDays, localDay, localInstant } = await import('../src/domain/lanes.js');
+
+process.env.EPIC_MAIL_FROM = 'Epic <hello@epic.day>';
+const utc = (day, time) => localInstant(day, time, 'Europe/London').toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 
 test.after(() => pool.end());
 
@@ -60,9 +63,9 @@ test('one entry for each booked session still to come, with a UID that stays the
   assert.ok(ics.includes(`UID:${b.id}-${sessions[1].id}@epic.day`));
   assert.ok(ics.includes(`UID:${b.id}-${sessions[3].id}@epic.day`));
   assert.ok(!ics.includes(sessions[0].id) && !ics.includes(sessions[2].id) && !ics.includes(sessions[4].id));
-  const day = plusDays(today(), 7).replace(/-/g, '');
-  assert.ok(ics.includes(`DTSTART;TZID=Europe/London:${day}T100000`));
-  assert.ok(ics.includes(`DTEND;TZID=Europe/London:${day}T120000`));
+  assert.ok(ics.includes(`DTSTART:${utc(plusDays(today(), 7), '10:00')}`), 'in UTC, so no client needs the time zone');
+  assert.ok(ics.includes(`DTEND:${utc(plusDays(today(), 7), '12:00')}`));
+  assert.ok(ics.includes('METHOD:PUBLISH') && ics.includes('ORGANIZER;CN=Epic:mailto:hello@epic.day'));
   // No start time: a whole-day entry.
   assert.ok(ics.includes(`DTSTART;VALUE=DATE:${plusDays(today(), 21).replace(/-/g, '')}`));
   assert.ok(ics.includes('SUMMARY:Swim\\, splash\\; and float'));
@@ -137,9 +140,9 @@ test('a one-off over three days: the first from its start to midnight, the middl
   const { b } = await oneBooking({ sessions: [{ on: d(10), start: '15:00' }, { on: d(11) }, { on: d(12), end: '12:00' }] });
   const ics = unfold((await bookingCalendar(b.id)).content);
   const c = (n) => d(n).replace(/-/g, '');
-  assert.ok(ics.includes(`DTSTART;TZID=Europe/London:${c(10)}T150000\r\nDTEND;TZID=Europe/London:${c(11)}T000000`));
+  assert.ok(ics.includes(`DTSTART:${utc(d(10), '15:00')}\r\nDTEND:${utc(d(11), '00:00')}`));
   assert.ok(ics.includes(`DTSTART;VALUE=DATE:${c(11)}\r\nDTEND;VALUE=DATE:${c(12)}`));
-  assert.ok(ics.includes(`DTSTART;TZID=Europe/London:${c(12)}T000000\r\nDTEND;TZID=Europe/London:${c(12)}T120000`));
+  assert.ok(ics.includes(`DTSTART:${utc(d(12), '00:00')}\r\nDTEND:${utc(d(12), '12:00')}`));
   assert.ok(!ics.includes('DURATION'));
 });
 
@@ -157,4 +160,14 @@ test('a carriage return in a title cannot start a line of its own', async () => 
   const ics = (await bookingCalendar(b.id)).content;
   assert.ok(ics.includes('SUMMARY:Swim\\nX-EVIL:1'));
   assert.ok(!/\r(?!\n)/.test(ics));
+});
+
+test('a later change always carries a higher revision, and no sending address means a plain file to import', async () => {
+  const { b } = await oneBooking({ sessions: [{ on: plusDays(today(), 5), start: '10:00', end: '11:00' }] });
+  const seq = async (changedAt) => Number(/SEQUENCE:(\d+)/.exec((await bookingCalendar(b.id, { changedAt })).content)[1]);
+  const t = new Date();
+  assert.ok((await seq(new Date(t.getTime() + 200))) > (await seq(t)), 'two changes a fifth of a second apart');
+  assert.ok((await seq(t)) < 2 ** 31, 'fits a 32-bit integer');
+  const plain = await bookingCalendar(b.id, { from: '' });
+  assert.ok(!plain.content.includes('METHOD:') && !plain.content.includes('ORGANIZER') && !plain.contentType.includes('method'));
 });
