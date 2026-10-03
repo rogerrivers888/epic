@@ -274,22 +274,30 @@ function EditAnswers({ booking, onClose, onSaved }: { booking: Booking; onClose:
   // The host's list, plus anything told before the host changed it — shown so it can be taken back.
   const [dietList] = useState(() => [...new Set([...dietChoices(q), ...formOf(booking.answers).diet])]);
   const [failed, setFailed] = useState<string | null>(null);
+  // An answer the host has since taken off their list (or a question turned off) is still shown, so it can be
+  // taken back — otherwise saving anything would resend it and be refused (Codex, 3 Oct 2026).
+  const [told] = useState(() => formOf(booking.answers));
+  const bringItems: { id: string; name: string }[] = q.bring?.on ? (q.bring.items ?? []) : [];
+  const bringList = told.bring && !bringItems.some((it) => it.name === told.bring) ? [...bringItems, { id: `told:${told.bring}`, name: told.bring }] : bringItems;
+  const stayPlaces: { id: string; name: string }[] = q.stay?.on ? (q.stay.places ?? []) : [];
+  const stayList = told.stay && !stayPlaces.some((pl) => pl.name === told.stay) ? [...stayPlaces, { id: `told:${told.stay}`, name: told.stay }] : stayPlaces;
+  const dietShown = dietOn ? dietList : told.diet;
   return (
     <GuestSheet title={`What you told ${firstName(booking.event.host.name)}`} onClose={onClose}>
-      {dietOn ? <Chips items={dietList.map((d) => ({ key: d, label: d, on: form.diet.includes(d), onPress: () => set({ diet: form.diet.includes(d) ? form.diet.filter((x) => x !== d) : [...form.diet, d] }) }))} /> : null}
-      {q.plusOne?.on ? <Chips items={[{ label: 'Bringing someone', on: form.plusOne, onPress: () => set({ plusOne: !form.plusOne }) }]} /> : null}
-      {q.bring?.on && q.bring.items?.length ? (
+      {dietShown.length ? <Chips items={dietShown.map((d) => ({ key: d, label: d, on: form.diet.includes(d), onPress: () => set({ diet: form.diet.includes(d) ? form.diet.filter((x) => x !== d) : [...form.diet, d] }) }))} /> : null}
+      {q.plusOne?.on || told.plusOne ? <Chips items={[{ label: 'Bringing someone', on: form.plusOne, onPress: () => set({ plusOne: !form.plusOne }) }]} /> : null}
+      {bringList.length ? (
         <>
           <Para>Bring something</Para>
-          <Chips items={q.bring.items.map((it: { id: string; name: string }) => (taken.has(it.name) && form.bring !== it.name
+          <Chips items={bringList.map((it) => (taken.has(it.name) && form.bring !== it.name
             ? { key: it.id, label: `${it.name} · taken`, on: false, disabled: true, onPress: () => {} }
             : { key: it.id, label: it.name, on: form.bring === it.name, onPress: () => set({ bring: form.bring === it.name ? null : it.name }) }))} />
         </>
       ) : null}
-      {q.stay?.on && q.stay.places?.length ? (
+      {stayList.length ? (
         <>
           <Para>Stay over</Para>
-          <Chips items={q.stay.places.map((pl: { id: string; name: string }) => ({ key: pl.id, label: pl.name, on: form.stay === pl.name, onPress: () => set({ stay: form.stay === pl.name ? null : pl.name }) }))} />
+          <Chips items={stayList.map((pl) => ({ key: pl.id, label: pl.name, on: form.stay === pl.name, onPress: () => set({ stay: form.stay === pl.name ? null : pl.name }) }))} />
         </>
       ) : null}
       <Field value={form.note} onChange={(v) => set({ note: v })} placeholder="Anything else" height={72} maxLength={500} />
