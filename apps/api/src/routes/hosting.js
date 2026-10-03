@@ -1667,11 +1667,13 @@ router.post('/experiences/:id/book', async (req, res, next) => {
      * is made against the offer as it is, never as it was (Codex, 12 Sep 2026).
      */
     const booking = await withTransaction(async (client) => {
+      // The lock Stop hosting takes, and first, as it does: a booking and a stop never cross (Codex, 3 Oct 2026).
+      if (ahead?.host_id) await client.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${ahead.host_id}`]);
       const o = await repo.lockOffer(req.params.id, client);
       if (!o || o.state !== 'live') throw refuse(409, 'not_bookable', o?.state === 'paused' ? `This is paused${o.paused_until ? ` — back ${ymd(o.paused_until)}` : ''}. It is not taking bookings just now.` : 'This experience is not taking bookings.');
       // On the transaction's own connection: a second pooled one per request would starve the pool under a burst.
       const host = await repo.hostById(o.host_id, client);
-      if (!host) throw refuse(409, 'not_bookable', 'This experience is not taking bookings.');
+      if (!host || host.stopped_at || host.paused) throw refuse(409, 'not_bookable', 'This experience is not taking bookings.');
       if (host.household_id === household.id) throw refuse(409, 'own_offer', 'You cannot book your own experience.');
       /**
        * And asked again under the lock.
