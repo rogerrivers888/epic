@@ -458,9 +458,18 @@ export function membershipCheckoutBody({ customerId, priceId, householdId, planK
 }
 
 /** The customer's Checkout sessions still open — any of them payable. */
-export function openCheckouts(customerId, { householdId = null } = {}) {
-  return call('GET', '/checkout/sessions', { customer: customerId, status: 'open', limit: 20 }, { householdId, purpose: 'membership.checkout.list' })
-    .then((r) => r?.data ?? []);
+export async function openCheckouts(customerId, { householdId = null } = {}) {
+  // Every page: a session past the first page is as payable as one on it (Codex, 3 Oct 2026).
+  const out = [];
+  let after;
+  for (let page = 0; page < 50; page += 1) {
+    const r = await call('GET', '/checkout/sessions', { customer: customerId, status: 'open', limit: 100, starting_after: after }, { householdId, purpose: 'membership.checkout.list' });
+    const data = r?.data ?? [];
+    out.push(...data);
+    if (!r?.has_more || !data.length) break;
+    after = data[data.length - 1].id;
+  }
+  return out;
 }
 
 export function membershipCheckout(args, { idempotencyKey = null } = {}) {

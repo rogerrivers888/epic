@@ -151,7 +151,7 @@ const invoiceSubscription = (inv) => (typeof inv?.subscription === 'string' ? in
   ?? inv?.parent?.subscription_details?.subscription ?? null;
 
 /** Read the subscription back and write it down. Returns the stored row, or null when it is not one of ours. */
-async function sync(subscriptionId, { pauseReason = null, changedAt = null } = {}) {
+async function sync(subscriptionId, { pauseReason = null, changedAt = null, snapshotPriceId = null } = {}) {
   // Stamped before the read, so an older read finishing later is dropped rather than written over a newer one.
   const stamp = await billing.readStamp();
   const sub = await stripe.retrieveSubscription(subscriptionId);
@@ -165,6 +165,10 @@ async function sync(subscriptionId, { pauseReason = null, changedAt = null } = {
   // The subscription's customer is the household's, however the household came to have it.
   if (customer) await billing.setCustomer(householdId, customer);
   const facts = stripe.membershipFromSubscription(sub);
+  // The event's time dates a price change only when the event itself shows the price read back now — otherwise it
+  // is the time of something earlier (a late or out-of-order delivery), and the change is dated when it is seen
+  // (Codex, 3 Oct 2026).
+  if (!(snapshotPriceId && snapshotPriceId === facts.priceId)) changedAt = null;
   try {
     return await billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason, stamp, changedAt });
   } catch (err) {
@@ -191,7 +195,7 @@ export async function applyMembershipEvent(event) {
     return true;
   }
   if (type.startsWith('customer.subscription.') && isMembership(obj)) {
-    const row = await sync(obj.id, { changedAt: at });
+    const row = await sync(obj.id, { changedAt: at, snapshotPriceId: obj?.items?.data?.[0]?.price?.id ?? null });
     // Stripe's three-day warning: the backstop for the seven-day reminder, sent only if that one never went.
     if (type === 'customer.subscription.trial_will_end' && row) await remind(await billing.claimReminderFor(row.id));
     return true;

@@ -41,7 +41,13 @@ const fake = http.createServer((req, res) => {
     if (req.url === '/v1/prices' && req.method === 'POST') { priceMade += 1; return json({ id: 'price_solo_599', product: 'epic_membership_solo' }); }
     if (req.url === '/v1/checkout/sessions' && req.method === 'POST') return json({ id: 'cs_m_1', url: 'https://checkout.stripe.test/m' });
     if (req.url === '/v1/billing_portal/sessions' && req.method === 'POST') return json({ url: 'https://billing.stripe.test/p' });
-    if (req.url.startsWith('/v1/checkout/sessions?')) return json({ data: openSessions });
+    if (req.url.startsWith('/v1/checkout/sessions?')) {
+      // Two pages when there are more than one: the second after the first page's last id.
+      const after = new URL(req.url, 'http://x').searchParams.get('starting_after');
+      const from = after ? openSessions.findIndex((x) => x.id === after) + 1 : 0;
+      const page = openSessions.slice(from, from + 1);
+      return json({ data: page, has_more: from + 1 < openSessions.length });
+    }
     if (req.url.endsWith('/expire')) return json({ id: req.url.split('/')[4], status: 'expired' });
     if (req.url.startsWith('/v1/checkout/sessions/')) return json({ id: req.url.split('/')[4], ...checkoutRead });
     if (req.url.startsWith('/v1/subscriptions/') && req.method === 'DELETE') { const s = subs.get(req.url.split('/')[3].split('?')[0]); return json({ ...s, status: 'canceled', latest_invoice: null }); }
@@ -508,7 +514,8 @@ test('a Checkout whose answer was lost is closed before another opens', async ()
   const { account } = await aMember();
   const srv = await server(account);
   try {
-    openSessions = [{ id: 'cs_lost', metadata: { epic_kind: 'membership' } }, { id: 'cs_other', metadata: { epic_kind: 'pro' } }];
+    // The lost one on the second page.
+    openSessions = [{ id: 'cs_other', metadata: { epic_kind: 'pro' } }, { id: 'cs_lost', metadata: { epic_kind: 'membership' } }];
     calls.length = 0;
     assert.equal((await srv.send('POST', '/api/membership/checkout', { plan: 'solo' })).status, 200);
     assert.ok(calls.some((c) => c.url === '/v1/checkout/sessions/cs_lost/expire'));
@@ -532,4 +539,17 @@ test('a first payment given up on is no membership; a pause and a price change a
   const m = await billing.membershipBySubscription(sub.id);
   assert.equal(new Date(m.paused_at).toISOString(), '2023-04-01T00:00:00.000Z');
   assert.equal(m.price_history[0].until.slice(0, 10), '2023-03-10');
+});
+
+test('a late event never dates a price change it did not show', async () => {
+  const { household } = await aMember();
+  const sub = aSub(household.id, { status: 'active', trialEnd: new Date('2022-01-01T00:00:00Z') });
+  await applyStripeEvent(event('customer.subscription.updated', sub));
+  // Stripe now has Pro; an old February event (showing Solo) arrives late.
+  const februarySnapshot = JSON.parse(JSON.stringify(sub));
+  sub.items.data[0].price = { ...sub.items.data[0].price, id: 'price_pro_1299', unit_amount: 1299, metadata: { epic_plan: 'pro' } };
+  await applyStripeEvent({ ...event('customer.subscription.updated', februarySnapshot), created: secs(new Date('2022-02-01T00:00:00Z')) });
+  const m = await billing.membershipBySubscription(sub.id);
+  assert.equal(m.plan_key, 'pro');
+  assert.notEqual(m.price_history[0].until.slice(0, 7), '2022-02', 'not dated by an event that showed the old price');
 });
