@@ -270,10 +270,10 @@ const SEEDS = [
     channels: { email: { subject: '{{#if host}}You\'re on the Epic hosts list{{else}}You\'re on the Epic list{{/if}}', body: '{{#if host}}You\'re on the hosts list. We\'ll be in touch before launch.{{else}}You\'re on the list. We\'ll email you when the app\'s out.{{/if}}\n\nDidn\'t sign up? Just ignore this.' } },
   },
   // ---- New wordings: nothing sends these yet; the owner sees them first ---------
-  { key: 'guest_message', name: 'A guest sent you a message', trigger: 'booking.guest_message', notificationKind: 'guest_message', state: 'new_wording', channels: notif('{{guestName}} sent you a message about {{title or "your event"}}', '“{{message}}”') },
+  { key: 'guest_message', name: 'A guest sent you a message', trigger: 'booking.guest_message', notificationKind: 'host_guest_message', state: 'new_wording', channels: notif('{{guestName}} sent you a message about {{title or "your event"}}', '“{{message}}”') },
   { key: 'host_question', name: 'A guest asked a question', trigger: 'booking.host_question', notificationKind: 'host_question', state: 'new_wording', channels: notif('A question about {{title or "your event"}}', '{{guestName}} asked: “{{question}}”') },
   { key: 'check_expiring', name: 'Checked is running out', trigger: 'host.checked_expiring', notificationKind: 'check_expiring', state: 'new_wording', channels: notif('Your {{what}} runs out on {{on}}', 'Upload the new one under Checks before then, or your drop-off events pause on that day. Bookings already made are kept.') },
-  { key: 'event_live', name: 'Your event is live', trigger: 'event.live', notificationKind: 'review_changes_requested', state: 'new_wording', channels: notif('Your event is live: {{title or "your event"}}', 'It has been approved and is taking bookings now.') },
+  { key: 'event_live', name: 'Your event is live', trigger: 'event.live', notificationKind: 'event_live', state: 'new_wording', channels: notif('Your event is live: {{title or "your event"}}', 'It has been approved and is taking bookings now.') },
   {
     key: 'referee_request', name: 'Referee request', trigger: 'host.referee_requested', state: 'new_wording',
     channels: { email: { subject: '{{hostName}} has named you as a referee on Epic', body: '{{hostName}} wants to host events on Epic and has named you as a referee.\n\nPlease tell us how you know them, and whether you have any concern about them looking after children:\n{{url}}\n\nIt takes about two minutes. If you don\'t know {{hostName}}, ignore this.' } },

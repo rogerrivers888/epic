@@ -333,6 +333,8 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   if (!want.length) throw refuse(400, 'nothing_to_send', `“${t.name}” has nothing that can be delivered.`);
   if (want.includes('in_app')) {
     if (!t.notificationKind) throw refuse(400, 'no_kind', `“${t.name}” has no notification kind to write an in-app message under.`);
+    // A kind the notifications list does not know yet is registered there when its sender is wired, not guessed here (Codex, 3 Oct 2026).
+    if (!notifications.KINDS[t.notificationKind]) throw refuse(409, 'kind_not_registered', `“${t.name}” is written under “${t.notificationKind}”, which in-app notifications do not have yet.`);
     if (!to.householdId && !to.accountId) throw refuse(400, 'no_recipient', 'An in-app message needs a household or an account.');
   }
   const values = await valuesFor(t.trigger, fields);
@@ -349,7 +351,8 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   if (want.includes('in_app')) {
     const row = await notifications.notify({
       householdId: to.householdId ?? null, accountId: to.accountId ?? null, kind: t.notificationKind,
-      title: out.in_app.title, body: out.in_app.body, link, dedupeKey, email: false,
+      // Scoped to the template, as message_sends is: one template's key never silences another's (Codex, 3 Oct 2026).
+      title: out.in_app.title, body: out.in_app.body, link, dedupeKey: dedupeKey ? `template:${t.key}:${dedupeKey}` : null, email: false,
     });
     sent.in_app = row ? { written: true, id: row.id } : { written: false, reason: 'already_sent' };
     await logSend({ t, channel: 'in_app', purpose: 'deliver', toKind: to.accountId ? 'account' : 'household', toRef, result: sent.in_app, by });

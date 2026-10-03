@@ -144,3 +144,16 @@ test('marketing consent is asked of the sign-up the message is for', async () =>
   assert.equal(await templates.hasMarketingConsent('alert@example.com', 'tell_me_when.match', { alertId: climbing.id }), true);
   assert.equal(await templates.hasMarketingConsent('alert@example.com', 'booking.confirmed'), false);
 });
+
+test('every in-app template is written under a notification kind for its own audience, or waits to be registered', async () => {
+  const { KINDS } = await import('../src/repositories/notifications.js');
+  // Kinds the new templates need, registered in repositories/notifications.js (the hosting chat's) when their senders are wired.
+  const PENDING = new Set(['checks_lapsed', 'children_paused', 'complaint', 'contact_details_hidden', 'standing', 'strike', 'host_guest_message', 'event_live']);
+  const HOST = new Set(['host.strike', 'host.rating_dropped', 'host.appeal_decided', 'host.back_to_draft', 'host.late_change', 'complaint.opened', 'booking.guest_message', 'booking.host_question', 'event.live', 'complaint.reply_warn_host']);
+  for (const t of SEED_TEMPLATES.filter((x) => x.channels.in_app && x.notificationKind)) {
+    if (KINDS[t.notificationKind]) {
+      if (HOST.has(t.trigger)) assert.equal(KINDS[t.notificationKind].audience, 'host', `${t.key} goes to a host`);
+    } else assert.ok(PENDING.has(t.notificationKind), `${t.key}: “${t.notificationKind}” is neither registered nor waiting to be`);
+  }
+  await assert.rejects(templates.deliver({ templateKey: 'contact_details_hidden', to: { householdId: '00000000-0000-0000-0000-000000000000' } }), { code: 'kind_not_registered' });
+});
