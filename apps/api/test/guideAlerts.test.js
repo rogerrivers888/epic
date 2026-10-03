@@ -223,6 +223,12 @@ test('the place lookup: counties from the list, postcodes from ONS, names only o
   const bath = await placeOf('bath', { fetchImpl: fake({ '/places?q=bath': names }) });
   assert.deepEqual([bath.name, bath.county, bath.source], ['Bath', 'Bath and North East Somerset', 'os-open-names'], 'the city, not the village or the street');
   assert.equal(await placeOf('Bat', { fetchImpl: fake({ '/places?q=Bat': names }) }), null, 'no exact match is no answer');
+  const newports = [
+    { name_1: 'Newport', local_type: 'Town', county_unitary: 'Isle of Wight' },
+    { name_1: 'Newport', local_type: 'Town', county_unitary: 'Telford and Wrekin' },
+    { name_1: 'Newport', local_type: 'Village', county_unitary: 'Essex' },
+  ];
+  assert.equal(await placeOf('Newport', { fetchImpl: fake({ '/places?q=Newport': newports }) }), null, 'two towns of one name is no answer');
   assert.equal(await placeOf('Reading', { fetchImpl: async () => { throw new Error('down'); } }), null, 'a failed lookup is no answer, never a throw');
   assert.equal(await placeOf('   '), null);
 });

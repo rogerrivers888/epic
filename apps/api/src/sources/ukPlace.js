@@ -9,7 +9,8 @@
 // A county is not a place Open Names knows — "Dorset" finds nothing, and "Isle
 // of Wight" finds a hamlet in Surrey — so the counties are a fixed list, matched
 // first. A place name is accepted only on an exact match, the biggest kind of
-// settlement winning. Anything else is not a guess: it answers null, and the
+// settlement winning, and only when it is the one place of that kind with the
+// name. Anything else is not a guess: it answers null, and the
 // sign-up keeps the words as typed (the can't-speak rule).
 
 import { userAgent } from '../origins.js';
@@ -91,6 +92,9 @@ export async function placeOf(typed, { fetchImpl = fetch } = {}) {
       .sort((a, b) => rank(a.local_type) - rank(b.local_type));
     const p = exact[0];
     if (!p) return null;
+    // Two of the biggest kind with one name — the Newports — is not a place we can
+    // tell from the words: unresolved, never whichever the answer listed first (Codex).
+    if (exact[1] && rank(exact[1].local_type) === rank(p.local_type)) return null;
     return { name: p.name_1, county: p.county_unitary ?? null, region: p.region ?? null, country: p.country ?? null, lat: p.latitude ?? null, lng: p.longitude ?? null, source: 'os-open-names' };
   } catch (err) {
     console.error(`epic-api: guide alert — place not looked up: ${err.message}`);
