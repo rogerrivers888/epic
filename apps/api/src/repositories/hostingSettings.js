@@ -70,12 +70,13 @@ export async function change(key, { value, isOn }, { by = null, why, approvalId 
     if (!row) return { status: 404, error: 'There is no such setting.' };
     // An undo names the change it undoes, and is refused under the setting's own lock if anything came after it:
     // the check and the write are one step, so nothing can land between them (Codex, 3 Oct 2026).
+    // Still the latest word means the setting holds exactly what that change set — read under the lock, so it holds
+    // whatever order transactions' timestamps say (Codex, 3 Oct 2026).
     if (ifLatest) {
-      const { rows: [later] } = await c.query(
-        `select 1 from hosting_changes x where x.subject_kind = 'setting' and x.subject_id = $1 and x.id <> $2
-            and x.at > (select at from hosting_changes where id = $2) limit 1`, [key, ifLatest],
-      );
-      if (later) return { status: 409, error: 'It has been changed since. Undo the latest change first.' };
+      const { rows: [ch] } = await c.query('select after from hosting_changes where id = $1', [ifLatest]);
+      const after = ch?.after ?? null;
+      const same = after && JSON.stringify(after.value) === JSON.stringify(row.value) && (after.is_on === undefined || after.is_on === row.is_on);
+      if (!same) return { status: 409, error: 'It has been changed since. Undo the latest change first.' };
     }
     const ok = checkSetting(row, { value, isOn });
     if (!ok.ok) return { status: 400, error: ok.message };
