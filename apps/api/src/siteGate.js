@@ -185,6 +185,9 @@ export async function siteGate(req, res, next) {
   if (req.method === 'POST' && path === '/api/postmark/events') return next();
   // Stripe's events (routes/hostLanes.js) are admitted by their own signature, as Postmark's are by its token.
   if (req.method === 'POST' && path === '/api/stripe/webhook') return next();
+  // The membership reminder's one-tap cancel (routes/membership.js): its unguessable token is the credential, and it
+  // only opens Stripe's own cancel page for that membership — an email link can carry no password and no session.
+  if (req.method === 'GET' && /^\/api\/membership\/cancel\/[^/]+$/.test(path)) return next();
   // The sign-in door stays open (guarded by the passcode/link + signInGuard.js) —
   // but only the GET status check and the POST sign-in verbs. DELETE /api/session
   // (sign out, and `?all=1` signs every device out) must pass through the gate's
