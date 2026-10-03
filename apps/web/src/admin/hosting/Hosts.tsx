@@ -24,7 +24,8 @@ import { useViewport } from '../../hooks/useViewport';
 import { Ladder, Num, Word, Blank, Act, Stat, Kicker, Tick, Progress, type Col } from '../table';
 import { FilterRow, Dropdown, TextAction, type DropdownOption } from '../kit';
 import { Explain, type Tip } from '../explain';
-import { KIND_WORDS, KIND_OPTIONS, amberTone, liveTone, ownerAct, useLoad, useSorted, gbp, when } from './kit';
+import { KIND_WORDS, KIND_OPTIONS, Opens, amberTone, liveTone, ownerAct, useLoad, useOpen, useSorted, gbp, when } from './kit';
+import { paths } from '../../routes';
 
 // ---------------------------------------------------------------------------
 // shared with Events.tsx
@@ -176,7 +177,7 @@ type Video = {
 };
 type VideosPayload = { profile: { name: string; town: string | null; photo: string | null; line: string | null }; videos: Video[] };
 
-type Review = { id: string; date: string | null; event: string; offerId: string; household: string; rating: number | null; review: string | null; reply: string | null; shown: boolean };
+type Review = { id: string; date: string | null; event: string; offerId: string; household: string; householdId?: string; bookingId?: string | null; rating: number | null; review: string | null; reply: string | null; shown: boolean };
 type ReviewsPayload = { rows: Review[]; capped: boolean };
 
 type Change = { id: string; subjectKind: string; subjectId: string; field: string; before: unknown; after: unknown; why: string | null; by: string | null; byLabel: string | null; approvalId: string | null; at: string };
@@ -682,6 +683,7 @@ function Reviews({ id, canManage }: { id: string; canManage: boolean }) {
   const { sort, desc, onSort } = useSortState('r', REVIEW_SORTS, null);
   const [busy, setBusy] = useState<string | null>(null);
   const [fault, setFault] = useState<string | null>(null);
+  const open = useOpen();
 
   const events = useMemo(() => {
     const seen = new Map<string, string>();
@@ -705,8 +707,8 @@ function Reviews({ id, canManage }: { id: string; canManage: boolean }) {
   const dim = (r: Review, node: React.ReactNode) => (r.shown ? node : <View style={{ opacity: 0.45 }}>{node}</View>);
   const columns: Col<Review>[] = [
     { key: 'date', label: 'Date', sort: 'date', width: 64, tip: tip('Date', 'When the review was left.'), cell: (r) => dim(r, r.date ? <Word>{when(r.date)}</Word> : <Blank />) },
-    { key: 'event', label: 'Event', sort: 'event', width: 220, tip: tip('Event', 'Which event it was for.'), cell: (r) => dim(r, <Text style={s.word} numberOfLines={1}>{r.event}</Text>) },
-    { key: 'household', label: 'Household', sort: 'household', width: 160, tip: tip('Household', 'Who left it.'), cell: (r) => dim(r, <Text style={s.word} numberOfLines={1}>{r.household}</Text>) },
+    { key: 'event', label: 'Event', sort: 'event', width: 220, tip: tip('Event', 'Which event it was for. Opens it; the rest of the row opens the booking it was left on.'), cell: (r) => dim(r, <Opens to={paths.hostingRecord('event', r.offerId)}>{r.event}</Opens>) },
+    { key: 'household', label: 'Household', sort: 'household', width: 160, tip: tip('Household', 'Who left it. Opens their record in Customers.'), cell: (r) => dim(r, <Opens to={r.householdId ? paths.customer(r.householdId) : null}>{r.household}</Opens>) },
     { key: 'rating', label: 'Rating', sort: 'rating', width: 60, align: 'right', tip: tip('Rating', 'Out of 5.'), cell: (r) => dim(r, <Num n={r.rating} />) },
     { key: 'review', label: 'Review', sort: 'review', grow: true, tip: tip('Review', 'In their words. Hover for the full text.'),
       cellTip: (r) => (r.review ? tip('Review', r.review) : null),
@@ -732,6 +734,9 @@ function Reviews({ id, canManage }: { id: string; canManage: boolean }) {
       </FilterRow>
       {fault ? <Failed>{fault}</Failed> : null}
       <Ladder columns={columns} rows={rows} keyOf={(r) => r.id} dense sort={sort} desc={desc} onSort={onSort}
+              // A review opens the booking it was left on, or its event when it names none (K15 §3).
+              onRow={(r) => open(r.bookingId ? paths.hostingRecord('booking', r.bookingId) : paths.hostingRecord('event', r.offerId))}
+              label={(r) => `Open what ${r.household}’s review was left on`}
               empty={<Word muted>No reviews match.</Word>} />
       <Explain tip={tip('Listed', data.capped ? 'The newest 500 reviews only.' : 'Hidden reviews stay listed, dimmed.')}>
         <Word muted>{`${rows.length} of ${data.rows.length}${data.capped ? '+' : ''}`}</Word>
@@ -754,6 +759,7 @@ const brief = (v: unknown): string => {
 const FIELD_WORD: Record<string, string> = { paused: 'Paused', fee_override_pct: 'Fee override', removed: 'Removed' };
 
 function HostChanges({ id }: { id: string }) {
+  const open = useOpen();
   const { data, error } = useLoad<ChangesPayload>(() => api.hostingAdmin<ChangesPayload>('/changes', { kind: 'host', subject: id }), [id]);
   const [sort, setSort] = useState<string | null>(null);
   const [desc, setDesc] = useState(false);
@@ -775,6 +781,8 @@ function HostChanges({ id }: { id: string }) {
     <View style={{ gap: 10 }}>
       <Ladder columns={columns} rows={rows} keyOf={(c) => c.id} dense sort={sort} desc={desc}
               onSort={(k) => { if (sort === k) setDesc(!desc); else { setSort(k); setDesc(false); } }}
+              // A change opens on Changes, filtered to everything changed about that same thing (K15 §3).
+              onRow={(c) => open(paths.hosting('changes', { what: c.subjectKind, subject: c.subjectId }))} label={() => 'Every change to this host, on Changes'}
               empty={<Blank />} />
       {data.capped ? <Explain tip={tip('Newest only', `The newest ${data.limit} changes. Older ones are not in this list.`)}><Word muted>{`Newest ${data.limit} only`}</Word></Explain> : null}
     </View>

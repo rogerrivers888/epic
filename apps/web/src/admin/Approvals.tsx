@@ -15,6 +15,27 @@ import { useSession } from '../hooks/useSession';
 import { colors, spacing, type } from '../theme';
 import { Button } from '../components/ui';
 import { AdminPage, PageHead, Panel, ago } from './kit';
+import { useRouter } from '../router';
+import { paths } from '../routes';
+
+const ID = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
+/**
+ * What a request is about, read from the call it will run, when that names
+ * something the back office has a record for (K15 §3, Roger, 3 Oct 2026: every
+ * name opens what it refers to). Null for a call that names nothing.
+ */
+export function subjectOf(request: string | null | undefined): { words: string; href: string } | null {
+  const path = String(request ?? '').replace(/^[A-Z]+\s+/, '').split('?')[0];
+  let m = path.match(new RegExp(`^/api/admin/hosting/hosts/${ID}(/|$)`, 'i'));
+  if (m) return { words: 'Open the host', href: paths.hostingRecord('host', m[1]) };
+  m = path.match(new RegExp(`^/api/admin/hosting/money/payouts/${ID}(/|$)`, 'i'));
+  if (m) return { words: 'Open the payout', href: paths.hostingRecord('payout', m[1]) };
+  m = path.match(new RegExp(`^/api/admin/hosting/(?:review|events)/${ID}(/|$)`, 'i'));
+  if (m) return { words: 'Open the event', href: paths.hostingRecord('event', m[1]) };
+  if (/^\/api\/admin\/hosting\/settings\//.test(path)) return { words: 'Open hosting settings', href: paths.hosting('settings') };
+  if (/^\/api\/admin\/hosting\/changes\//.test(path)) return { words: 'Open hosting changes', href: paths.hosting('changes', { what: 'setting' }) };
+  return null;
+}
 
 /** Any older numbers filed beside the brief, as "12 places" pairs. The brief itself is drawn on its own. */
 const numbersLine = (n: Approval['numbers']) =>
@@ -57,6 +78,7 @@ function Said({ label, children }: { label: string; children: React.ReactNode })
  */
 export function Approvals({ standalone = false, onCount }: { standalone?: boolean; onCount?: (n: number) => void } = {}) {
   const { access } = useSession();
+  const { navigate } = useRouter();
   const elevated = Boolean(access?.elevated);
   const [rows, setRows] = useState<Approval[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -122,9 +144,14 @@ export function Approvals({ standalone = false, onCount }: { standalone?: boolea
         const brief = briefOf(r.numbers);
         const failed = r.state === 'failed';
         const unknown = r.state === 'unknown';
+        const subject = subjectOf(r.request);
         return (
           <View key={r.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, gap: 4 }}>
             <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]}>{r.description}</Text>
+            {subject ? (
+              <Text style={[type.small, { color: colors.ink, textDecorationLine: 'underline', alignSelf: 'flex-start' }]} accessibilityRole="link"
+                    onPress={() => navigate(subject.href)}>{subject.words}</Text>
+            ) : null}
             {/* The plain-English brief first (owner, 1 Oct 2026): who asked, why,
                 what changes, how much, what it costs — then the technical call. */}
             {brief ? (

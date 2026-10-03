@@ -17,7 +17,12 @@ import { Press } from '../../components/press';
 import { Banner, Dropdown, FilterRow, PageHead, TextAction } from '../kit';
 import { useSession } from '../../hooks/useSession';
 import { Blank, Ladder, Stat, Word, type Col } from '../table';
-import { useLoad, useSorted, when } from './kit';
+import { Opens, useLoad, useSorted, when } from './kit';
+import { paths, HOSTING_RECORDS, type HostingRecord } from '../../routes';
+
+/** The record a change is about, when it has one (K15 §3): a host, event, booking, payout or complaint. */
+const recordOf = (c: { subjectKind: string; subjectId: string }) =>
+  (c.subjectKind in HOSTING_RECORDS ? paths.hostingRecord(c.subjectKind as HostingRecord, c.subjectId) : null);
 
 type Change = {
   id: string;
@@ -120,9 +125,9 @@ export function ChangesTab() {
       tip: ['When', 'When the change was made. Newest first.'],
       cell: (c) => <Word>{when(c.at, true)}</Word> },
     { key: 'what', label: 'What', width: 200, sort: 'what',
-      tip: ['What', 'What kind of thing changed, and which part of it. Press a row to see every change to that one thing.'],
+      tip: ['What', 'What kind of thing changed, and which part of it. Opens that host, event, booking, payout or complaint; press the rest of the row to see every change to that one thing.'],
       cellTip: (c) => [whatOf(c), c.subjectId],
-      cell: (c) => <Word strong>{whatOf(c)}</Word> },
+      cell: (c) => <Opens to={recordOf(c)} strong>{whatOf(c)}</Opens> },
     { key: 'change', label: 'Before → After', grow: true, sort: 'change',
       tip: ['Before → After', 'What it was, and what it became. Only the after when there was nothing before.'],
       cellTip: (c) => ['Before → After', changeOf(c)],

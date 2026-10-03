@@ -322,6 +322,14 @@ export type AdminScreen =
  */
 export const FILING_TABS = ['overview', 'categories', 'facts', 'mapping', 'collections', 'automations', 'changes', 'markets', 'runs'] as const;
 export type FilingTab = typeof FILING_TABS[number];
+/**
+ * The records inside the back office's Hosting screen, each the query key that
+ * opens it and the sub-tab it opens on: `/admin/hosting?tab=money&booking=<id>`.
+ * Host and event were already addressed this way; booking, payout and complaint
+ * joined them so every row of a hosting table opens something (K15 §3).
+ */
+export const HOSTING_RECORDS = { host: 'hosts', event: 'events', booking: 'money', payout: 'money', complaint: 'safety' } as const;
+export type HostingRecord = keyof typeof HOSTING_RECORDS;
 const FILING_TAB_WAS: Record<string, FilingTab> = {
   labels: 'facts', rules: 'categories', defaults: 'categories', rows: 'collections', ideas: 'collections',
 };
@@ -1069,6 +1077,21 @@ export const paths = {
   /** The filing desk on one tab. Overview is the default and is not written down. */
   filing: (tab?: FilingTab | null, query?: Record<string, string | null | undefined>) =>
     buildHref(['admin', 'filing'], { ...(query ?? {}), tab: tab && tab !== 'overview' ? tab : null }),
+  /**
+   * Hosting in the back office, at one sub-tab and whatever is open inside it.
+   * Review is the default and is not written down.
+   */
+  hosting: (tab?: string | null, query?: Record<string, string | null | undefined>) =>
+    buildHref(['admin', 'hosting'], { tab: tab && tab !== 'review' ? tab : null, ...(query ?? {}) }),
+  /**
+   * One hosting record, opened as query state on its own sub-tab (K15 §3, Roger,
+   * 3 Oct 2026: "every table is clickable"): a host, an event, a booking, a
+   * payout or a complaint. `HOSTING_RECORDS` says which tab each opens on and
+   * is the only spelling of the query keys.
+   */
+  hostingRecord: (kind: HostingRecord, id: string) => paths.hosting(HOSTING_RECORDS[kind], { [kind]: id }),
+  /** One household's record in the back office's Customers. */
+  customer: (householdId: string) => buildHref(['admin', 'customers'], { household: householdId }),
   join: (token: string) => buildHref(['join', token]),
   /** Somebody else's door into one trip. */
   shared: (token: string) => buildHref(['shared', token]),

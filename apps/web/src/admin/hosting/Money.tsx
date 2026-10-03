@@ -23,12 +23,14 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api } from '../../api';
 import { colors, desk, AMBER_DARK, getAdminThemePref, type, BORDER } from '../../theme';
-import { useQueryState, asOneOf, asText } from '../../router';
+import { useQueryState, asOneOf, asText, useRouter } from '../../router';
 import { Dropdown, FilterRow, Choice, TextAction } from '../kit';
 import { Explain, type Tip } from '../explain';
 import { Act, Ladder, Num, Word, Blank, Kicker, Stat, type Col } from '../table';
-import { KIND_OPTIONS, amberTone, ownerAct, useLoad, useSorted, gbp, when } from './kit';
+import { KIND_OPTIONS, Opens, amberTone, ownerAct, useLoad, useOpen, useSorted, gbp, when } from './kit';
 import { SearchBox } from './Hosts';
+import { BookingRecord, PayoutRecord } from './Records';
+import { paths } from '../../routes';
 
 // ---------------------------------------------------------------------------
 // shared by the Money, Safety and Reports tabs
@@ -145,17 +147,18 @@ type Streams = {
 };
 type Movement = {
   id: string; when: string; type: string; event: string | null; bookingId: string | null; ratePct: number | null;
+  offerId?: string | null; hostId?: string | null; householdId?: string | null; payoutId?: string | null;
   epicPence: number | null; toHostPence: number | null; amountPence: number; reason: string | null; state: string;
   stripe: 'matched' | 'mismatch' | 'pending' | 'not_checked' | null;
 };
 type Ledger = { rows: Movement[]; capped: boolean };
-type Payout = { id: string; host: string; event: string | null; pence: number; releaseAt: string; tookPlace: string | null; confirmedBy: number; state: string; holdReason: string | null; since: string | null; releasedBy: string | null };
+type Payout = { id: string; hostId?: string; host: string; offerId?: string | null; event: string | null; pence: number; releaseAt: string; tookPlace: string | null; confirmedBy: number; state: string; holdReason: string | null; since: string | null; releasedBy: string | null };
 type Payouts = {
   capped: boolean; paid30: { count: number; pence: number };
   waitingForConfirmation: Payout[]; held: Payout[]; failed: Payout[];
   refundsByCause: { cause: string | null; state: string; count: number; pence: number }[];
-  cardHolds: { bookingId: string; event: string | null; host: string; household: string; pence: number | null; replyBy: string | null }[];
-  refundsNeedingAPerson?: { id: string; event: string | null; pence: number; cause: string | null; stripe: string | null; at: string }[];
+  cardHolds: { bookingId: string; offerId?: string; hostId?: string; householdId?: string; event: string | null; host: string; household: string; pence: number | null; replyBy: string | null }[];
+  refundsNeedingAPerson?: { id: string; bookingId?: string | null; offerId?: string | null; event: string | null; pence: number; cause: string | null; stripe: string | null; at: string }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -168,6 +171,13 @@ const VIEW_WORDS = [{ key: 'streams', label: 'Streams' }, { key: 'ledger', label
 
 export function MoneyTab() {
   const [view, setView] = useQueryState<View_>('mview', 'streams', asOneOf(VIEWS, 'streams'));
+  // A booking or a payout opened from any table is a record on this tab (K15 §3); back is the view it came from.
+  const [booking] = useQueryState<string | null>('booking', null, asText);
+  const [payout] = useQueryState<string | null>('payout', null, asText);
+  // Back is wherever it was opened from — a ledger row, a host's review, Safety — or the bare tab when it was a link.
+  const { back } = useRouter();
+  if (booking) return <BookingRecord id={booking} onBack={() => back(paths.hosting('money'))} />;
+  if (payout) return <PayoutRecord id={payout} onBack={() => back(paths.hosting('money', { mview: 'payouts' }))} />;
   return (
     <View>
       <ViewSwitch value={view} options={VIEW_WORDS} onPick={(v) => setView(v, { replace: false })} />
@@ -192,6 +202,9 @@ function usePeriod() {
 
 type StreamRow = Stream & { total?: boolean; last?: number | null; split?: boolean };
 
+/** The ledger type each stream is made of; the total is every type. */
+const STREAM_TYPE: Record<string, string> = { public: 'charge', host_link: 'charge', intro: 'charge', private_payment: 'charge', private_fee: 'private_fee', pro: 'pro', tips: 'tip' };
+
 /** Streams that are not bookings on an event, so Kind cannot split them. */
 const NOT_BY_KIND = new Set(['private_fee', 'pro', 'tips']);
 
@@ -205,6 +218,7 @@ function StreamsView({ onLedger }: { onLedger: () => void }) {
   const last = useLoad(() => (before ? api.hostingAdmin<Streams>('/money/streams', { ...q, month: before, period: 'month' }) : Promise.resolve(null)), [before, kind]);
   const beforeName = before ? MONTHS[monthOf(before).getUTCMonth()] : null;
 
+  const open = useOpen();
   const byKind = kind !== 'all';
   const rows: StreamRow[] = (data?.streams ?? []).map((x) => {
     const split = byKind && NOT_BY_KIND.has(x.key);
@@ -289,7 +303,10 @@ function StreamsView({ onLedger }: { onLedger: () => void }) {
 
       {!data ? <Loading error={error} reload={reload} /> : (
         <View>
-          <Ladder columns={columns} rows={[...sorted, total]} keyOf={(r) => r.key} sort={sort} desc={desc} onSort={onSort} />
+          <Ladder columns={columns} rows={[...sorted, total]} keyOf={(r) => r.key} sort={sort} desc={desc} onSort={onSort}
+                  // A stream is a sum of movements, so it opens them: the ledger for the same period, at that type (K15 §3).
+                  onRow={(r) => open(paths.hosting('money', { mview: 'ledger', mmonth: period === 'month' && month !== months[0].key ? month : null, mperiod: period === '30d' ? '30d' : null, mtype: STREAM_TYPE[r.key] ?? null }))}
+                  label={(r) => `Open the ledger for ${r.stream}`} />
           <View style={{ marginTop: 22 }}>
             <TableHead tip={tip('Cost · paid from Epic’s share', 'The guarantee pool is paid from what Epic took, so it is a cost, not a stream.')}>Cost · paid from Epic’s share</TableHead>
             <Ladder columns={poolColumns} rows={[{ key: 'pool' }]} keyOf={(r) => r.key} />
@@ -363,6 +380,7 @@ function LedgerView() {
   const sorted = useSorted(data?.rows, sort, desc, (r, k) => (
     k === 'when' ? r.when : k === 'type' ? TYPE_WORDS[r.type] ?? r.type : k === 'event' ? r.event : k === 'booking' ? bookingOf(r) : k === 'rate' ? r.ratePct
       : k === 'epic' ? r.epicPence : k === 'host' ? hostOf(r) : k === 'reason' ? reasonWords(r.reason) : k === 'stripe' ? r.stripe : null));
+  const open = useOpen();
   const matched = data?.rows.filter((r) => r.stripe === 'matched').length ?? null;
   const mismatched = data?.rows.filter((r) => r.stripe === 'mismatch').length ?? null;
 
@@ -370,7 +388,8 @@ function LedgerView() {
     { key: 'when', label: 'When', sort: 'when', width: 120, tip: tip('When', 'When it moved.'), cell: (r) => <Word>{when(r.when, true)}</Word> },
     { key: 'type', label: 'Type', sort: 'type', width: 140, tip: tip('Type', 'Booking, refund, payout, card hold, fee, Pro or tip.'),
       cell: (r) => <Word>{TYPE_WORDS[r.type] ?? r.type}</Word> },
-    { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'Which event.'), cell: (r) => (r.event ? <Word>{r.event}</Word> : <Blank />) },
+    { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'Which event. Opens it; the rest of the row opens the booking or payout it moved for.'),
+      cell: (r) => <Opens to={eventHref(r.offerId)}>{r.event}</Opens> },
     { key: 'booking', label: 'Booking', sort: 'booking', width: 110, align: 'right', tip: tip('Booking', 'What the guest paid, or what went back to them.'),
       cell: (r) => <Pounds p={bookingOf(r)} /> },
     { key: 'rate', label: 'Rate', sort: 'rate', width: 70, align: 'right', tip: tip('Rate', 'The host’s rate on this booking, stored when it was made.'),
@@ -409,10 +428,18 @@ function LedgerView() {
         <SearchBox value={q} onCommit={(v) => setQ(v)} placeholder="Event, host or booking" />
       </FilterRow>
       {!data ? <Loading error={error} reload={reload} />
-        : <Ladder columns={columns} rows={sorted} keyOf={(r) => r.id} sort={sort} desc={desc} onSort={onSort} dense empty={<Blank />} />}
+        : <Ladder columns={columns} rows={sorted} keyOf={(r) => r.id} sort={sort} desc={desc} onSort={onSort} dense empty={<Blank />}
+                  onRow={(r) => { const to = movementHref(r); if (to) open(to); }} label={(r) => `Open the ${TYPE_WORDS[r.type] ?? r.type} movement`} />}
     </View>
   );
 }
+
+/** Where a name opens (K15 §3): its record, or nothing when the row does not say which. */
+const eventHref = (id: string | null | undefined) => (id ? paths.hostingRecord('event', id) : null);
+const hostHref = (id: string | null | undefined) => (id ? paths.hostingRecord('host', id) : null);
+const householdHref = (id: string | null | undefined) => (id ? paths.customer(id) : null);
+/** A movement opens what it moved for: its booking, else its payout, else its event. A fee or Pro row names none of them. */
+const movementHref = (r: Movement) => (r.bookingId ? paths.hostingRecord('booking', r.bookingId) : r.payoutId ? paths.hostingRecord('payout', r.payoutId) : eventHref(r.offerId));
 
 /** A guest's side of a movement: paid in, or sent back (negative). */
 function bookingOf(r: Movement): number | null {
@@ -464,11 +491,14 @@ function PayoutsView() {
   const refunds = useSorted<RefundRow>(data?.refundsByCause, r.sort, r.desc, (x, k) => (k === 'cause' ? reasonWords(x.cause) : k === 'state' ? x.state : k === 'count' ? x.count : k === 'amount' ? x.pence : null));
   const holds = useSorted(data?.cardHolds, c.sort, c.desc, (x, k) => (k === 'event' ? x.event : k === 'host' ? x.host : k === 'household' ? x.household : k === 'held' ? x.pence : k === 'by' ? x.replyBy : null));
   const now = Date.now();
+  const open = useOpen();
 
   if (!data) return <Loading error={error} reload={reload} />;
 
-  const host: Col<Payout> = { key: 'host', label: 'Host', sort: 'host', width: 190, tip: tip('Host', 'Whose payout.'), cell: (p) => <Word>{p.host}</Word> };
-  const event: Col<Payout> = { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'Which event.'), cell: (p) => (p.event ? <Word>{p.event}</Word> : <Blank />) };
+  const host: Col<Payout> = { key: 'host', label: 'Host', sort: 'host', width: 190, tip: tip('Host', 'Whose payout. Opens the host; the rest of the row opens the payout.'), cell: (p) => <Opens to={hostHref(p.hostId)}>{p.host}</Opens> };
+  const event: Col<Payout> = { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'Which event. Opens it.'), cell: (p) => <Opens to={eventHref(p.offerId)}>{p.event}</Opens> };
+  // Every row opens its record (K15 §3): a payout, a booking, or the ledger's refunds for a total by cause.
+  const toPayout = (p: Payout) => open(paths.hostingRecord('payout', p.id));
   const amount = (t: string): Col<Payout> => ({ key: 'amount', label: 'Amount', sort: 'amount', width: 120, align: 'right', tip: tip('Amount', t), cell: (p) => <Pounds p={p.pence} /> });
 
   const waitingCols: Col<Payout>[] = [
@@ -486,7 +516,7 @@ function PayoutsView() {
     { key: 'since', label: 'Since', sort: 'since', width: 130, tip: tip('Since', 'When the hold began: the complaint, or the payout falling due.'), cell: (p) => (p.since ? <Word>{when(p.since, true)}</Word> : <Blank />) },
     { key: 'pays', label: 'Was due', sort: 'pays', width: 130, tip: tip('Was due', 'When it would have been released.'), cell: (p) => <Word>{when(p.releaseAt, true)}</Word> },
     amount('Held, tips included.'),
-    { key: 'release', label: '', width: 120, tip: tip('Release', 'Pays it now, over a complaint’s hold. Money moves, so it needs the owner signed in; anyone else’s press goes to Approvals. Missing tax details or Stripe set-up still hold it.'),
+    { key: 'release', label: '', width: 120, stops: true, tip: tip('Release', 'Pays it now, over a complaint’s hold. Money moves, so it needs the owner signed in; anyone else’s press goes to Approvals. Missing tax details or Stripe set-up still hold it.'),
       cell: (p) => (p.holdReason === 'tax_details' || p.holdReason === 'stripe_incomplete' ? <Blank />
         : <Act label="Release" icon="locked" tone="secondary" small onPress={() => { setReleasing(p); setWhy(''); setSaid(null); }} />) },
   ];
@@ -495,7 +525,7 @@ function PayoutsView() {
     { key: 'state', label: 'Stripe', width: 110, tip: tip('Stripe', 'The transfer failed at Stripe.'), cell: () => <Said colour={red()}>Failed</Said> },
     { key: 'pays', label: 'Was due', sort: 'pays', width: 130, tip: tip('Was due', 'When it was released.'), cell: (p) => <Word>{when(p.releaseAt, true)}</Word> },
     amount('Not paid, tips included.'),
-    { key: 'retry', label: '', width: 110, tip: tip('Retry', 'Back into the queue once the reason is fixed. Money moves, so it needs the owner signed in; anyone else is told to file it for approval.'),
+    { key: 'retry', label: '', width: 110, stops: true, tip: tip('Retry', 'Back into the queue once the reason is fixed. Money moves, so it needs the owner signed in; anyone else is told to file it for approval.'),
       cell: (p) => <TextAction label="Retry" onPress={() => act(ownerAct('POST', `/money/payouts/${p.id}/retry`, {}, { change: `Send ${p.host}’s ${gbp(p.pence)} payout to Stripe again`, why: 'Stripe refused the transfer; the reason has been fixed.', affected: { count: 1, unit: 'payouts' } }), 'Back in the queue')} /> },
   ];
   const refundCols: Col<RefundRow>[] = [
@@ -508,9 +538,9 @@ function PayoutsView() {
   const refundTotal: RefundRow = { cause: null, state: '', total: true, count: data.refundsByCause.reduce((t, x) => t + x.count, 0), pence: data.refundsByCause.reduce((t, x) => t + x.pence, 0) };
   type Hold = Payouts['cardHolds'][number];
   const holdCols: Col<Hold>[] = [
-    { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'The On request event.'), cell: (x) => (x.event ? <Word>{x.event}</Word> : <Blank />) },
-    { key: 'host', label: 'Host', sort: 'host', width: 180, tip: tip('Host', 'Who has to answer.'), cell: (x) => <Word>{x.host}</Word> },
-    { key: 'household', label: 'Household', sort: 'household', width: 180, tip: tip('Household', 'Who asked.'), cell: (x) => <Word>{x.household}</Word> },
+    { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'The On request event. Opens it; the rest of the row opens the booking.'), cell: (x) => <Opens to={eventHref(x.offerId)}>{x.event}</Opens> },
+    { key: 'host', label: 'Host', sort: 'host', width: 180, tip: tip('Host', 'Who has to answer. Opens the host.'), cell: (x) => <Opens to={hostHref(x.hostId)}>{x.host}</Opens> },
+    { key: 'household', label: 'Household', sort: 'household', width: 180, tip: tip('Household', 'Who asked. Opens their record in Customers.'), cell: (x) => <Opens to={householdHref(x.householdId)}>{x.household}</Opens> },
     { key: 'held', label: 'Held', sort: 'held', width: 110, align: 'right', tip: tip('Held', 'On the card, not charged.'), cell: (x) => <Pounds p={x.pence} /> },
     { key: 'by', label: 'Host replies by', sort: 'by', width: 160, tip: tip('Host replies by', 'The host’s reply window from the request (Settings). Accepted, it is charged; declined or unanswered, the hold is released. Amber under 6 hours; red once past.'),
       cell: (x) => {
@@ -534,11 +564,11 @@ function PayoutsView() {
 
       <View>
         <TableHead tip={tip('Waiting for confirmation', PAYOUT_RULE)}>Waiting for confirmation</TableHead>
-        <Ladder columns={waitingCols} rows={waiting} keyOf={(p) => p.id} sort={w.sort} desc={w.desc} onSort={w.onSort} empty={<Blank />} />
+        <Ladder columns={waitingCols} rows={waiting} keyOf={(p) => p.id} onRow={toPayout} label={(p) => `Open ${p.host}’s payout`} sort={w.sort} desc={w.desc} onSort={w.onSort} empty={<Blank />} />
       </View>
       <View>
         <TableHead tip={tip('Held payouts', 'Each with its reason. Releasing one by hand needs the owner signed in and goes to Approvals.')}>Held payouts</TableHead>
-        <Ladder columns={heldCols} rows={held} keyOf={(p) => p.id} sort={h.sort} desc={h.desc} onSort={h.onSort} empty={<Blank />} />
+        <Ladder columns={heldCols} rows={held} keyOf={(p) => p.id} onRow={toPayout} label={(p) => `Open ${p.host}’s payout`} sort={h.sort} desc={h.desc} onSort={h.onSort} empty={<Blank />} />
         {releasing ? (
           <View style={s.form}>
             <Text style={s.word}>{`Release ${gbp(releasing.pence)} to ${releasing.host}`}</Text>
@@ -551,11 +581,13 @@ function PayoutsView() {
       </View>
       <View>
         <TableHead tip={tip('Failed', 'Released, and the transfer did not go through.')}>Failed payouts</TableHead>
-        <Ladder columns={failedCols} rows={failed} keyOf={(p) => p.id} sort={f.sort} desc={f.desc} onSort={f.onSort} empty={<Blank />} />
+        <Ladder columns={failedCols} rows={failed} keyOf={(p) => p.id} onRow={toPayout} label={(p) => `Open ${p.host}’s payout`} sort={f.sort} desc={f.desc} onSort={f.onSort} empty={<Blank />} />
       </View>
       <View>
         <TableHead tip={tip('Refunds by cause', 'Last 30 days.')}>Refunds by cause · 30 days</TableHead>
         <Ladder columns={refundCols} rows={data.refundsByCause.length ? [...refunds, refundTotal] : []} keyOf={(x, i) => (x.total ? 'total' : `${x.cause}:${x.state}:${i}`)}
+                // A total by cause is many refunds, not one record: it opens the ledger's refunds over the same 30 days.
+                onRow={() => open(paths.hosting('money', { mview: 'ledger', mtype: 'refund', mperiod: '30d' }))} label={() => 'Open these refunds in the ledger'}
                 sort={r.sort} desc={r.desc} onSort={r.onSort} empty={<Blank />} />
       </View>
       {data.refundsNeedingAPerson?.length ? (
@@ -563,19 +595,21 @@ function PayoutsView() {
           <TableHead tip={tip('Refunds needing a person', 'Stripe refused these. The money stays owed to the guest until someone retries or settles it.')}>Refunds needing a person</TableHead>
           <Ladder<Stuck>
             columns={[
-              { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'Whose booking the refund is for.'), cell: (x) => (x.event ? <Word>{x.event}</Word> : <Blank />) },
+              { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'Whose booking the refund is for. Opens the event; the rest of the row opens the booking.'), cell: (x) => <Opens to={eventHref(x.offerId)}>{x.event}</Opens> },
               { key: 'amount', label: 'Amount', sort: 'amount', width: 120, align: 'right', tip: tip('Amount', 'Owed back to the guest.'), cell: (x) => <Pounds p={x.pence} /> },
               { key: 'stripe', label: 'Stripe said', sort: 'stripe', width: 220, tip: tip('Stripe said', 'Stripe’s own code for the refusal.'), cell: (x) => (x.stripe ? <Word>{x.stripe}</Word> : <Blank />) },
               { key: 'when', label: 'When', sort: 'when', width: 110, tip: tip('When', 'When the refund was owed.'), cell: (x) => <Word>{when(x.at)}</Word> },
-              { key: 'retry', label: '', width: 90, tip: tip('Retry', 'Sends it to Stripe again with the same key, so it can never be paid twice.'),
+              { key: 'retry', label: '', width: 90, stops: true, tip: tip('Retry', 'Sends it to Stripe again with the same key, so it can never be paid twice.'),
                 cell: (x) => <TextAction label="Retry" onPress={() => act(api.hostingAdminPost(`/money/refunds/${x.id}/retry`, {}).then(() => 'done' as const), 'Sent again')} /> },
             ]}
-            rows={stuck} keyOf={(x) => x.id} sort={n.sort} desc={n.desc} onSort={n.onSort} />
+            rows={stuck} keyOf={(x) => x.id} sort={n.sort}
+            onRow={(x) => { if (x.bookingId) open(paths.hostingRecord('booking', x.bookingId)); else if (x.offerId) open(paths.hostingRecord('event', x.offerId)); }}
+            label={() => 'Open the booking it is owed on'} desc={n.desc} onSort={n.onSort} />
         </View>
       ) : null}
       <View>
         <TableHead tip={tip('Card holds · Ask to book', 'On request bookings: the card is held, not charged, until the host answers.')}>Card holds · Ask to book</TableHead>
-        <Ladder columns={holdCols} rows={holds} keyOf={(x) => x.bookingId} sort={c.sort} desc={c.desc} onSort={c.onSort} empty={<Blank />} />
+        <Ladder columns={holdCols} rows={holds} keyOf={(x) => x.bookingId} onRow={(x) => open(paths.hostingRecord('booking', x.bookingId))} label={(x) => `Open ${x.household}’s booking`} sort={c.sort} desc={c.desc} onSort={c.onSort} empty={<Blank />} />
       </View>
     </View>
   );

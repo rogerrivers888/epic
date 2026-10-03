@@ -236,6 +236,73 @@ test('a hosting change replayed from Approvals carries the approval’s id; DAC7
   } finally { await owner.close(); }
 });
 
+test('a booking, a payout and a complaint each open as a record that names what it belongs to (K15 §3)', async () => {
+  const { h, o } = await inReview({ adults: true });
+  const g = await aHousehold(query);
+  const { rows: [sx] } = await query(`insert into offer_sessions (offer_id, on_date, starts_at, ends_at) values ($1, current_date - 2, '10:00', '12:00') returning id`, [o.id]);
+  const { rows: [b] } = await query(
+    `insert into experience_bookings (offer_id, host_id, household_id, state, heads, payment_state, value_pence, fee_pence, host_pence, charged_pence, fee_rate_pct, fee_reason, stripe_payment_intent)
+     values ($1, $2, $3, 'confirmed', 2, 'charged', 2000, 400, 1600, 2000, 20, 'standard', 'pi_secret_never_shown') returning id`, [o.id, h.id, g.household.id]);
+  await query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, sx.id]);
+  const { rows: [p] } = await query(
+    `insert into host_payouts (host_id, offer_id, session_id, amount_pence, release_at, state, hold_reason, lines, stripe_transfer)
+     values ($1, $2, $3, 1600, now() + interval '1 day', 'held', 'complaint', $4::jsonb, 'tr_never_shown') returning id`,
+    [h.id, o.id, sx.id, JSON.stringify([{ bookingId: b.id, pence: 1600 }])]);
+  const { rows: [pay] } = await query(
+    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, state, stripe_ref, stripe_match, cause)
+     values ('refund', $1, $2, $3, $4, 500, 'failed', 're_never_shown', 'matched', 'complaint') returning id`, [b.id, o.id, h.id, g.household.id]);
+  const { rows: [k] } = await query(
+    `insert into hosting_complaints (booking_id, session_id, offer_id, host_id, household_id, kind, reason, state)
+     values ($1, $2, $3, $4, $5, 'complaint', 'Nobody there', 'open') returning id`, [b.id, sx.id, o.id, h.id, g.household.id]);
+  await settings.logChange({ subjectKind: 'payout', subjectId: p.id, field: 'release', after: { state: 'held' }, byLabel: 'epic' });
+  await settings.logChange({ subjectKind: 'complaint', subjectId: k.id, field: 'state', after: { state: 'open' }, byLabel: 'guest' });
+  await settings.logChange({ subjectKind: 'booking', subjectId: pay.id, field: 'refund_retry', after: { state: 'pending' }, byLabel: 'staff' });
+  const srv = await server(STAFF);
+  const nobody = await server({ ...STAFF, capabilities: new Set() });
+  try {
+    const bk = await srv.get(`/api/admin/hosting/bookings/${b.id}`);
+    assert.equal(bk.status, 200, JSON.stringify(bk.body));
+    assert.deepEqual([bk.body.booking.hostId, bk.body.booking.offerId, bk.body.booking.householdId], [h.id, o.id, g.household.id]);
+    assert.equal(bk.body.booking.valuePence, 2000);
+    assert.equal(bk.body.sessions[0].payoutId, p.id);
+    assert.deepEqual(bk.body.payouts.map((x) => [x.id, x.pence, x.part]), [[p.id, 1600, 'share']]);
+    assert.deepEqual(bk.body.complaints.map((x) => x.id), [k.id]);
+    assert.equal(bk.body.payments[0].stripe, 'matched');
+    assert.ok(bk.body.changes.some((c) => c.field === 'refund_retry'), 'a refund retried against its payment row is the booking’s change too');
+    assert.doesNotMatch(JSON.stringify(bk.body), /never_shown/, 'no Stripe reference leaves the server');
+
+    const po = await srv.get(`/api/admin/hosting/payouts/${p.id}`);
+    assert.equal(po.status, 200, JSON.stringify(po.body));
+    assert.deepEqual([po.body.payout.hostId, po.body.payout.offerId, po.body.payout.session.id], [h.id, o.id, sx.id]);
+    assert.equal(po.body.payout.sent, true);
+    assert.deepEqual(po.body.lines.map((l) => [l.bookingId, l.pence, l.householdId]), [[b.id, 1600, g.household.id]]);
+    assert.deepEqual(po.body.complaints.map((x) => x.id), [k.id], 'the complaint holding it');
+    assert.deepEqual(po.body.changes.map((c) => c.field), ['release']);
+    assert.doesNotMatch(JSON.stringify(po.body), /never_shown/);
+
+    const kc = await srv.get(`/api/admin/hosting/complaints/${k.id}`);
+    assert.equal(kc.status, 200, JSON.stringify(kc.body));
+    assert.deepEqual([kc.body.complaint.bookingId, kc.body.complaint.householdId, kc.body.complaint.hostId], [b.id, g.household.id, h.id]);
+    assert.deepEqual(kc.body.payouts.map((x) => [x.id, x.state]), [[p.id, 'held']]);
+    assert.equal(kc.body.changes.length, 1);
+
+    // The lists the records are opened from carry the ids they need.
+    const safety = (await srv.get('/api/admin/hosting/safety')).body;
+    const row = safety.complaints.find((x) => x.id === k.id);
+    assert.deepEqual([row.hostId, row.offerId, row.householdId, row.bookingId], [h.id, o.id, g.household.id, b.id]);
+    const held = (await srv.get('/api/admin/hosting/money/payouts')).body.held.find((x) => x.id === p.id);
+    assert.deepEqual([held.hostId, held.offerId], [h.id, o.id]);
+    const moved = (await srv.get('/api/admin/hosting/money/ledger?period=30d')).body.rows.find((x) => x.id === pay.id);
+    assert.deepEqual([moved.bookingId, moved.hostId, moved.offerId, moved.householdId], [b.id, h.id, o.id, g.household.id]);
+
+    for (const path of ['bookings', 'payouts', 'complaints']) {
+      assert.equal((await srv.get(`/api/admin/hosting/${path}/${crypto.randomUUID()}`)).status, 404, `${path}: no such one`);
+      assert.equal((await srv.get(`/api/admin/hosting/${path}/not-a-uuid`)).status, 404, `${path}: a bad id is a 404`);
+      assert.equal((await nobody.get(`/api/admin/hosting/${path}/${crypto.randomUUID()}`)).status, 403, `${path}: view_hosting only`);
+    }
+  } finally { await srv.close(); await nobody.close(); }
+});
+
 test('Report this host lands on Safety, counted on its tab, and leaves once looked into', async () => {
   const { h } = await inReview({ adults: true });
   const { rows: [r] } = await query(`insert into host_reports (host_id, reason) values ($1, 'Asked to be paid in cash') returning id`, [h.id]);

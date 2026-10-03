@@ -13,6 +13,7 @@ import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
 import { AMBER_DARK, colors, desk, fonts, getAdminThemePref, INK, LIME } from '../../theme';
 import { api, ApiError } from '../../api';
+import { useRouter } from '../../router';
 
 export const KIND_WORDS: Record<string, string> = { oneoff: 'One-off', weekly: 'Weekly', course: 'Course', onrequest: 'On request' };
 export const KIND_OPTIONS = [{ key: 'all', label: 'All' }, { key: 'oneoff', label: 'One-off' }, { key: 'weekly', label: 'Weekly' }, { key: 'course', label: 'Course' }, { key: 'onrequest', label: 'On request' }];
@@ -37,6 +38,29 @@ export function HostingTabs<K extends string>({ value, onPick, counts = null }: 
         </Press>
       ))}
     </View>
+  );
+}
+
+/**
+ * Every row opens its record, and every name in it that refers to something
+ * else opens that (K15 §3, Roger, 3 Oct 2026: "every table is clickable").
+ * The row's own press goes to `Ladder`'s `onRow`; a name inside it is pressed
+ * as text, whose press stops the click before it reaches the row, so a host's
+ * name in a payout's row opens the host and the rest of the row the payout.
+ */
+export function useOpen() {
+  const { navigate } = useRouter();
+  return useCallback((href: string) => navigate(href, { replace: false }), [navigate]);
+}
+
+/** A name that opens its own record; plain words when there is nothing to open. A dash for nothing at all. */
+export function Opens({ to, children, strong }: { to: string | null | undefined; children: React.ReactNode; strong?: boolean }) {
+  const open = useOpen();
+  const style = { fontFamily: fonts.body, fontSize: 13.5, color: colors.ink, fontWeight: strong ? '700' as const : '400' as const };
+  if (children == null || children === '') return <Text style={[style, { color: colors.inkMuted }]}>—</Text>;
+  if (!to) return <Text style={style} numberOfLines={1}>{children}</Text>;
+  return (
+    <Text style={[style, { textDecorationLine: 'underline' }]} numberOfLines={1} accessibilityRole="link" onPress={() => open(to)}>{children}</Text>
   );
 }
 

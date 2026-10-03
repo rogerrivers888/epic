@@ -383,6 +383,19 @@ test('Household, Settings, Prototypes and the back office', () => {
   // so both are shareable addresses rather than modal state.
   assert.equal(splitHref('/admin/customers?household=abc&q=oko&plan=Solo').query.get('household'), 'abc');
   assert.equal(splitHref('/admin/suppliers?supplier=anthropic&sort=variance').query.get('supplier'), 'anthropic');
+  // Every hosting record is a layer on /admin/hosting, opened on its own sub-tab,
+  // so a row somebody pressed is a link somebody else can open (K15 §3, 3 Oct 2026).
+  assert.equal(paths.customer('abc'), '/admin/customers?household=abc');
+  assert.equal(paths.hosting('review'), '/admin/hosting');
+  assert.equal(paths.hosting('money', { mview: 'ledger', mstripe: 'mismatch' }), '/admin/hosting?tab=money&mview=ledger&mstripe=mismatch');
+  for (const [kind, tab] of [['host', 'hosts'], ['event', 'events'], ['booking', 'money'], ['payout', 'money'], ['complaint', 'safety']] as const) {
+    const href = paths.hostingRecord(kind, 'r-1');
+    assert.equal(href, `/admin/hosting?tab=${tab}&${kind}=r-1`);
+    assert.deepEqual(parseRoute(href), { name: 'admin', screen: 'hosting' });
+    assert.equal(splitHref(href).query.get(kind), 'r-1');
+    assert.equal(splitHref(href).query.get('tab'), tab);
+    assert.equal(withQuery(href, { [kind]: null }), `/admin/hosting?tab=${tab}`, 'closing a record leaves its tab');
+  }
   // The drill's own two switches, so a link lands on the quarterly view.
   assert.equal(splitHref('/admin/reporting?measure=revenue&chart=1&view=quarterly&rate=3').query.get('view'), 'quarterly');
   // Subscriptions: which tier is open, and monthly or annual.

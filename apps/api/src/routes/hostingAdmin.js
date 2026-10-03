@@ -323,12 +323,12 @@ router.get('/hosts/:id/videos', requires('view_hosting'), async (req, res, next)
 router.get('/hosts/:id/reviews', requires('view_hosting'), async (req, res, next) => {
   try {
     const { rows } = await query(
-      `select r.id, r.created_at, r.stars, r.text, r.reply, r.hidden, o.title, o.id as offer_id, hh.name as household
+      `select r.id, r.created_at, r.stars, r.text, r.reply, r.hidden, o.title, o.id as offer_id, hh.name as household, hh.id as household_id, r.booking_id
          from host_reviews r join host_offers o on o.id = r.offer_id join households hh on hh.id = r.household_id
         where r.host_id = $1 and r.side = 'guest' order by r.created_at desc limit 500`,
       [req.params.id],
     );
-    res.json({ rows: rows.map((r) => ({ id: r.id, date: ymd(r.created_at), event: r.title, offerId: r.offer_id, household: r.household, rating: r.stars, review: r.text, reply: r.reply, shown: !r.hidden })), capped: rows.length === 500 });
+    res.json({ rows: rows.map((r) => ({ id: r.id, date: ymd(r.created_at), event: r.title, offerId: r.offer_id, household: r.household, householdId: r.household_id, bookingId: r.booking_id ?? null, rating: r.stars, review: r.text, reply: r.reply, shown: !r.hidden })), capped: rows.length === 500 });
   } catch (err) { next(err); }
 });
 
@@ -456,7 +456,7 @@ router.get('/events', requires('view_hosting'), async (req, res, next) => {
     const vis = req.query.visibility === 'public' ? 'public' : req.query.visibility === 'private' ? 'invite' : null;
     const q = typeof req.query.q === 'string' && req.query.q.trim() ? `%${req.query.q.trim().toLowerCase()}%` : null;
     const { rows } = await query(
-      `select o.id, o.title, o.lane, o.state, o.visibility, o.min_count, o.max_count, o.price_mode, o.called_off_at, h.name as host,
+      `select o.id, o.title, o.lane, o.state, o.visibility, o.min_count, o.max_count, o.price_mode, o.called_off_at, h.name as host, h.id as host_id,
               (select min(s.decides_at) from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and s.decided_outcome is null) as decides_at,
               (select min(s.on_date) from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and s.on_date >= current_date) as next_date,
               coalesce((select sum(b.heads) from experience_bookings b where b.offer_id = o.id and b.state in ('pending', 'confirmed')), 0)::int as booked
@@ -479,7 +479,7 @@ router.get('/events', requires('view_hosting'), async (req, res, next) => {
       for (const o of offers) waiting.set(o.id, waitingFor(o, hostOf.get(o.host_id)));
     }
     res.json({
-      rows: rows.map((e) => ({ id: e.id, title: e.title, host: e.host, kind: e.lane, lane: e.lane, waitingOn: waiting.get(e.id) ?? null, state: e.called_off_at ? 'called_off' : e.state, visibility: e.visibility === 'public' ? 'Public' : 'Private', booked: e.booked, min: e.min_count, max: e.max_count, decidesBy: ymd(e.decides_at), next: ymd(e.next_date), priceMode: e.price_mode })),
+      rows: rows.map((e) => ({ id: e.id, title: e.title, host: e.host, hostId: e.host_id, kind: e.lane, lane: e.lane, waitingOn: waiting.get(e.id) ?? null, state: e.called_off_at ? 'called_off' : e.state, visibility: e.visibility === 'public' ? 'Public' : 'Private', booked: e.booked, min: e.min_count, max: e.max_count, decidesBy: ymd(e.decides_at), next: ymd(e.next_date), priceMode: e.price_mode })),
       draftsByStep: byStep, capped: rows.length === 1000,
     });
   } catch (err) { next(err); }
@@ -495,11 +495,12 @@ router.get('/events/:id', requires('view_hosting'), async (req, res, next) => {
     const { rows: sessions } = await query(
       `select s.*, coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id where bs.session_id = s.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')), 0)::int as booked,
               (select count(*) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id where bs.session_id = s.id and b.confirmed_happened = 'yes')::int as confirmed_by,
-              (select p.state from host_payouts p where p.session_id = s.id) as payout_state
+              (select p.state from host_payouts p where p.session_id = s.id) as payout_state,
+              (select p.id from host_payouts p where p.session_id = s.id) as payout_id
          from offer_sessions s where s.offer_id = $1 order by s.on_date, s.starts_at`, [o.id],
     );
     const { rows: refunds } = await query(
-      `select p.amount_pence, p.cause, p.state, p.stripe_ref, p.stripe_match, p.created_at, hh.name as household, b.heads, b.id as booking_id
+      `select p.amount_pence, p.cause, p.state, p.stripe_ref, p.stripe_match, p.created_at, hh.name as household, hh.id as household_id, b.heads, b.id as booking_id
          from hosting_payments p join experience_bookings b on b.id = p.booking_id join households hh on hh.id = b.household_id
         where p.offer_id = $1 and p.kind in ('refund', 'release') order by p.created_at`, [o.id],
     );
@@ -511,8 +512,8 @@ router.get('/events/:id', requires('view_hosting'), async (req, res, next) => {
       event: { id: o.id, title: o.title, host: host?.name, hostId: o.host_id, kind: o.lane, state: o.called_off_at ? 'called_off' : o.state, waitingOn: o.state === 'approved' ? waitingFor(o, host) : null, visibility: o.visibility, min: o.min_count, max: o.max_count, priceMode: o.price_mode, pricePence: o.price_pence, totalPence: o.total_pence, refundPolicy: o.refund_policy, heldPence: money.held, bookings: money.bookings },
       numbers,
       hostIsPaid: typeof s.payout_release === 'number' ? { hours: s.payout_release, earlyOnConfirm: s.payout_early_on_confirm === true } : null,
-      sessions: sessions.map((x) => ({ id: x.id, n: x.n, date: ymd(x.on_date), time: hm(x.starts_at), booked: x.booked, state: x.state, decided: x.decided_outcome, decidesAt: x.decides_at, confirmedBy: x.confirmed_by, payout: x.payout_state ?? null, late: x.late })),
-      refunds: refunds.map((r) => ({ booking: r.booking_id.slice(0, 8), bookingId: r.booking_id, household: r.household, heads: r.heads, pence: r.amount_pence, cause: r.cause, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null, at: r.created_at })),
+      sessions: sessions.map((x) => ({ id: x.id, n: x.n, date: ymd(x.on_date), time: hm(x.starts_at), booked: x.booked, state: x.state, decided: x.decided_outcome, decidesAt: x.decides_at, confirmedBy: x.confirmed_by, payout: x.payout_state ?? null, payoutId: x.payout_id ?? null, late: x.late })),
+      refunds: refunds.map((r) => ({ booking: r.booking_id.slice(0, 8), bookingId: r.booking_id, household: r.household, householdId: r.household_id, heads: r.heads, pence: r.amount_pence, cause: r.cause, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null, at: r.created_at })),
     });
   } catch (err) { next(err); }
 });
@@ -585,7 +586,7 @@ router.get('/money/ledger', requires('view_hosting'), async (req, res, next) => 
     const match = ['mismatch', 'matched'].includes(req.query.stripe) ? req.query.stripe : null;
     const q = typeof req.query.q === 'string' && req.query.q.trim() ? `%${req.query.q.trim().toLowerCase().slice(0, 80)}%` : null;
     const { rows } = await query(
-      `select p.*, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id left join hosts h on h.id = coalesce(p.host_id, o.host_id)
+      `select p.*, o.title, coalesce(p.host_id, o.host_id) as host_of from hosting_payments p left join host_offers o on o.id = p.offer_id left join hosts h on h.id = coalesce(p.host_id, o.host_id)
         where p.created_at >= $1 and p.created_at < $2 and ($3::text is null or p.kind = $3)
           and ($4::text is null or p.stripe_match = $4)
           and ($5::text is null or lower(coalesce(o.title, '') || ' ' || coalesce(h.name, '') || ' ' || coalesce(p.booking_id::text, '')) like $5)
@@ -593,7 +594,7 @@ router.get('/money/ledger', requires('view_hosting'), async (req, res, next) => 
       [from, to, type, match, q],
     );
     res.json({
-      rows: rows.map((r) => ({ id: r.id, when: r.created_at, type: r.kind, event: r.title, bookingId: r.booking_id, ratePct: r.rate_pct == null ? null : Number(r.rate_pct), epicPence: r.epic_pence, toHostPence: r.host_pence, amountPence: r.amount_pence, reason: r.cause ?? r.reason, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null })),
+      rows: rows.map((r) => ({ id: r.id, when: r.created_at, type: r.kind, event: r.title, bookingId: r.booking_id, offerId: r.offer_id ?? null, hostId: r.host_of ?? null, householdId: r.household_id ?? null, payoutId: r.payout_id ?? null, ratePct: r.rate_pct == null ? null : Number(r.rate_pct), epicPence: r.epic_pence, toHostPence: r.host_pence, amountPence: r.amount_pence, reason: r.cause ?? r.reason, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null })),
       capped: rows.length === 1000,
     });
   } catch (err) { next(err); }
@@ -612,15 +613,15 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
     const { rows: [paid] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence + tips_pence), 0)::int as pence from host_payouts where state = 'paid' and updated_at > now() - interval '30 days'`);
     const { rows: refunds } = await query(`select cause, state, count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_payments where kind = 'refund' and voided_at is null and created_at > now() - interval '30 days' group by 1, 2 order by 1`);
     const { rows: stuck } = await query(
-      `select p.id, p.amount_pence, p.cause, p.reason, p.created_at, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id
+      `select p.id, p.amount_pence, p.cause, p.reason, p.created_at, p.booking_id, p.offer_id, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id
         where p.kind in ('refund', 'release', 'tip_refund') and p.state = 'failed' and p.voided_at is null order by p.created_at`,
     );
     const { rows: holds } = await query(
-      `select b.id, b.held_pence, b.respond_by, o.title, h.name as host, hh.name as household
+      `select b.id, b.held_pence, b.respond_by, b.offer_id, b.host_id, b.household_id, o.title, h.name as host, hh.name as household
          from experience_bookings b join host_offers o on o.id = b.offer_id join hosts h on h.id = b.host_id join households hh on hh.id = b.household_id
         where b.request_state = 'asked' and b.payment_state = 'held' order by b.respond_by`,
     );
-    const pay = (p) => ({ id: p.id, host: p.host, event: p.title, pence: p.amount_pence + p.tips_pence, releaseAt: p.release_at, tookPlace: p.took_place, confirmedBy: p.confirmed_by, state: p.state, holdReason: p.hold_reason, since: p.held_since ?? p.updated_at, releasedBy: p.released_by ?? null });
+    const pay = (p) => ({ id: p.id, hostId: p.host_id, host: p.host, offerId: p.offer_id ?? null, event: p.title, pence: p.amount_pence + p.tips_pence, releaseAt: p.release_at, tookPlace: p.took_place, confirmedBy: p.confirmed_by, state: p.state, holdReason: p.hold_reason, since: p.held_since ?? p.updated_at, releasedBy: p.released_by ?? null });
     res.json({
       capped: payouts.length === 500,
       paid30: { count: paid.n, pence: paid.pence },
@@ -628,8 +629,8 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
       held: payouts.filter((p) => p.state === 'held').map(pay),
       failed: payouts.filter((p) => p.state === 'failed').map(pay),
       refundsByCause: refunds.map((r) => ({ cause: r.cause, state: r.state, count: r.n, pence: r.pence })),
-      refundsNeedingAPerson: stuck.map((r) => ({ id: r.id, event: r.title, pence: r.amount_pence, cause: r.cause, stripe: r.reason, at: r.created_at })),
-      cardHolds: holds.map((h) => ({ bookingId: h.id, event: h.title, host: h.host, household: h.household, pence: h.held_pence, replyBy: h.respond_by })),
+      refundsNeedingAPerson: stuck.map((r) => ({ id: r.id, bookingId: r.booking_id ?? null, offerId: r.offer_id ?? null, event: r.title, pence: r.amount_pence, cause: r.cause, stripe: r.reason, at: r.created_at })),
+      cardHolds: holds.map((h) => ({ bookingId: h.id, offerId: h.offer_id, hostId: h.host_id, householdId: h.household_id, event: h.title, host: h.host, household: h.household, pence: h.held_pence, replyBy: h.respond_by })),
     });
   } catch (err) { next(err); }
 });
@@ -676,6 +677,152 @@ router.post('/money/refunds/:id/retry', requires('manage_hosting'), async (req, 
     if (!r) throw refuse(404, 'not_found', 'That refund isn’t waiting on a person.');
     await logChange({ subjectKind: 'booking', subjectId: r.id, field: 'refund_retry', after: { state: 'pending' }, why: typeof req.body?.why === 'string' ? req.body.why.slice(0, 500) : null, by: by(), byLabel: 'staff' });
     res.json({ retried: true });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Records — a booking, a payout, a complaint (K15 §3, "Every table is clickable")
+// ---------------------------------------------------------------------------
+//
+// Read-only, and guarded as the money lists they are opened from are
+// (`view_hosting`). Each names what it belongs to by id — host, event,
+// household, booking, payout — so every name on the record opens its own.
+// Stripe's own references stay on the server: a record says whether Stripe
+// agrees, never the id it agrees under, as the event record does.
+
+/** The hosting_changes rows about any of these subjects, newest first, with who made them. */
+async function changesAbout(pairs, limit = 100) {
+  const kinds = pairs.map((p) => p[0]);
+  const ids = pairs.map((p) => String(p[1]));
+  if (!pairs.length) return { rows: [], capped: false };
+  const { rows } = await query(
+    `select c.*, a.email as by_email from hosting_changes c
+       join unnest($1::text[], $2::text[]) as s(kind, id) on s.kind = c.subject_kind and s.id = c.subject_id
+       left join accounts a on a.id = c.by_account
+      order by c.at desc limit $3`,
+    [kinds, ids, limit],
+  );
+  return {
+    rows: rows.map((r) => ({ id: r.id, subjectKind: r.subject_kind, subjectId: r.subject_id, field: r.field, before: r.before, after: r.after, why: r.why, by: r.by_email ?? r.by_label, byLabel: r.by_label, approvalId: r.approval_id, at: r.at })),
+    capped: rows.length === limit,
+  };
+}
+
+const paymentRow = (p) => ({
+  id: p.id, kind: p.kind, pence: p.amount_pence, epicPence: p.epic_pence, hostPence: p.host_pence, ratePct: p.rate_pct == null ? null : Number(p.rate_pct),
+  cause: p.cause ?? null, reason: p.reason ?? null, state: p.state, stripe: p.stripe_ref ? p.stripe_match : null, payoutId: p.payout_id ?? null,
+  bookingId: p.booking_id ?? null, at: p.created_at, voided: Boolean(p.voided_at),
+});
+
+router.get('/bookings/:id', requires('view_hosting'), async (req, res, next) => {
+  try {
+    if (!UUID.test(req.params.id)) throw refuse(404, 'not_found', 'No such booking.');
+    const { rows: [b] } = await query(
+      `select b.*, o.title, o.lane, o.visibility, h.name as host, hh.name as household
+         from experience_bookings b left join host_offers o on o.id = b.offer_id left join hosts h on h.id = b.host_id
+         left join households hh on hh.id = b.household_id where b.id = $1`, [req.params.id],
+    );
+    if (!b) throw refuse(404, 'not_found', 'No such booking.');
+    const { rows: sessions } = await query(
+      `select x.id, x.n, x.on_date, x.starts_at, x.state, bs.state as booked, (select p.id from host_payouts p where p.session_id = x.id) as payout_id
+         from booking_sessions bs join offer_sessions x on x.id = bs.session_id where bs.booking_id = $1 order by x.on_date, x.starts_at`, [b.id],
+    );
+    const { rows: payments } = await query('select * from hosting_payments where booking_id = $1 order by created_at', [b.id]);
+    // A payout carries this booking as one of its lines (hostingLedger.schedulePayout), or a tip of it.
+    const { rows: payouts } = await query(
+      `select p.id, p.state, p.release_at, p.hold_reason, (l->>'pence')::int as pence, 'share' as part
+         from host_payouts p, jsonb_array_elements(coalesce(p.lines, '[]'::jsonb)) l where l->>'bookingId' = $1
+       union all
+       select p.id, p.state, p.release_at, p.hold_reason, t.amount_pence as pence, 'tip' as part
+         from booking_tips t join host_payouts p on p.id = t.payout_id where t.booking_id = $2
+        order by release_at`, [String(b.id), b.id],
+    );
+    const { rows: complaints } = await query('select id, kind, state, reason, amount_pence, created_at, resolved_at from hosting_complaints where booking_id = $1 order by created_at', [b.id]);
+    // A refund retried by hand is logged against the payment row, not the booking (POST /money/refunds/:id/retry).
+    const changes = await changesAbout([['booking', b.id], ...payments.map((p) => ['booking', p.id])]);
+    res.json({
+      booking: {
+        id: b.id, state: b.state, kind: b.booking_kind ?? null, heads: b.heads, madeAt: b.created_at,
+        hostId: b.host_id, host: b.host, offerId: b.offer_id, event: b.title, lane: b.lane, visibility: b.visibility,
+        householdId: b.household_id, household: b.household,
+        request: b.request_state ?? null, replyBy: b.respond_by ?? null,
+        payment: b.payment_state ?? null, valuePence: b.value_pence, ratePct: b.fee_rate_pct == null ? null : Number(b.fee_rate_pct), feeReason: b.fee_reason ?? null,
+        epicPence: b.fee_pence, hostPence: b.host_pence, heldPence: b.held_pence, chargedPence: b.charged_pence, refundedPence: b.refunded_pence,
+        refundPolicy: b.refund_policy ?? null, cancelledAt: b.cancelled_at, cancelCause: b.cancel_cause ?? null, cancelledBy: b.cancelled_by ?? null,
+        happened: b.confirmed_happened ?? null, dispute: b.dispute_state ?? null, voided: Boolean(b.money_voided_at), viaHostLink: Boolean(b.via_host_link),
+      },
+      sessions: sessions.map((x) => ({ id: x.id, n: x.n, date: ymd(x.on_date), time: hm(x.starts_at), state: x.state, booked: x.booked, payoutId: x.payout_id ?? null })),
+      payments: payments.map(paymentRow),
+      payouts: payouts.map((p) => ({ id: p.id, state: p.state, releaseAt: p.release_at, holdReason: p.hold_reason, pence: p.pence, part: p.part })),
+      complaints: complaints.map((k) => ({ id: k.id, kind: k.kind, state: k.state, reason: k.reason, pence: k.amount_pence, at: k.created_at, resolvedAt: k.resolved_at })),
+      changes: changes.rows, changesCapped: changes.capped,
+    });
+  } catch (err) { next(err); }
+});
+
+router.get('/payouts/:id', requires('view_hosting'), async (req, res, next) => {
+  try {
+    if (!UUID.test(req.params.id)) throw refuse(404, 'not_found', 'No such payout.');
+    const { rows: [p] } = await query(
+      `select p.*, h.name as host, o.title, x.n as session_n, x.on_date, x.starts_at,
+              ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(o.time_zone, 'Europe/London')) as took_place,
+              (select count(*) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id where bs.session_id = p.session_id and b.confirmed_happened = 'yes')::int as confirmed_by
+         from host_payouts p join hosts h on h.id = p.host_id left join host_offers o on o.id = p.offer_id left join offer_sessions x on x.id = p.session_id
+        where p.id = $1`, [req.params.id],
+    );
+    if (!p) throw refuse(404, 'not_found', 'No such payout.');
+    const lines = Array.isArray(p.lines) ? p.lines.filter((l) => l && UUID.test(String(l.bookingId ?? ''))) : [];
+    const { rows: bookings } = lines.length
+      ? await query(`select b.id, b.heads, b.state, b.household_id, hh.name as household from experience_bookings b left join households hh on hh.id = b.household_id where b.id = any($1::uuid[])`, [lines.map((l) => l.bookingId)])
+      : { rows: [] };
+    const bookingOf = new Map(bookings.map((b) => [b.id, b]));
+    const { rows: tips } = await query(`select t.id, t.booking_id, t.amount_pence, t.state, t.created_at, t.household_id, hh.name as household from booking_tips t left join households hh on hh.id = t.household_id where t.payout_id = $1 order by t.created_at`, [p.id]);
+    const { rows: complaints } = p.session_id
+      ? await query(`select k.id, k.kind, k.state, k.booking_id, k.created_at, k.resolved_at, k.household_id, hh.name as household from hosting_complaints k left join households hh on hh.id = k.household_id where k.session_id = $1 order by k.created_at`, [p.session_id])
+      : { rows: [] };
+    const { rows: payments } = await query('select * from hosting_payments where payout_id = $1 order by created_at', [p.id]);
+    const changes = await changesAbout([['payout', p.id]]);
+    res.json({
+      payout: {
+        id: p.id, state: p.state, hostId: p.host_id, host: p.host, offerId: p.offer_id, event: p.title,
+        session: p.session_id ? { id: p.session_id, n: p.session_n, date: ymd(p.on_date), time: hm(p.starts_at) } : null,
+        pence: p.amount_pence + p.tips_pence, sharePence: p.amount_pence, tipsPence: p.tips_pence,
+        releaseAt: p.release_at, tookPlace: p.took_place, confirmedBy: p.confirmed_by, holdReason: p.hold_reason, releasedBy: p.released_by ?? null,
+        sent: Boolean(p.stripe_transfer), attempt: p.attempt ?? null, mode: p.mode, madeAt: p.created_at, updatedAt: p.updated_at,
+      },
+      lines: lines.map((l) => { const b = bookingOf.get(l.bookingId); return { bookingId: l.bookingId, pence: Number(l.pence) || 0, heads: b?.heads ?? null, state: b?.state ?? null, householdId: b?.household_id ?? null, household: b?.household ?? null }; }),
+      tips: tips.map((t) => ({ id: t.id, bookingId: t.booking_id, pence: t.amount_pence, state: t.state, at: t.created_at, householdId: t.household_id, household: t.household })),
+      complaints: complaints.map((k) => ({ id: k.id, kind: k.kind, state: k.state, bookingId: k.booking_id, householdId: k.household_id, household: k.household, at: k.created_at, resolvedAt: k.resolved_at })),
+      payments: payments.map(paymentRow),
+      changes: changes.rows, changesCapped: changes.capped,
+    });
+  } catch (err) { next(err); }
+});
+
+router.get('/complaints/:id', requires('view_hosting'), async (req, res, next) => {
+  try {
+    if (!UUID.test(req.params.id)) throw refuse(404, 'not_found', 'No such complaint.');
+    const { rows: [k] } = await query(
+      `select k.*, h.name as host, o.title, hh.name as household, x.n as session_n, x.on_date, x.starts_at
+         from hosting_complaints k left join hosts h on h.id = k.host_id left join host_offers o on o.id = k.offer_id
+         left join households hh on hh.id = k.household_id left join offer_sessions x on x.id = k.session_id
+        where k.id = $1`, [req.params.id],
+    );
+    if (!k) throw refuse(404, 'not_found', 'No such complaint.');
+    // The payout an open complaint holds: the session's own (hostingMoney holds it while one is open).
+    const { rows: payouts } = k.session_id
+      ? await query('select id, state, hold_reason, amount_pence + tips_pence as pence, release_at from host_payouts where session_id = $1', [k.session_id])
+      : { rows: [] };
+    const changes = await changesAbout([['complaint', k.id]]);
+    res.json({
+      complaint: {
+        id: k.id, kind: k.kind, state: k.state, reason: k.reason, pence: k.amount_pence, at: k.created_at, resolvedAt: k.resolved_at,
+        hostId: k.host_id, host: k.host, offerId: k.offer_id, event: k.title, householdId: k.household_id, household: k.household, bookingId: k.booking_id,
+        session: k.session_id ? { id: k.session_id, n: k.session_n, date: ymd(k.on_date), time: hm(k.starts_at) } : null,
+      },
+      payouts: payouts.map((p) => ({ id: p.id, state: p.state, holdReason: p.hold_reason, pence: p.pence, releaseAt: p.release_at })),
+      changes: changes.rows, changesCapped: changes.capped,
+    });
   } catch (err) { next(err); }
 });
 
@@ -739,12 +886,12 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
       checked: checked.map((h) => ({ hostId: h.id, host: h.name, state: h.checked_state, on: ymd(h.checked_on), insuranceExpires: ymd(h.insurance_expires), dropOffEvents: h.drop_off_events })),
       ratings: th ? ratings.map((r) => ({ hostId: r.id, host: r.name, avg: r.avg, reviews: r.n, ratedEvents: r.rated })) : null,
       ratingsReason: th ? null : t ? 'The rating thresholds are set without an average to measure against' : 'Rating escalation thresholds are not set yet',
-      complaints: complaints.filter((k) => k.kind !== 'host_no_show').map((k) => ({ id: k.id, kind: k.kind, host: k.host, event: k.title, household: k.household, booking: k.booking_id ? k.booking_id.slice(0, 8) : null, reason: k.reason, amountPence: k.amount_pence, state: k.state, at: k.created_at, autoPayLimit: s.claim_auto_pay_limit ?? null })),
-      noShows: complaints.filter((k) => k.kind === 'host_no_show').map((k) => ({ id: k.id, host: k.host, event: k.title, household: k.household, state: k.state, at: k.created_at })),
+      complaints: complaints.filter((k) => k.kind !== 'host_no_show').map((k) => ({ id: k.id, kind: k.kind, hostId: k.host_id, host: k.host, offerId: k.offer_id, event: k.title, householdId: k.household_id, household: k.household, bookingId: k.booking_id, booking: k.booking_id ? k.booking_id.slice(0, 8) : null, reason: k.reason, amountPence: k.amount_pence, state: k.state, at: k.created_at, autoPayLimit: s.claim_auto_pay_limit ?? null })),
+      noShows: complaints.filter((k) => k.kind === 'host_no_show').map((k) => ({ id: k.id, hostId: k.host_id, host: k.host, offerId: k.offer_id, event: k.title, householdId: k.household_id, household: k.household, bookingId: k.booking_id, state: k.state, at: k.created_at })),
       idAskedAgain: askedAgain.map((h) => ({ hostId: h.id, host: h.name, asks: storedIdAsks(h.stripe_requirements), verifiedOn: ymd(h.identity_verified_at), stripeAccount: h.stripe_account_id })),
       incidentsCapped: incidents.length === 200,
-      reports: reports.map((r) => ({ id: r.id, hostId: r.host_id, host: r.host_name, event: r.title ?? null, reason: r.reason, at: r.created_at })),
-      incidents: incidents.map((i) => ({ id: i.id, host: i.host, event: i.title, children: i.children ?? [], reporter: i.reporter, body: i.body, at: i.created_at })),
+      reports: reports.map((r) => ({ id: r.id, hostId: r.host_id, host: r.host_name, offerId: r.offer_id ?? null, event: r.title ?? null, reason: r.reason, at: r.created_at })),
+      incidents: incidents.map((i) => ({ id: i.id, hostId: i.host_id, host: i.host, offerId: i.offer_id, event: i.title, children: i.children ?? [], reporter: i.reporter, body: i.body, at: i.created_at })),
     });
   } catch (err) { next(err); }
 });

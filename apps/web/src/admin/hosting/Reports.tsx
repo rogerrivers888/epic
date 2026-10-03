@@ -23,7 +23,8 @@ import { useQueryState, asOneOf } from '../../router';
 import { Dropdown, FilterRow } from '../kit';
 import { Ladder, Num, Word, Blank, Act, Stat, Bar, type Col } from '../table';
 import { Explain } from '../explain';
-import { KIND_OPTIONS, KIND_WORDS, useLoad, useSorted, gbp } from './kit';
+import { KIND_OPTIONS, KIND_WORDS, useLoad, useOpen, useSorted, gbp } from './kit';
+import { paths } from '../../routes';
 import { Band, Loading, Pct, Pounds, Said, TableHead, ViewSwitch, amber, red, pct, tip, useSortParam, monthOf, monthWords } from './Money';
 
 type Step = { key: string; started: number; sent: number; live: number; booked: number };
@@ -91,6 +92,7 @@ function FunnelView() {
     live: rows.reduce((t, x) => t + x.live, 0), booked: rows.reduce((t, x) => t + x.booked, 0),
   });
   const total = data ? all(data.byKind) : null;
+  const open = useOpen();
 
   const cols = (first: string, firstTip: string): Col<FunnelRow>[] => [
     { key: 'label', label: first, sort: 'label', grow: true, tip: tip(first, firstTip), cell: (x) => <Word strong={x.total}>{x.label}</Word> },
@@ -123,6 +125,8 @@ function FunnelView() {
           <View>
             <TableHead tip={tip('By Kind', 'One-off, Weekly, Course or On request.')}>By Kind</TableHead>
             <Ladder columns={cols('Kind', 'One-off, Weekly, Course or On request.')} rows={data.byKind.length ? [...byKind, total] : []}
+                    // A kind opens its events, filtered to it (K15 §3); the total opens them all.
+                    onRow={(x) => open(paths.hosting('events', { ekind: x.total ? null : x.key, evis: vis === 'all' ? null : vis }))} label={(x) => `Open the ${x.label} events`}
                     keyOf={(x) => x.key} sort={k.sort} desc={k.desc} onSort={k.onSort} empty={<Blank />} />
           </View>
           <View>
@@ -169,6 +173,7 @@ function MoneyView() {
   const value = (x: MonthRow, key: string) => (key === 'label' ? x.key : key === 'rate' ? pct(x.epic, x.value) : key === 'mix' ? null : (x as any)[key] as number);
   const sortedMonths = useSorted(months, m.sort ?? 'label', m.sort ? m.desc : true, value);
   const sortedKinds = useSorted(kinds, kk.sort, kk.desc, (x, key) => (key === 'label' ? x.label : value(x, key)));
+  const open = useOpen();
   const total: MonthRow = {
     key: 'total', label: 'Twelve months', total: true, byKind: {},
     n: months.reduce((t, x) => t + x.n, 0), value: months.reduce((t, x) => t + x.value, 0), epic: months.reduce((t, x) => t + x.epic, 0), host: months.reduce((t, x) => t + x.host, 0),
@@ -209,11 +214,15 @@ function MoneyView() {
           <View>
             <TableHead tip={tip('By month', 'Calendar months, bookings by the day they were made.')}>By month</TableHead>
             <Ladder columns={figures('Month', 'Calendar month.', true)} rows={months.length ? [...sortedMonths, total] : []}
+                    // A month opens its bookings in the ledger; the twelve months open Streams by Kind (K15 §3).
+                    onRow={(x) => open(x.total ? paths.hosting('money', { mkind: kind === 'all' ? null : kind }) : paths.hosting('money', { mview: 'ledger', mmonth: x.key, mtype: 'charge' }))}
+                    label={(x) => `Open ${x.label} in Money`}
                     keyOf={(x) => x.key} sort={m.sort ?? 'label'} desc={m.sort ? m.desc : true} onSort={m.onSort} empty={<Blank />} />
           </View>
           <View>
             <TableHead tip={tip('By Kind', 'The same twelve months, by Kind.')}>By Kind</TableHead>
             <Ladder columns={figures('Kind', 'One-off, Weekly, Course or On request.', false)} rows={kinds.length ? [...sortedKinds, total] : []}
+                    onRow={(x) => open(paths.hosting('money', { mkind: x.total ? null : x.key }))} label={(x) => `Open ${x.label} in Streams`}
                     keyOf={(x) => x.key} sort={kk.sort} desc={kk.desc} onSort={kk.onSort} empty={<Blank />} />
           </View>
         </View>
@@ -239,6 +248,7 @@ function Dac7View() {
     k === 'host' ? x.host : k === 'tax' ? x.tax : k === 'consideration' ? x.considerationPence : k === 'fees' ? x.feesPence : k === 'tips' ? x.tipsPence : k === 'activities' ? x.activities : null));
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ text: string; refused: boolean } | null>(null);
+  const open = useOpen();
 
   const produce = async () => {
     setBusy(true); setSaid(null);
@@ -291,7 +301,8 @@ function Dac7View() {
       </View>
       {said ? <Text style={[type.small, { color: said.refused ? red() : colors.inkMuted }]}>{said.text}</Text> : null}
       {!data ? <Loading error={error} reload={reload} />
-        : <Ladder columns={cols} rows={total ? [...rows, total] : []} keyOf={(x) => x.hostId} sort={d.sort} desc={d.desc} onSort={d.onSort} empty={<Blank />} />}
+        : <Ladder columns={cols} rows={total ? [...rows, total] : []} keyOf={(x) => x.hostId}
+                  onRow={(x) => { if (!x.total) open(paths.hostingRecord('host', x.hostId)); }} label={(x) => `Open ${x.host}`} sort={d.sort} desc={d.desc} onSort={d.onSort} empty={<Blank />} />}
     </View>
   );
 }

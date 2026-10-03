@@ -18,7 +18,8 @@ import { SHORT } from '../../screens/host/v7/model';
 import { Ladder, Num, Word, Blank, Kicker, type Col } from '../table';
 import { FilterRow, Dropdown } from '../kit';
 import { Explain } from '../explain';
-import { KIND_WORDS, KIND_OPTIONS, useLoad, useSorted, gbp, when } from './kit';
+import { KIND_WORDS, KIND_OPTIONS, Opens, useLoad, useOpen, useSorted, gbp, when } from './kit';
+import { paths } from '../../routes';
 import { tip, optionsOf, labelOf, useSortState, Said, SearchBox, Fact, Block, Back, Band, Failed, Waiting, stateWord, stateTone } from './Hosts';
 
 // ---------------------------------------------------------------------------
@@ -26,13 +27,13 @@ import { tip, optionsOf, labelOf, useSortState, Said, SearchBox, Fact, Block, Ba
 // ---------------------------------------------------------------------------
 
 type EventRow = {
-  id: string; title: string; host: string; kind: string | null; lane: string; state: string; visibility: 'Public' | 'Private';
+  id: string; title: string; host: string; hostId?: string; kind: string | null; lane: string; state: string; visibility: 'Public' | 'Private';
   booked: number; min: number | null; max: number | null; decidesBy: string | null; next: string | null; priceMode: string | null; waitingOn?: string[] | null;
 };
 type EventsPayload = { rows: EventRow[]; draftsByStep: Record<string, { step: string; n: number }[]>; capped: boolean };
 
-type Session = { id: string; n: number | null; date: string | null; time: string | null; booked: number; state: string; decided: 'on' | 'called_off' | null; decidesAt: string | null; confirmedBy: number; payout: string | null; late: boolean | null };
-type Refund = { booking: string; bookingId: string; household: string; heads: number | null; pence: number; cause: string | null; state: string; stripe: 'pending' | 'matched' | 'mismatch' | 'not_checked' | null; at: string };
+type Session = { id: string; n: number | null; date: string | null; time: string | null; booked: number; state: string; decided: 'on' | 'called_off' | null; decidesAt: string | null; confirmedBy: number; payout: string | null; payoutId?: string | null; late: boolean | null };
+type Refund = { booking: string; bookingId: string; household: string; householdId?: string; heads: number | null; pence: number; cause: string | null; state: string; stripe: 'pending' | 'matched' | 'mismatch' | 'not_checked' | null; at: string };
 type EventDetail = {
   event: {
     id: string; title: string; host: string | null; hostId: string; kind: string | null; state: string; visibility: string;
@@ -115,7 +116,7 @@ function EventList({ onOpen }: { onOpen: (id: string) => void }) {
 
   const columns: Col<EventRow>[] = [
     { key: 'title', label: 'Event', sort: 'title', grow: true, tip: tip('Event', 'As titled by the host. Opens the event.'), cell: (r) => <Text style={[s.word, s.strong]} numberOfLines={1}>{r.title}</Text> },
-    { key: 'host', label: 'Host', sort: 'host', width: 150, tip: tip('Host', 'Who runs it.'), cell: (r) => <Text style={s.word} numberOfLines={1}>{r.host}</Text> },
+    { key: 'host', label: 'Host', sort: 'host', width: 150, tip: tip('Host', 'Who runs it. Opens the host.'), cell: (r) => <Opens to={r.hostId ? paths.hostingRecord('host', r.hostId) : null}>{r.host}</Opens> },
     { key: 'kind', label: 'Kind', sort: 'kind', width: 96, tip: tip('Kind', 'One-off, weekly, course or on request, public or private.'),
       cell: (r) => (r.kind ? <Word>{KIND_WORDS[r.kind] ?? r.kind}</Word> : <Blank />) },
     { key: 'state', label: 'Status', sort: 'state', width: 270, tip: tip('Status', 'In review, approved and waiting on whatever is still missing, live, paused, called off or ended.'),
@@ -202,6 +203,7 @@ function Drafts({ byStep, total }: { byStep: EventsPayload['draftsByStep']; tota
 
 function EventPage({ id, onBack }: { id: string; onBack: () => void }) {
   const { setQuery } = useRouter();
+  const go = useOpen();
   const { data, error } = useLoad<EventDetail>(() => api.hostingAdmin<EventDetail>(`/events/${encodeURIComponent(id)}`), [id]);
   const [ssort, setSsort] = React.useState<string | null>(null);
   const [sdesc, setSdesc] = React.useState(false);
@@ -252,15 +254,17 @@ function EventPage({ id, onBack }: { id: string; onBack: () => void }) {
     { key: 'confirmed', label: 'Confirmed by', sort: 'confirmed', width: 110, align: 'right', tip: tip('Confirmed by', 'Guests who said it took place. A yes may release the payout early.'),
       cell: (x) => (x.state === 'scheduled' && !x.confirmedBy ? <Blank /> : <Num n={x.confirmedBy} />) },
     { key: 'payout', label: 'Payout', sort: 'payout', width: 96, tip: tip('Payout', 'This session’s payout: scheduled, held, released, paid or failed.'),
-      cell: (x) => (x.payout ? <Said tone={x.payout === 'held' ? 'attention' : x.payout === 'failed' ? 'refusal' : 'plain'}>{PAYOUT_WORD[x.payout] ?? cap(x.payout)}</Said> : <Blank />) },
+      cell: (x) => (x.payout ? (x.payoutId
+        ? <Opens to={paths.hostingRecord('payout', x.payoutId)}>{PAYOUT_WORD[x.payout] ?? cap(x.payout)}</Opens>
+        : <Said tone={x.payout === 'held' ? 'attention' : x.payout === 'failed' ? 'refusal' : 'plain'}>{PAYOUT_WORD[x.payout] ?? cap(x.payout)}</Said>) : <Blank />) },
     { key: 'state', label: 'Status', sort: 'state', width: 100, tip: tip('Status', 'Scheduled, called off, cancelled or finished.'),
       cellTip: (x) => (x.late ? tip('Changed late', 'Changed within 48 hours; it counts against the host.') : null),
       cell: (x) => <Said tone={x.state === 'called_off' || x.state === 'cancelled' ? 'refusal' : x.late ? 'attention' : 'plain'}>{SESSION_WORD[x.state] ?? cap(x.state)}</Said> },
   ];
 
   const refundCols: Col<Refund>[] = [
-    { key: 'booking', label: 'Booking', sort: 'booking', width: 100, tip: tip('Booking', 'The booking’s reference: the first eight characters of its id, as in the ledger.'), cell: (r) => <Text style={s.word} numberOfLines={1}>{r.booking}</Text> },
-    { key: 'household', label: 'Household', sort: 'household', grow: true, tip: tip('Household', 'Who booked.'), cell: (r) => <Text style={s.word} numberOfLines={1}>{r.household}</Text> },
+    { key: 'booking', label: 'Booking', sort: 'booking', width: 100, tip: tip('Booking', 'The booking’s reference: the first eight characters of its id, as in the ledger. The row opens the booking.'), cell: (r) => <Text style={s.word} numberOfLines={1}>{r.booking}</Text> },
+    { key: 'household', label: 'Household', sort: 'household', grow: true, tip: tip('Household', 'Who booked. Opens their record in Customers.'), cell: (r) => <Opens to={r.householdId ? paths.customer(r.householdId) : null}>{r.household}</Opens> },
     { key: 'heads', label: 'Guests', sort: 'heads', width: 70, align: 'right', tip: tip('Guests', 'People on the booking.'), cell: (r) => <Num n={r.heads} /> },
     { key: 'amount', label: 'Amount', sort: 'amount', width: 96, align: 'right', tip: tip('Amount', 'Refunded.'), cell: (r) => <Text style={s.num}>{gbp(r.pence)}</Text> },
     { key: 'cause', label: 'Cause', sort: 'cause', width: 140, tip: tip('Cause', 'Why it was refunded.'), cell: (r) => (r.cause ? <Word>{CAUSE_WORD[r.cause] ?? cap(r.cause)}</Word> : <Blank />) },
@@ -309,6 +313,8 @@ function EventPage({ id, onBack }: { id: string; onBack: () => void }) {
       <View>
         <View style={s.blockHead}><Kicker tip={tip('Sessions', 'Every session of this event, in date order.')}>{`Sessions · ${data.sessions.length}`}</Kicker></View>
         <Ladder columns={sessionCols} rows={sessions} keyOf={(x) => x.id} dense sort={ssort} desc={sdesc}
+                // A session has no record of its own; its row opens the payout for it once there is one (K15 §3).
+                onRow={(x) => { if (x.payoutId) go(paths.hostingRecord('payout', x.payoutId)); }} label={(x) => `Open the payout for session ${x.n ?? ''}`}
                 onSort={(k) => { if (ssort === k) setSdesc(!sdesc); else { setSsort(k); setSdesc(false); } }}
                 empty={<Word muted>No sessions.</Word>} />
       </View>
@@ -317,6 +323,7 @@ function EventPage({ id, onBack }: { id: string; onBack: () => void }) {
         <View>
           <View style={s.blockHead}><Kicker tip={tip('Refunds made', 'Each refund and release on this event, and whether Stripe agrees.')}>{`Refunds made · ${data.refunds.length}`}</Kicker></View>
           <Ladder columns={refundCols} rows={refunds} keyOf={(r, i) => `${r.at}-${i}`} dense sort={rsort} desc={rdesc}
+                  onRow={(r) => go(paths.hostingRecord('booking', r.bookingId))} label={(r) => `Open booking ${r.booking}`}
                   onSort={(k) => { if (rsort === k) setRdesc(!rdesc); else { setRsort(k); setRdesc(false); } }}
                   empty={<Word muted>No refunds.</Word>} />
         </View>
