@@ -381,8 +381,8 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
     });
     sent.in_app = row ? { written: true, id: row.id } : { written: false, reason: 'already_sent' };
     await logSend({ t, channel: 'in_app', purpose: 'deliver', toKind: to.accountId ? 'account' : 'household', toRef, result: sent.in_app, by });
-    // Already said once under this key: nothing else goes either.
-    if (!row) return { template: t.key, version: t.version, channels: sent };
+    // Each channel keeps its own once-only claim: an in-app message already written does not stop a
+    // retry of an e-mail or SMS that failed the first time (Codex, 3 Oct 2026).
   }
   if (want.includes('email')) {
     if (!addr.email) sent.email = { sent: false, reason: 'no_address' };

@@ -228,3 +228,22 @@ test('a failed send gives its once-only key back, and a launch-list yes is to th
   assert.equal(await templates.hasMarketingConsent('lists@example.com', 'interest.signed_up', { source: 'home' }), false);
   assert.equal(await templates.hasMarketingConsent('lists@example.com', 'interest.signed_up'), false);
 });
+
+test('an in-app message already written does not stop a retry of the e-mail that failed (Codex, 3 Oct 2026)', async () => {
+  const { aHousehold } = await import('./helpers/db.js');
+  const { household } = await aHousehold(query);
+  await query(`insert into accounts (household_id, email, role, status, name) values ($1, 'twochan@example.com', 'customer', 'active', 'Pat')`, [household.id]);
+  const was = { ...templates.senders };
+  let ok = false;
+  templates.senders.mail = async () => (ok ? { sent: true } : { sent: false, reason: 'provider_down' });
+  try {
+    const go = () => templates.deliver({ templateKey: 'refund_issued', fields: { amount: '5.00', title: 'Clay', link: 'https://epic.day/b/1' }, to: { householdId: household.id }, dedupeKey: 'refund:twochan' });
+    const first = await go();
+    assert.equal(first.channels.in_app.written, true);
+    assert.equal(first.channels.email.sent, false);
+    ok = true;
+    const second = await go();
+    assert.equal(second.channels.in_app.written, false);
+    assert.equal(second.channels.email.sent, true);
+  } finally { Object.assign(templates.senders, was); }
+});
