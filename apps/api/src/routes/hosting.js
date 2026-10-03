@@ -1765,6 +1765,14 @@ router.post('/bookings/:id/cancel', async (req, res, next) => {
   try {
     const { booking } = await myBooking(req.params.id);
     if (booking.state === 'cancelled') return res.json({ booking: bookingPayload(booking) });
+    // A lane booking (hosting v4) cancels by its own rules — the policy, the refund queue, the sessions (Codex, 2 Oct 2026).
+    const { rows: [lane] } = await query('select lane from host_offers where id = $1', [booking.offer_id]);
+    if (lane?.lane) {
+      const { cancelBooking } = await import('./guestBookings.js');
+      const household = await currentHousehold();
+      await cancelBooking({ bookingId: booking.id, household, account: currentAccount(), sessionIds: req.body?.sessionIds ?? null });
+      return res.json({ booking: bookingPayload(await repo.bookingById(booking.id)) });
+    }
     const on = occurrenceDate(booking, booking.occurrence);
     const hours = on ? (new Date(`${on}T${booking.starts_at ?? '12:00'}:00`).getTime() - Date.now()) / 3600000 : Infinity;
     const window = booking.refund_rule === '7d' ? 24 * 7 : booking.refund_rule === 'none' ? Infinity : 24;

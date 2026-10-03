@@ -759,13 +759,22 @@ router.get('/booked/:id/cancel-quote', async (req, res, next) => {
 router.post('/booked/:id/cancel', async (req, res, next) => {
   try {
     const { household, account } = await me();
+    res.json(await cancelBooking({ bookingId: req.params.id, household, account, sessionIds: req.body?.sessionIds }));
+  } catch (err) { next(err); }
+});
+
+/**
+ * A guest cancels a lane booking: the policy agreed at booking, the refund queued, sessions given back or
+ * forfeited. Shared with the older /bookings/:id/cancel, so the booking page can't take a cheaper path (Codex, 2 Oct 2026).
+ */
+export async function cancelBooking({ bookingId, household, account, sessionIds }) {
     // Each session once, however often it was sent (Codex, 2 Oct 2026).
-    const ids = Array.isArray(req.body?.sessionIds) ? [...new Set(req.body.sessionIds.filter((x) => UUID.test(String(x))))] : null;
+    const ids = Array.isArray(sessionIds) ? [...new Set(sessionIds.filter((x) => UUID.test(String(x))))] : null;
     const out = await withTransaction(async (c) => {
-      const { rows: [b0] } = await c.query('select offer_id from experience_bookings where id = $1 and household_id = $2', [req.params.id, household.id]);
+      const { rows: [b0] } = await c.query('select offer_id from experience_bookings where id = $1 and household_id = $2', [bookingId, household.id]);
       if (!b0) throw refuse(404, 'not_found', 'That booking isn’t yours.');
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${b0.offer_id}`]);
-      const { rows: [b] } = await c.query('select * from experience_bookings where id = $1 for update', [req.params.id]);
+      const { rows: [b] } = await c.query('select * from experience_bookings where id = $1 for update', [bookingId]);
       if (b.state === 'cancelled') throw refuse(409, 'already_cancelled', 'This one is cancelled already.');
       const o = await repo.offerById(b.offer_id);
       const q = await quoteFor(b, o, ids);
@@ -790,9 +799,8 @@ router.post('/booked/:id/cancel', async (req, res, next) => {
     });
     // A freed place goes to the waiting list straight away.
     void offerFreedPlaces().catch(() => null);
-    res.json(out);
-  } catch (err) { next(err); }
-});
+    return out;
+}
 
 router.post('/booked/:id/keep', async (req, res, next) => {
   try {
