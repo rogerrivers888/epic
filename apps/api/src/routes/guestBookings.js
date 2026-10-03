@@ -926,6 +926,11 @@ export async function changeParty({ bookingId, householdId = null, hostId = null
     const q = await quoteParty(c, b, o, party, { by });
     const { rows: kids } = await c.query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1', [b.id]);
     const later = ['card_saved', 'charge_failed'].includes(b.payment_state);
+    // A later charge under way, or one refused and waiting on the guest (L4): its amount is fixed in that payment, so
+    // the party can't grow until it is settled (Codex, 3 Oct 2026).
+    if (later && q.chargePence > 0 && (b.payment_state === 'charge_failed' || b.stripe_payment_intent || (b.later_charge_claimed_at && Date.now() - new Date(b.later_charge_claimed_at).getTime() < 10 * 60_000))) {
+      throw refuse(409, 'charge_under_way', 'Your payment for this booking is being taken — add people once it’s through.');
+    }
     const payNow = q.paid && q.chargePence > 0 && !later;
     const { rows: [change] } = await c.query(
       `insert into booking_party_changes (booking_id, from_heads, to_heads, from_party, to_party, from_children, delta_pence, charge_pence, fee_pence, refund_pence, fee_kept_pence, state, by_label, by_account, finished_at)

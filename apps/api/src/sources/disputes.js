@@ -23,7 +23,10 @@ export const SEND_DAYS_BEFORE = 2;
 export async function applyDispute(d, { closed = false, eventType = null } = {}) {
   if (!d?.id) return null;
   const pi = typeof d.payment_intent === 'string' ? d.payment_intent : d.payment_intent?.id ?? null;
-  const { rows: [b] } = pi ? await query('select id, household_id, host_id, offer_id from experience_bookings where stripe_payment_intent = $1', [pi]) : { rows: [] };
+  // The booking whose money it was: by its own payment, or by any charge on the ledger (a payment for more places).
+  const { rows: [b] } = pi ? await query(
+    `select b.id, b.household_id, b.host_id, b.offer_id from experience_bookings b
+      where b.stripe_payment_intent = $1 or b.id = (select booking_id from hosting_payments where stripe_ref = $1 and kind = 'charge' limit 1) limit 1`, [pi]) : { rows: [] };
   const dueBy = d.evidence_details?.due_by ? new Date(d.evidence_details.due_by * 1000) : null;
   await query(
     `insert into chargebacks (id, booking_id, payment_intent, amount_pence, reason, status, due_by, closed_at, mode)
@@ -105,7 +108,8 @@ export async function sendDueEvidence({ now = new Date(), status = stripe.stripe
   const { rows } = await query(
     `select * from chargebacks where evidence_sent_at is null and accepted_at is null and closed_at is null and due_by is not null
         and due_by - make_interval(days => $2) <= $1 and status in ('needs_response', 'warning_needs_response')
-      order by due_by limit 20`, [now, SEND_DAYS_BEFORE]);
+        and mode = $3
+      order by due_by limit 20`, [now, SEND_DAYS_BEFORE, status().mode ?? 'test']);
   for (const cb of rows) {
     try {
       const done = await sendEvidence(cb.id, { by: 'epic', submit });

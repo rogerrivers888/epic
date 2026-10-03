@@ -633,8 +633,10 @@ async function complaintShare(c, k) {
   if (!b) return { b: null, pence: 0 };
   const left = Math.max(0, Number(b.charged_pence ?? 0) - Number(b.refunded_pence ?? 0) - Number(b.cancellation_fee_pence ?? 0));
   if (!k.session_id) return { b, pence: left };
+  // An even share of what is still left across the sessions still held — never of the original charge, which an
+  // earlier refund has already been taken from (Codex, 3 Oct 2026).
   const { rows: [{ n }] } = await c.query(`select count(*)::int as n from booking_sessions where booking_id = $1 and state <> 'cancelled'`, [b.id]);
-  return { b, pence: Math.min(left, Math.floor(Number(b.charged_pence ?? 0) / Math.max(1, n))) };
+  return { b, pence: Math.min(left, Math.floor(left / Math.max(1, n))) };
 }
 
 /**

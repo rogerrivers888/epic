@@ -114,3 +114,19 @@ test('sending evidence, accepting a chargeback or refunding a complaint from the
     assert.ok(list.chargebacks.some((c) => c.id === 'dp_test_1'));
   } finally { await new Promise((r) => s.close(r)); }
 });
+
+test('a session complaint after an earlier refund refunds a share of what is left, not of the first charge', async () => {
+  const { booking, complaint } = await aComplaint({ charged: 6000, sessions: 3 });
+  // One session already refunded (£20) and given back: two sessions and £40 left.
+  await query(`update experience_bookings set refunded_pence = 2000 where id = $1`, [booking.id]);
+  await query(`update booking_sessions set state = 'cancelled' where booking_id = $1 and session_id <> $2 and session_id = (select session_id from booking_sessions where booking_id = $1 and session_id <> $2 limit 1)`, [booking.id, complaint.session_id]);
+  const r = await money.refundComplaint({ complaintId: complaint.id, by: 'staff' });
+  assert.equal(r.refundPence, 2000, '£40 left over two sessions');
+});
+
+test('the evidence job looks only at chargebacks in the mode Stripe is in', async () => {
+  await query(`insert into chargebacks (id, status, due_by, mode) values ('dp_live_x', 'needs_response', now() + interval '1 day', 'live')`);
+  const sent = [];
+  await disputes.sendDueEvidence({ status: () => ({ ready: true, mode: 'test' }), submit: async (id) => { sent.push(id); return {}; } });
+  assert.equal(sent.includes('dp_live_x'), false);
+});
