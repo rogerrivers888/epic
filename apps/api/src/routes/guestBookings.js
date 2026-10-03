@@ -230,7 +230,7 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
       who: { ageMin: o.age_min, ageMax: o.age_max, partyMax: o.party_max, dropOff: o.parents === 'drop_off', adultsOnly: o.age_min != null && o.age_min >= cfg.adultAge },
       questions: o.guest_questions ?? {},
       refundWords: o.refund_policy && paidThroughEpic(o) ? refundWords(o.refund_policy, cfg) : null,
-      waitlist: { on: o.waitlist_on === true, offerHours: typeof s.waitlist_offer === 'number' ? s.waitlist_offer : null, offeredUntil: mineOffered[0]?.offer_expires_at ?? null, offeredParty: mineOffered[0]?.party ?? null },
+      waitlist: { on: o.waitlist_on === true, offerHours: typeof s.waitlist_offer === 'number' ? s.waitlist_offer : null, offeredUntil: mineOffered[0]?.offer_expires_at ?? null, offeredParty: mineOffered[0]?.party ?? null, offeredSession: mineOffered[0]?.session_id ?? null },
       askWindowHours: o.lane === 'onrequest' ? (typeof s.ask_to_book_window === 'number' ? s.ask_to_book_window : null) : null,
     });
   } catch (err) { next(err); }

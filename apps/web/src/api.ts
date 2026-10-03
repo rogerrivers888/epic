@@ -2826,7 +2826,7 @@ export const api = {
       `/api/experiences/${encodeURIComponent(offerId)}/booking`, { ...body, hostLink: hostLinkFor(hostId) ?? undefined }),
   guestPaid: (bookingId: string, paymentIntent: string) => post<{ state: string; paymentState: string; requestState: string | null }>(`/api/booked/${encodeURIComponent(bookingId)}/payment`, { paymentIntent }),
   /** Leave the waiting list — or pass on a place offered from it (G18), which then goes to the next person. */
-  guestLeaveWaitlist: (offerId: string) => del<{ left: boolean; passed: boolean }>(`/api/experiences/${encodeURIComponent(offerId)}/waitlist`),
+  guestLeaveWaitlist: (offerId: string, sessionId?: string | null) => del<{ left: boolean; passed: boolean }>(`/api/experiences/${encodeURIComponent(offerId)}/waitlist${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),
   guestWaitlist: (offerId: string, body: { party?: number; sessionId?: string | null; linkToken?: string | null; inviteToken?: string | null } = {}) => post<{ position: number }>(`/api/experiences/${encodeURIComponent(offerId)}/waitlist`, body),
   guestBooked: () => request<GuestBookedList>('/api/booked'),
   guestBooking: (id: string) => request<{ booking: GuestBooking }>(`/api/booked/${encodeURIComponent(id)}`),
@@ -6250,7 +6250,7 @@ export type GuestOptions = {
     groups: { dropIn: { pct: number; min: number } | null; bookAhead: { pct: number; min: number } | null }; throughEpic: boolean };
   who: { ageMin: number | null; ageMax: number | null; partyMax: number | null; dropOff: boolean; adultsOnly: boolean };
   questions: Record<string, any>; refundWords: string | null;
-  waitlist: { on: boolean; offerHours: number | null; offeredUntil?: string | null; offeredParty?: number | null }; askWindowHours: number | null;
+  waitlist: { on: boolean; offerHours: number | null; offeredUntil?: string | null; offeredParty?: number | null; offeredSession?: string | null }; askWindowHours: number | null;
 };
 export type GuestChild = { name?: string; age?: number | null; dob?: string | null; emergencyContact?: string | null; memberId?: string | null };
 export type GuestBookBody = {

@@ -163,12 +163,12 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const offeredAt = opt?.waitlist.offeredUntil ? new Date(opt.waitlist.offeredUntil) : null;
   const hoursLeft = offeredAt ? Math.max(0, Math.floor((offeredAt.getTime() - Date.now()) / 3_600_000)) : null;
   const byWhen = offeredAt ? `${offeredAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${offeredAt.toDateString() === new Date().toDateString() ? ' tonight' : offeredAt.toDateString() === new Date(Date.now() + 86_400_000).toDateString() ? ' tomorrow' : ` ${dayWords(offeredAt.toISOString().slice(0, 10))}`}` : null;
-  const party = opt?.waitlist.offeredParty ?? 1;
-  // The price for the party the place is held for; the event's own words when it can't be said simply.
-  const each = !opt ? null : opt.price.mode === 'free' ? 0 : opt.price.mode === 'by_numbers' ? opt.price.nowEach ?? null : opt.price.per === 'booking' ? null : opt.price.pence ?? null;
-  const offerPrice = opt?.price.per === 'booking' && opt.price.pence != null ? gbp(opt.price.pence) : each != null ? gbp(each * party) : price.big;
+  // The event's own price words: child rates, group discounts and drop-in or book-ahead prices are the booking screen's
+  // to total, never guessed here (Codex, 3 Oct 2026).
+  const offerPrice = price.big;
   const pass = async () => {
-    try { await api.guestLeaveWaitlist(o.id); toast.show('Passed to the next person'); api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => null); }
+    // Only the offered session's place: a Weekly's other waiting lists stay as they are (Codex, 3 Oct 2026).
+    try { await api.guestLeaveWaitlist(o.id, opt?.waitlist.offeredSession ?? null); toast.show('Passed to the next person'); api.guestOptions(id, { l: linkToken, i: inviteToken }).then(setOpt).catch(() => null); }
     catch (e: any) { toast.show(e?.message ?? 'That didn’t go through.'); }
   };
   const sessions = opt?.sessions ?? [];
