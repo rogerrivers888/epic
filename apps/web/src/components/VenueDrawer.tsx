@@ -3,7 +3,10 @@ import { Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Platfor
 import { Press, Pulse } from './press';
 import { useViewport } from '../hooks/useViewport';
 import { Icon, IconName, IconText, Rating, Stars } from './Icon';
-import { API_URL, api, ownedImageUrl, BrowseItem, MenuLink, OwnedRecord, PlaceInsideItem, PlaceOpenStatusBrief, Venue, Visit } from '../api';
+import { API_URL, api, ownedImageUrl, BrowseItem, EventNear, MenuLink, OwnedRecord, PlaceInsideItem, PlaceOpenStatusBrief, Venue, Visit } from '../api';
+import { useRouter } from '../router';
+import { paths } from '../routes';
+import { EventCard } from './InspireBody';
 import { useOptionalRouter } from '../router';
 import { colors, fonts, radius, spacing, TARGET, type, BORDER, CREAM, INK, LIME } from '../theme';
 import { Button, Chip, Row, Segmented, Wrap, clock, minutes } from './ui';
@@ -275,6 +278,16 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
   // Which places have grounds worth looking inside, decided from what the
   // search already said this place is.
   const insideOf = item?.experiences ?? [];
+  // Epic's own events at this place (guest handoff: "events on a place's page", the Inspire card).
+  const { navigate: go } = useRouter();
+  const [eventsHere, setEventsHere] = useState<EventNear[]>([]);
+  useEffect(() => {
+    setEventsHere([]);
+    if (!item?.venueRef) return undefined;
+    let live = true;
+    api.eventsNear({ lat: item.lat ?? 0, lng: item.lng ?? 0, minutes: 60, ref: item.venueRef }).then((r) => { if (live) setEventsHere(r.events); }).catch(() => null);
+    return () => { live = false; };
+  }, [item?.venueRef]); // eslint-disable-line react-hooks/exhaustive-deps
   const grounds = insideOf.reduce((r, e) => Math.max(r, GROUNDS[e] ?? 0), 0);
   const [venue, setVenue] = useState<Venue | null | undefined>(undefined);
   const [menu, setMenu] = useState<MenuLink | null | undefined>(undefined);
@@ -1089,6 +1102,13 @@ export function VenueDrawer({ item, country, baseLabel, onClose, onAdd, addLabel
                         height={140}
                       />
                       <Text style={type.tiny}>Their own mark, from their website. Shown to identify them; the mark is theirs.</Text>
+                    </View>
+                  ) : null}
+
+                  {eventsHere.length ? (
+                    <View style={{ gap: spacing.sm }}>
+                      <Text style={type.h3}>Events here</Text>
+                      {eventsHere.map((e) => <EventCard key={e.id} e={e} wide onOpen={() => { onClose(); go(paths.experience(e.id)); }} />)}
                     </View>
                   ) : null}
 

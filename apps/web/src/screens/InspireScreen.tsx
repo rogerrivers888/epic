@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { Press } from '../components/press';
-import { api, Experience, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
+import { api, Experience, EventNear, BrowseItem, HouseholdResponse, InspireItem, InspireNear, MoodKey, OwnedImage, Place, VenuePhotoRef, Intake } from '../api';
 import { useHere } from '../hooks/useHere';
 import { colors, fonts, spacing, TARGET, type } from '../theme';
 import { useCachedResource, runFetch, inspireNearKey, INSPIRE_DEFAULT_MINUTES, TEN_MINUTES, savedOverrides, useScrollMemory, scrollKey } from '../cache/resourceCache';
@@ -20,7 +20,7 @@ import { InkMenu } from '../components/InkMenu';
 import { ContextRow } from '../components/NavRows';
 import { ExperienceCard } from '../components/hosting';
 import { BoxRow, Popover, PopoverFooter, PopoverGroup, PopoverList, type PopoverOption } from '../components/ControlRow';
-import { CardWide, Carousel, EmptyMatch, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
+import { CardWide, Carousel, EmptyMatch, EventCard, EventLane, FoodRow, SubRow, TRAVEL } from '../components/InspireBody';
 import { Button } from '../components/ui';
 import { CollectionRowView, CollectionsHead, useCollections, WhoseList } from '../components/CollectionRows';
 import { TRAVEL_MODES, type TravelMode } from '../components/TravelSheet';
@@ -355,6 +355,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
    * is where a guest finds them.
    */
   const [hosted, setHosted] = useState<Experience[]>([]);
+  // Events near you (guest handoff G1): the lane first under Activities, and each event in its category's lane.
+  const [events, setEvents] = useState<EventNear[]>([]);
 
   // Where the phone is, when the browser will say without being asked.
   //
@@ -400,8 +402,13 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
     api.experiencesNear({ lat: centre.lat, lng: centre.lng, km: Math.max(10, Math.round((travel ?? HOW_FAR_DEFAULT) * 0.8)) })
       .then((r) => { if (live) setHosted(r.cards); })
       .catch(() => { if (live) setHosted([]); });
+    api.eventsNear({ lat: centre.lat, lng: centre.lng, minutes: travel ?? HOW_FAR_DEFAULT })
+      .then((r) => { if (live) setEvents(r.events); })
+      .catch(() => { if (live) setEvents([]); });
     return () => { live = false; };
   }, [centre?.lat, centre?.lng, travel]);
+  const eventsIn = (mood: string) => events.filter((e) => e.mood === mood);
+  const openEvent = (e: EventNear) => navigate(paths.experience(e.id));
   // Everything that changes what the search returns — where you are looking
   // from, how you are getting there and how far — with two notes kept from when
   // this was one imperative fetch:
@@ -962,7 +969,11 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
           {pick ? (
             <CompactBand
               title={listTitle}
-              context={listCount ? `${listCount} place${listCount === 1 ? '' : 's'}` : undefined}
+              context={(() => {
+                const ev = mode === 'activities' && pick ? eventsIn(pick).length : 0;
+                const places = listCount ? `${listCount} place${listCount === 1 ? '' : 's'}` : null;
+                return [places, ev ? `${ev} event${ev === 1 ? '' : 's'}` : null].filter(Boolean).join(' and ') || undefined;
+              })()}
               onBack={() => goTo(mode, null)}
               right={<MicTile onPress={() => navigate(paths.say({ for: 'inspire' }))} />}
             />
@@ -1080,10 +1091,23 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                       {answer.map((i) => <CardWide key={i.venueRef} item={i} crowd={crowdOf(i)} travel={travelDraw} onOpen={() => open(i)} />)}
                     </View>
                   ) : null}
+                  {/* Epic's own events that match what was asked — the named things, or the moods it was narrowed to (events in search). */}
+                  {(() => {
+                    const moods = ask?.resolved.filter.moods ?? [];
+                    const named = (ask?.resolved.wants ?? []).map((w) => w.name.toLowerCase()).filter((w) => w.length > 2);
+                    const hits = events.filter((e) => moods.includes(e.mood) || named.some((w) => (e.title ?? '').toLowerCase().includes(w)));
+                    return hits.length ? <View style={styles.cards}>{hits.map((e) => <EventCard key={`ev-${e.id}`} e={e} mixed wide onOpen={() => openEvent(e)} />)}</View> : null;
+                  })()}
                   <Pressable onPress={() => navigate(withQuery(href, { intake: null }, paths.inspire()))} accessibilityRole="button" style={{ paddingVertical: 8 }}>
                     <Text style={[type.small, { color: colors.accent, fontWeight: '600' }]}>{answer.length ? 'Show everything nearby instead ›' : 'Everything nearby ›'}</Text>
                   </Pressable>
                 </View>
+              ) : null}
+
+              {/* Events near you (G1): first, and not drawn at all when nothing is near. */}
+              {!pick && mode === 'activities' && !(answer && answer.length) ? (
+                <EventLane events={events} onOpen={openEvent}
+                           onAll={() => navigate(withQuery(paths.inspireEvents(), centre ? { lat: String(centre.lat), lng: String(centre.lng), m: String(travel ?? HOW_FAR_DEFAULT), at: placeName ?? null } : {}))} />
               ) : null}
 
               {/* Hosted near you: people, with faces and type chips (H3 cards), and the door to "who does what you love". */}
@@ -1113,6 +1137,8 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                   // journey-time count (Codex, owner 30 Sep 2026).
                   estimated={pool?.estimated ?? false}
                   items={sh.items.slice(0, ACROSS)}
+                  events={eventsIn(sh.key)}
+                  onOpenEvent={openEvent}
                   onAll={() => goTo('activities', sh.key)}
                   onOpen={open}
                   crowdOf={crowdOf}
@@ -1151,9 +1177,18 @@ export function InspireScreen({ route, household, onOpenTrip, onPlanner, onCreat
                     </View>
                   ) : (
                     <View style={styles.cards}>
-                      {listed.map((i) => (
-                        <CardWide key={i.venueRef} item={i} crowd={crowdOf(i)} travel={travelDraw} onOpen={() => open(i)} />
-                      ))}
+                      {/* A category's events sit among its places, one after every second place (G1b). */}
+                      {(() => {
+                        const ev = pick ? eventsIn(pick) : [];
+                        const out: React.ReactNode[] = [];
+                        listed.forEach((i, n) => {
+                          out.push(<CardWide key={i.venueRef} item={i} crowd={crowdOf(i)} travel={travelDraw} onOpen={() => open(i)} />);
+                          const e = n % 2 === 0 ? ev[Math.floor(n / 2)] : undefined;
+                          if (e) out.push(<EventCard key={`ev-${e.id}`} e={e} mixed wide onOpen={() => openEvent(e)} />);
+                        });
+                        for (const e of ev.slice(Math.ceil(listed.length / 2))) out.push(<EventCard key={`ev-${e.id}`} e={e} mixed wide onOpen={() => openEvent(e)} />);
+                        return out;
+                      })()}
                       {/* The end of what we have looked up, and the way past it.
                           One press is one search: twenty more from the same
                           question while Google has them, then the next drawer

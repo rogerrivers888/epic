@@ -2844,6 +2844,7 @@ export const api = {
   guestTip: (id: string, amountPence: number) => post<{ tip: { id: string; amountPence: number; feePence: number; totalPence: number }; pay: { clientSecret: string | null; paymentIntent: string } }>(`/api/booked/${encodeURIComponent(id)}/tip`, { amountPence }),
   guestPayments: () => request<{ payments: GuestPayment[]; capped: boolean }>('/api/payments'),
   guestMessages: () => request<{ threads: { offerId: string; bookingId: string | null; topicId: string | null; title: string | null; host: string; photo: string | null; last: string; at: string; unread: number }[]; unread: number; capped: boolean }>('/api/messages'),
+  eventsNear: (p: { lat: number; lng: number; minutes: number; ref?: string; q?: string }) => request<{ events: EventNear[]; estimated: boolean; minutes: number; capped: boolean }>(`/api/events/near${qs(p)}`),
   paymentsConfig: () => request<{ ready: boolean; mode: 'test' | 'live' | null; publishableKey: string | null; note: string | null }>('/api/payments/config'),
   desk: () => request<DeskHome>('/api/host/desk'),
   deskCohostInvites: () => request<{ invites: { id: string; offerId: string; title: string | null; host: string; guests: boolean; messages: boolean; money: boolean }[] }>('/api/host/desk/cohost-invites'),
@@ -2949,6 +2950,11 @@ export const api = {
   removeEvidence: (id: string) => del<void>(`/api/host/evidence/${id}`),
   /** An invitation to a private offer: what it opens, and the answer. Public. */
   invited: (token: string) => request<InvitedView>(`/api/invited/${token}`),
+  /** Yes or no to an invitation, with no account (guest handoff G12): how many are coming. */
+  invitedReply: (token: string, body: { rsvp: 'yes' | 'no'; heads?: number }) => post<{ invite: OfferInvite }>(`/api/invited/${encodeURIComponent(token)}`, body),
+  /** An invitation answered by a household on Epic (G13): a booking like any other, paid when it is a paid one. */
+  invitedBook: (token: string, body: Partial<GuestBookBody> & { rsvp: 'yes' | 'no' }) =>
+    post<{ rsvp: 'yes' | 'no'; booking?: { id: string; state: string }; pay?: { clientSecret: string | null; paymentIntent: string; amountPence: number; hold: boolean } | null }>(`/api/invited/${encodeURIComponent(token)}/book`, body),
   invitedLink: (token: string) => request<{ offerId: string; title: string | null; visibility: Visibility }>(`/api/invited/link/${encodeURIComponent(token)}`),
   hostContacts: () => request<{ contacts: HostContact[] }>('/api/host/contacts'),
   // What you are up for, and the introductions it leads to. Nothing here lists anybody.
@@ -5913,7 +5919,7 @@ export type Booking = {
   host: { id: string; name: string; type: HostType; trust: TrustLevel | null; photo: string | null; location: string | null };
   isPast: boolean; reviewed: boolean; bookedAt: string;
 };
-export type InvitedView = { invite: OfferInvite; offer: Experience; going: number; payments: PaymentsConfig };
+export type InvitedView = { invite: OfferInvite; offer: Experience; going: number; payments: PaymentsConfig; taken?: string[] };
 /** Every e-mail sent and what Postmark said became of it (admin › Mail). */
 export type MailRow = { id: string; to_address: string; subject: string; purpose: string; provider_id: string | null; status: 'sending' | 'sent' | 'delivered' | 'opened' | 'bounced' | 'soft_bounced' | 'complained' | 'failed'; bounce_type: string | null; failure: string | null; sent_at: string; delivered_at: string | null; opened_at: string | null; bounced_at: string | null };
 export type AdminMail = { counts: Record<string, number>; filters: { delivered: number; not_delivered: number }; rows: MailRow[]; words: Record<string, string>; sender: { configured: boolean; from?: string; provider?: string; stream?: string; events?: boolean; message?: string; setup?: string } };
@@ -6279,3 +6285,11 @@ export type GuestBooking = {
   dropOff: boolean; [k: string]: any;
 };
 export type GuestPayment = { id: string; kind: string; pence: number; state: string; cause: string | null; at: string; title: string | null; bookingId: string | null };
+
+/** An event near the household, for Inspire's lanes and Events near you (guest handoff G1, G1b, G1c; routes/guestBookings.js). */
+export type EventNear = {
+  id: string; title: string | null; lane: GuestLane; photo: string | null; mood: string; date: string | null; time: string | null; sessionsAhead: number; minutesAway: number;
+  price: { mode: string; pence: number | null; childPence: number | null; nowEach: number | null };
+  who: { ageMin: number | null; ageMax: number | null; dropOff: boolean };
+  placesLeft: number | null; full: boolean; needs: number | null; waitlist: boolean; rating: number | null; reviews: number;
+};

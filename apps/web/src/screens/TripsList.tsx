@@ -93,7 +93,9 @@ function statusWords(t: TripSummary): { text: string; strong: boolean } {
   return { text: `In ${days} days`, strong: true };
 }
 
-export function TripsList({ trips, bookings, loading, error, span, when, onSpan, onWhen, onOpen, onHold, onNew, onOpenBooking, wide }: {
+export function TripsList({ trips, bookings, loading, error, span, when, onSpan, onWhen, onOpen, onHold, onNew, onOpenBooking, wide, guest = false }: {
+  /** Booked without a membership (G21): Events only, the ink promo, and Messages is a tab rather than the band's tile. */
+  guest?: boolean;
   trips: TripSummary[] | null;
   /** What the household has booked with hosts, for the `hosts` strip. */
   bookings?: Booking[] | null;
@@ -152,7 +154,7 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
     <View style={{ flex: 1 }}>
       <View style={wide ? styles.wide : undefined}>
         {/* The Plans mic starts a new trip by voice (§4); Messages sits beside it with its unread count (guest handoff G14, 4c). */}
-        <TallBand right={<View style={{ flexDirection: 'row', gap: 6 }}><MessagesTile unread={unread} onPress={() => navigate(paths.messages())} /><MicTile onPress={onNew} accessibilityLabel="Start a new trip" /></View>} />
+        <TallBand right={<View style={{ flexDirection: 'row', gap: 6 }}>{guest ? null : <MessagesTile unread={unread} onPress={() => navigate(paths.messages())} />}<MicTile onPress={onNew} accessibilityLabel="Start a new trip" /></View>} />
         <InkMenu
           tabs={[{ key: 'day', label: 'Day trips' }, { key: 'holiday', label: 'Holidays' }, { key: 'events', label: 'Events' }]}
           selected={span}
@@ -163,7 +165,7 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
         />
       </View>
 
-      {span === 'events' ? <View style={[{ flex: 1 }, wide ? styles.wide : null]}><PlansEvents /></View> : (
+      {span === 'events' ? <View style={[{ flex: 1 }, wide ? styles.wide : null]}><PlansEvents guest={guest} /></View> : (
       <ScrollView ref={scroll.ref as any} onScroll={scroll.onScroll} scrollEventThrottle={scroll.scrollEventThrottle} contentContainerStyle={[styles.body, wide && styles.wideBody]} keyboardShouldPersistTaps="handled">
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
         {loading && !trips ? <Text style={type.small}>Loading…</Text> : null}

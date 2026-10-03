@@ -840,7 +840,7 @@ test('the Host tab, and every page inside it', () => {
   assert.equal(tabOf(parseRoute('/open')), 'host');
   assert.equal(tabOf(parseRoute('/open/trip/t1')), 'trips');
   assert.equal(parseRoute('/i').name, 'unknown');
-  assert.equal(tabOf(parseRoute('/invited/tok')), null);
+  assert.equal(tabOf(parseRoute('/invited/tok')), 'trips', 'an invitation is answered under Plans (guest handoff G13)');
   assert.equal(parseRoute('/invited').name, 'unknown');
   assert.equal(paths.hostVideo('o1'), '/host/video?offer=o1');
   assert.deepEqual(roundTrip('/host/offers'), { name: 'host', page: 'manage', offerId: null });
@@ -1022,4 +1022,14 @@ test('Trips is Plans: every old /trips address lands on its /plans twin, query a
   assert.equal(legacyHref('/plans/abc', new URLSearchParams()), null);
   assert.equal(legacyHref('/tripsy', new URLSearchParams()), null);
   assert.equal(paths.trips(), '/plans');
+});
+
+test('the guest pages have addresses: every event near you, messages, payments (guest handoff G1c, G22, G31)', () => {
+  assert.deepEqual(roundTrip('/inspire/events'), { name: 'events' });
+  assert.deepEqual(roundTrip('/messages'), { name: 'messages' });
+  assert.deepEqual(roundTrip('/settings/payments'), { name: 'settings', section: 'payments' });
+  assert.equal(tabOf(parseRoute('/inspire/events')), 'inspire');
+  assert.equal(tabOf(parseRoute('/messages')), 'trips', 'members reach Messages from the Plans header');
+  assert.equal(paths.bookings(), '/plans?span=events');
+  assert.equal(ownsHeader(parseRoute('/messages')), true);
 });

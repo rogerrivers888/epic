@@ -20,7 +20,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Linking, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { api, DayStop, HouseholdResponse, LegMode, ShortlistItem, ShortlistStatus, TripAlongPlace, TripDay, TripDetail } from '../api';
+import { BookingRows, CHIP_BG, Kick } from './guest/kit';
+import { mediaUrl } from '../components/hosting';
+import { api, DayStop, GuestCard, HouseholdResponse, LegMode, ShortlistItem, ShortlistStatus, TripAlongPlace, TripDay, TripDetail } from '../api';
 import type { BrowseItem } from '../api';
 import { storage } from '../storage';
 import { CHIP_SCRIM, CREAM, GHOST, HAIRLINE, INACTIVE, INK, INK_MUTED, LIME, LIME_EDGE, LIME_TINT, MOSS, NEUTRAL, fonts } from '../theme';
@@ -186,6 +188,10 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
   // Which day the trip stage shows and adds to; `?day=` on a multi-day trip.
   const [dayId, setDayId] = useQueryState<string | null>('day', null, asText);
   const day = useMemo(() => days.find((x) => x.id === dayId) ?? days[0] ?? null, [days, dayId]);
+  // An event booked for a day of this trip sits on that day, beside the places (guest handoff, "bookings on a trip's day").
+  const [booked, setBooked] = useState<GuestCard[]>([]);
+  useEffect(() => { api.guestBooked().then((r) => setBooked(r.upcoming.filter((c) => c.id))).catch(() => setBooked([])); }, []);
+  const bookedToday = day?.date ? booked.filter((c) => c.date === day.date) : [];
   const show = (showRaw ?? 'all') as ShortTab;
 
   // The detour band and the selected day travel with the moves between stages,
@@ -994,6 +1000,12 @@ export function TripExperience({ d, days, household, wide, section, ideasTab, on
                 </Press>
               ) : null}
             </View>
+            {bookedToday.length ? (
+              <View style={{ gap: 8, marginBottom: 12 }}>
+                <Kick>Booked this day</Kick>
+                <BookingRows items={bookedToday.map((c) => ({ key: c.id!, photo: mediaUrl(c.photo), title: c.title ?? 'An event', line: c.time ? `${c.time}` : '', chip: c.chipWords, chipBg: CHIP_BG[c.chip] ?? INACTIVE, onPress: () => navigate(paths.booking(c.id!)) }))} />
+              </View>
+            ) : null}
             <View style={styles.timeline}>
               <View style={styles.spine} />
               {timeline.rows.map((r) => (

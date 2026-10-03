@@ -719,6 +719,80 @@ function card(b, now) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Inspire: events near you (guest handoff G1, G1b, G1c)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which Inspire lane an event sits in, from the host's "What is it" category — a
+ * clay club is Fun, a run club Sport, a talk Educational, a walk Outdoors (G1b).
+ */
+export function moodOf(category, label = '') {
+  const l = `${category ?? ''} ${label ?? ''}`.toLowerCase();
+  if (/\b(walk|hike|fossil|beach|outdoor|garden|forag|wild|nature|rockpool|kayak|paddle)/.test(l)) return 'outdoors';
+  if (/sport|fitness|run|yoga|swim|football|tennis|five-a-side/.test(l)) return 'sport';
+  if (/talk|taster|advice|help|history|science|lesson|course|language/.test(l)) return 'educational';
+  if (/climb|zip|adrenal/.test(l)) return 'adrenaline';
+  return 'fun';
+}
+
+/**
+ * GET /api/events/near?lat&lng&minutes — live public events from the four lanes within reach, soonest
+ * first. The reach is a straight-line estimate (about 0.75 km a minute, as the walking and transit counts
+ * already are), and the answer says so; an event with no coordinates is never counted as near.
+ */
+router.get('/events/near', async (req, res, next) => {
+  try {
+    const lat = Number(req.query.lat); const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) throw refuse(400, 'where', 'Where from.');
+    const minutes = Math.min(240, Math.max(5, Number(req.query.minutes) || 60));
+    const km = minutes * 0.75;
+    // At one place (its page, G1b "not drawn"), or matching words (search): Epic's own events, open to anyone.
+    const ref = typeof req.query.ref === 'string' && req.query.ref.trim() ? req.query.ref.trim().slice(0, 300) : null;
+    const words = typeof req.query.q === 'string' && req.query.q.trim() ? `%${req.query.q.trim().toLowerCase().slice(0, 80).replace(/[%_\\]/g, (c) => `\\${c}`)}%` : null;
+    const { rows } = await query(
+      `with o as (
+         select o.*, h.name as host_name, h.paused as host_paused, h.stopped_at as host_stopped,
+                coalesce(o.venue_lat, h.lat) as at_lat, coalesce(o.venue_lng, h.lng) as at_lng
+           from host_offers o join hosts h on h.id = o.host_id
+          where o.lane is not null and o.state = 'live' and o.visibility = 'public' and not coalesce(h.paused, false) and h.stopped_at is null
+       )
+       select o.id, o.title, o.lane, o.photo_ids, o.what_category, o.what_label, o.price_mode, o.price_pence, o.child_pence, o.total_pence, o.min_count, o.max_count, o.age_min, o.age_max, o.parents, o.waitlist_on, o.host_id,
+              (6371 * acos(least(1, cos(radians($1)) * cos(radians(o.at_lat)) * cos(radians(o.at_lng) - radians($2)) + sin(radians($1)) * sin(radians(o.at_lat))))) as km,
+              nxt.id as session_id, nxt.on_date, nxt.starts_at, nxt.max_count as session_max,
+              coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+                         where bs.session_id = nxt.id and bs.state = 'booked' and b.state in ('pending', 'confirmed', 'attended')), 0)::int as booked,
+              (select round(avg(r.stars)::numeric, 1)::float from host_reviews r where r.host_id = o.host_id and r.side = 'guest' and not r.hidden and r.publish_on <= current_date) as rating,
+              (select count(*)::int from host_reviews r where r.host_id = o.host_id and r.side = 'guest' and not r.hidden and r.publish_on <= current_date) as reviews,
+              (select count(*)::int from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and s.on_date >= current_date) as ahead
+         from o
+         left join lateral (select s.* from offer_sessions s where s.offer_id = o.id and s.state = 'scheduled' and s.on_date >= current_date order by s.on_date, s.starts_at limit 1) nxt on true
+        where (($4::text is not null) or (o.at_lat is not null and o.at_lng is not null)) and (nxt.id is not null or o.lane = 'onrequest')
+          and ($4::text is not null or (6371 * acos(least(1, cos(radians($1)) * cos(radians(o.at_lat)) * cos(radians(o.at_lng) - radians($2)) + sin(radians($1)) * sin(radians(o.at_lat))))) <= $3)
+          and ($4::text is null or o.venue_ref = $4)
+          and ($5::text is null or lower(coalesce(o.title, '') || ' ' || coalesce(o.what_label, '') || ' ' || coalesce(o.summary, '')) like $5)
+        order by nxt.on_date nulls last, nxt.starts_at nulls last limit 200`,
+      [lat, lng, km, ref, words],
+    );
+    res.json({
+      estimated: true, minutes,
+      events: rows.map((r) => {
+        const most = r.session_max ?? r.max_count ?? null;
+        const left = most != null ? Math.max(0, most - r.booked) : null;
+        return {
+          id: r.id, title: r.title, lane: r.lane, photo: mediaRef(r.photo_ids?.[0]), mood: moodOf(r.what_category, `${r.what_label ?? ''} ${r.title ?? ''}`),
+          date: ymd(r.on_date), time: hm(r.starts_at), sessionsAhead: r.ahead, minutesAway: Math.max(1, Math.round(Number(r.km) / 0.75)),
+          price: { mode: r.price_mode ?? 'free', pence: r.price_pence, childPence: r.child_pence, nowEach: r.price_mode === 'by_numbers' && r.total_pence && r.min_count ? perPersonAt(r.total_pence, r.min_count) : null },
+          who: { ageMin: r.age_min, ageMax: r.age_max, dropOff: r.parents === 'drop_off' },
+          placesLeft: left, full: left === 0, needs: r.min_count && r.booked < r.min_count ? r.min_count - r.booked : null, waitlist: r.waitlist_on === true,
+          rating: r.rating, reviews: r.reviews,
+        };
+      }),
+      capped: rows.length === 200,
+    });
+  } catch (err) { next(err); }
+});
+
 /**
  * GET /api/messages — the guest's inbox (guest handoff G31): one thread per event they booked or asked about,
  * newest first, with the last thing said and how much of it they haven't seen. Each opens where its messages

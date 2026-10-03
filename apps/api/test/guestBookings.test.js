@@ -699,3 +699,28 @@ test('Codex: a place offered from the waiting list can be booked, and a private 
     assert.ok(opt.body.waitlist.offeredUntil);
   } finally { await srv.close(); }
 });
+
+test('events near you: within reach, at one place, matching words, and in their Inspire lane', async () => {
+  settings.forget();
+  const { o, h } = await anEvent({ firstIn: 3 });
+  await query(`update host_offers set venue_lat = 51.4, venue_lng = -0.62, venue_ref = 'osm:node/42', title = 'Fossil hunting on the beach' where id = $1`, [o.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const near = await srv.get('/api/events/near?lat=51.39&lng=-0.62&minutes=30');
+    const e = near.body.events.find((x) => x.id === o.id);
+    assert.ok(e, 'two km away, inside half an hour');
+    assert.equal(e.mood, 'outdoors');
+    assert.equal(near.body.estimated, true, 'the reach is said to be an estimate');
+    assert.equal((await srv.get('/api/events/near?lat=53.48&lng=-2.24&minutes=30')).body.events.some((x) => x.id === o.id), false, 'Manchester is not near Sunningdale');
+    assert.ok((await srv.get('/api/events/near?lat=0&lng=0&minutes=60&ref=osm%3Anode%2F42')).body.events.some((x) => x.id === o.id), 'at its place, wherever you are');
+    assert.ok((await srv.get('/api/events/near?lat=51.39&lng=-0.62&minutes=30&q=fossil')).body.events.some((x) => x.id === o.id));
+    assert.equal((await srv.get('/api/events/near?lat=51.39&lng=-0.62&minutes=30&q=pottery')).body.events.some((x) => x.id === o.id), false);
+    await query('update hosts set paused = true where id = $1', [h.id]);
+    assert.equal((await srv.get('/api/events/near?lat=51.39&lng=-0.62&minutes=30')).body.events.some((x) => x.id === o.id), false, 'a paused host’s events are not offered');
+  } finally { await srv.close(); }
+  const { moodOf } = await import('../src/routes/guestBookings.js');
+  assert.equal(moodOf('Sport and fitness', 'Run club'), 'sport');
+  assert.equal(moodOf('Arts and crafts', 'Clay'), 'fun');
+  assert.equal(moodOf('Talks and tasters', 'Wine'), 'educational');
+});

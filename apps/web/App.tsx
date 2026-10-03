@@ -35,12 +35,13 @@ import { HostScreen } from './src/screens/host/HostScreen';
 import { HostProfileScreen } from './src/screens/HostProfileScreen';
 import { TagScreen } from './src/screens/TagScreen';
 import { HostPage } from './src/screens/guest/HostPage';
-import { GuestEvent } from './src/screens/guest/routes';
+import { GuestEvent, GuestInvite } from './src/screens/guest/routes';
 import { Inbox } from './src/screens/guest/PlansEvents';
+import { InspireEvents } from './src/screens/guest/InspireEvents';
 import { GuestBooking } from './src/screens/guest/BookingPage';
 import { PeopleScreen } from './src/screens/PeopleScreen';
 import { CollectionsScreen } from './src/screens/CollectionsScreen';
-import { InvitedScreen, InvitedLinkScreen } from './src/screens/InvitedScreen';
+import { InvitedLinkScreen } from './src/screens/InvitedScreen';
 import { ForkScreen, HeardScreen as UpForHeardScreen, ListeningScreen, SavedScreen, TripIntakeScreen, WhoScreen } from './src/screens/open/UpFor';
 import { MatchScreen } from './src/screens/open/Match';
 import { PrototypesScreen } from './src/screens/PrototypesScreen';
@@ -70,6 +71,12 @@ import { isFullBleed, isImmersive, isTabHome, legacyHref, ownsHeader, parseRoute
 // what there is to do, with one search bar above it. The conversational planner
 // is still there and still has an address — /plan, and the door at the foot
 // of the search screen — it is simply no longer the first thing Epic says.
+/** Without a membership (guest handoff G21): only Plans › Events, Messages and Settings. */
+const GUEST_TABS: { key: Tab; label: string; icon: IconName; href: string; owner?: true }[] = [
+  { key: 'trips', label: 'Plans', icon: 'trips', href: `${paths.trips()}?span=events` },
+  { key: 'messages', label: 'Messages', icon: 'message', href: paths.messages() },
+  { key: 'settings', label: 'Settings', icon: 'settings', href: paths.settings() },
+];
 const TABS: { key: Tab; label: string; icon: IconName; href: string; owner?: true }[] = [
   { key: 'inspire', label: 'Inspire', icon: 'inspire', href: paths.inspire() },
   { key: 'places', label: 'Places', icon: 'places', href: paths.places() },
@@ -303,7 +310,8 @@ function Routed() {
   if (route.name === 'hostProfile' && route.layer === 'trust') return <HostProfileScreen route={route} />;
   if (route.name === 'hostProfile' && !signedIn()) return <HostPage id={route.hostId} webPage />;
   // An invitation to a private offer (13 Sep 2026): no account, no password — yes or no, and how many.
-  if (route.name === 'invited') return <InvitedScreen token={route.token} />;
+  // An invitation answered on the web with no account (G12); signed in it sits in the app under Plans (G13).
+  if (route.name === 'invited' && !signedIn()) return <GuestInvite token={route.token} webPage />;
   if (route.name === 'invitedLink') return <InvitedLinkScreen token={route.token} />;
   if (route.name === 'experience' && !signedIn() && route.layer !== 'ask') return <GuestEvent route={route} webPage />;
   /**
@@ -346,7 +354,7 @@ function Routed() {
  */
 function Gate({ route }: { route: Route }) {
   const { href, query, setQuery, navigate } = useRouter();
-  const { state, isOwner, access, recheck } = useSession();
+  const { state, isOwner, access, recheck, account } = useSession();
   // A change of session identity — signing out, a timeout, or a different person
   // signing in on this browser — remounts the app below the gate, so no hook is
   // left showing the previous household's cached rows. The in-memory cache is
@@ -456,7 +464,8 @@ function Gate({ route }: { route: Route }) {
     if (!mayAdminister) return <NotHere title="That is not a page you can open" body="The back office needs an account with the admin door." href={paths.inspire()} />;
     return <AdminApp key={sessionEpoch} access={access} screen={route.screen} onScreen={(s) => navigate(s === 'filing' ? paths.filing('categories') : paths.admin(s))} onLeave={() => navigate(paths.inspire())} />;
   }
-  return <Shell key={sessionEpoch} route={route} isOwner={isOwner} mayAdminister={mayAdminister} />;
+  // Booked or replied without a membership (guest handoff G21): Plans · Messages · Settings only.
+  return <Shell key={sessionEpoch} route={route} isOwner={isOwner} mayAdminister={mayAdminister} guest={account?.plan === 'guest'} />;
 }
 
 /** An address that is not a page — mistyped, or one Epic used to have and no longer does. */
@@ -475,11 +484,12 @@ function NotHere({ title, body, href }: { title: string; body: string; href: str
   );
 }
 
-function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwner: boolean; mayAdminister?: boolean }) {
+function Shell({ route, isOwner, mayAdminister = false, guest = false }: { route: Route; isOwner: boolean; mayAdminister?: boolean; guest?: boolean }) {
   const { width } = useViewport();
   const { href, navigate } = useRouter();
   const desktop = width >= DESKTOP;
-  const tab = tabOf(route);
+  // Messages is its own tab for a guest; a member reaches it from the Plans header, so it lights Plans.
+  const tab = guest && route.name === 'messages' ? 'messages' : tabOf(route);
   /**
    * A screen that draws to every edge: no lime band above it, and the tab bar
    * over it rather than under it. A trip is one, because the trip is a map now.
@@ -519,8 +529,8 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
   // The admin module is the owner's. Everybody else's app is exactly what it
   // was before accounts existed.
   const tabs = useMemo(
-    () => TABS.filter((t) => !t.owner || isOwner).map((t) => ({ ...t, href: t.key === tab ? t.href : rememberedAddress(t.key, t.href) })),
-    [isOwner, tab, here],
+    () => (guest ? GUEST_TABS : TABS.filter((t) => !t.owner || isOwner)).map((t) => ({ ...t, href: t.key === tab ? t.href : rememberedAddress(t.key, t.href) })),
+    [isOwner, tab, here, guest],
   );
   const [health, setHealth] = useState<'checking' | 'ok' | 'down'>('checking');
   const [household, setHousehold] = useState<HouseholdResponse | null>(null);
@@ -684,6 +694,8 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
       {route.name === 'experience' ? <GuestEvent route={route} webPage={false} /> : null}
       {route.name === 'hostProfile' ? <HostPage id={route.hostId} webPage={false} /> : null}
       {route.name === 'messages' ? <Inbox /> : null}
+      {route.name === 'invited' ? <GuestInvite token={route.token} webPage={false} /> : null}
+      {route.name === 'events' ? <InspireEvents /> : null}
       {/* What you are up for, and the introductions it leads to (Casual meet ups). */}
       {route.name === 'open' && route.matchId ? <MatchScreen matchId={route.matchId} chat={route.chat} /> : null}
       {route.name === 'open' && !route.matchId && route.page === 'fork' ? <ForkScreen /> : null}

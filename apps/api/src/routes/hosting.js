@@ -1320,6 +1320,8 @@ publicRouter.get('/invited/:token', async (req, res, next) => {
       invite: invitePayload(inv),
       offer: { ...publicOffer(o, bookings, { revealed: true, host: publicHost(h) }), venueLabel: o.venue_label, venueLat: o.venue_lat, venueLng: o.venue_lng, doc: mediaRef(o.doc_id) },
       going: answered.reduce((n, x) => n + (x.rsvp_heads ?? x.heads), 0),
+      // What other guests said they're bringing, so the invite shows those items as taken (guest handoff G13).
+      taken: (await query(`select distinct answers->>'bring' as item from experience_bookings where offer_id = $1 and state in ('pending', 'confirmed', 'attended') and answers ? 'bring'`, [o.id])).rows.map((r) => r.item).filter(Boolean),
       payments: paymentsConfig(),
     });
   } catch (err) { next(err); }

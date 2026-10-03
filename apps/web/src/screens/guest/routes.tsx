@@ -13,6 +13,8 @@ import { ExperienceScreen } from '../ExperienceScreen';
 import { Book } from './Book';
 import { EventPage } from './EventPage';
 import { Waiting } from './kit';
+import { Invite } from './Invite';
+import { InvitedScreen } from '../InvitedScreen';
 
 export function GuestEvent({ route, webPage }: { route: Extract<Route, { name: 'experience' }>; webPage: boolean }) {
   const { query } = useRouter();
@@ -31,4 +33,12 @@ export function GuestEvent({ route, webPage }: { route: Extract<Route, { name: '
   if (route.layer === 'book') return <Book id={route.id} webPage={webPage} linkToken={l} inviteToken={i} initial={data?.offer ?? null} />;
   if (route.layer === 'ask' || route.layer === 'where') return <ExperienceScreen route={route} />;
   return <EventPage id={route.id} webPage={webPage} linkToken={l} inviteToken={i} initial={data} />;
+}
+
+/** An invitation: the guest page for an event from the four lanes, the older page for an older offer. */
+export function GuestInvite({ token, webPage }: { token: string; webPage: boolean }) {
+  const [lane, setLane] = useState<string | null | undefined>(undefined);
+  useEffect(() => { setLane(undefined); api.invited(token).then((r) => setLane(r.offer.lane ?? null)).catch(() => setLane(null)); }, [token]);
+  if (lane === undefined) return <Waiting />;
+  return lane ? <Invite token={token} webPage={webPage} /> : <InvitedScreen token={token} />;
 }

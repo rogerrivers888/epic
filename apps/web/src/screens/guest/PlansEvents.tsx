@@ -16,8 +16,11 @@ import { CompactBand } from '../../components/Band';
 import { mediaUrl } from '../../components/hosting';
 import { paths, withQuery } from '../../routes';
 import { useRouter } from '../../router';
-import { BookingRows, CHIP_BG, GuestPage, INACTIVE, INK_MUTED, Kick, LIME, Para, Rows, Waiting, dayWords, shortDay, tx, type BookingCard } from './kit';
+import { storage } from '../../storage';
+import { BookingRows, CHIP_BG, Promo, GuestPage, INACTIVE, INK_MUTED, Kick, LIME, Para, Rows, Waiting, dayWords, shortDay, tx, type BookingCard } from './kit';
 
+// Under the epic.screen family the cookie notice already names.
+const PROMO_KEY = 'epic.screen.guestPromo';
 const hoursLeft = (iso: string) => Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 3_600_000));
 
 function cardOf(c: GuestCard, navigate: (h: string) => void): BookingCard {
@@ -37,8 +40,10 @@ function cardOf(c: GuestCard, navigate: (h: string) => void): BookingCard {
 }
 
 /** The Events tab's body, under the Plans band and ink bar. */
-export function PlansEvents() {
+export function PlansEvents({ guest = false }: { guest?: boolean }) {
   const { navigate } = useRouter();
+  // The one gentle prompt (G21): an ink banner, dismissed for good with its ×.
+  const [promo, setPromo] = useState(() => guest && storage.getItem(PROMO_KEY) !== 'dismissed');
   const [d, setD] = useState<GuestBookedList | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { api.guestBooked().then(setD).catch((e) => setError(e?.message ?? 'Your events didn’t load.')); }, []);
@@ -46,6 +51,8 @@ export function PlansEvents() {
   const nothing = !d.upcoming.length && !d.invites.length && !d.past.length;
   return (
     <ScrollView contentContainerStyle={{ paddingTop: 16, paddingHorizontal: 20, paddingBottom: 22, gap: 14 }}>
+      {promo ? <Promo title="Plan your next day out with Epic" line="1 month free, then from £5.99 a month" onPress={() => navigate(paths.inspire())}
+                      onClose={() => { storage.setItem(PROMO_KEY, 'dismissed'); setPromo(false); }} /> : null}
       {d.upcoming.length ? <><Kick>Upcoming</Kick><BookingRows items={d.upcoming.map((c) => cardOf(c, navigate))} /></> : null}
       {d.invites.length ? (
         <>

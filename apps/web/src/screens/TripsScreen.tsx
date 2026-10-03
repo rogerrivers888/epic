@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSession } from '../hooks/useSession';
 import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
 import { useViewport } from '../hooks/useViewport';
@@ -117,7 +118,10 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
   // Plans › Day trips · Holidays · Events (guest handoff G14); an old ?when=hosts link is the Events tab.
   const [spanSet, setSpan] = useQueryState<'day' | 'holiday' | 'events'>('span', 'day', asOneOf(['day', 'holiday', 'events'] as const, 'day'));
   const [when, setWhen] = useQueryState<TripsWhen>('when', 'upcoming', asOneOf(['upcoming', 'past', 'ideas', 'hosts'] as const, 'upcoming'));
-  const span = when === 'hosts' ? 'events' : spanSet;
+  const { account } = useSession();
+  const guest = account?.plan === 'guest';
+  // Without a membership Plans is Events only (guest handoff G21).
+  const span = guest || when === 'hosts' ? 'events' : spanSet;
   // Booked with hosts (Events v4, G2): the experiences this household has booked, beside its trips.
   const [bookings, setBookings] = useState<Booking[] | null>(null);
   useEffect(() => { api.bookings().then((r) => setBookings(r.bookings)).catch(() => setBookings([])); }, [openId, when]);
@@ -296,6 +300,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
       loading={!data}
       error={error}
       span={span}
+      guest={guest}
       when={when}
       onSpan={(s) => { setSpan(s); if (when === 'hosts') setWhen('upcoming'); }}
       onWhen={setWhen}

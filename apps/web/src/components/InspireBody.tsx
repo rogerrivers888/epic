@@ -1,8 +1,9 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
-import { InspireItem } from '../api';
-import { colors, fonts, spacing, TARGET } from '../theme';
+import { InspireItem, type EventNear } from '../api';
+import { AMBER, CREAM, INACTIVE, INK, LIME, colors, fonts, spacing, TARGET } from '../theme';
+import { mediaUrl } from './hosting';
 import { Icon, IconName } from './Icon';
 import { CARD_H, CARD_W, MEDIA_RADIUS, VenueThumb } from './VenueThumb';
 import { briefly, priceMarks } from '../screens/inspireList';
@@ -183,8 +184,10 @@ export function SectionHead({ title, count, floor, estimated, onAll }: { title: 
 }
 
 /** All: one category's worth, across. The title is a door into the whole of it. */
-export function Carousel({ title, count, floor, estimated, items, onAll, onOpen, crowdOf, travel }: {
+export function Carousel({ title, count, floor, estimated, items, onAll, onOpen, crowdOf, travel, events, onOpenEvent }: {
   title: string; count: number; floor?: boolean; estimated?: boolean; items: InspireItem[];
+  /** This category's events, mixed in after the first place (guest handoff G1b). */
+  events?: EventNear[]; onOpenEvent?: (e: EventNear) => void;
   onAll: () => void; onOpen: (i: InspireItem) => void;
   /** What the crowd made of it, once Google has answered for this one. */
   crowdOf?: (i: InspireItem) => Crowd;
@@ -195,9 +198,10 @@ export function Carousel({ title, count, floor, estimated, items, onAll, onOpen,
     <View style={styles.section}>
       <SectionHead title={title} count={count} floor={floor} estimated={estimated} onAll={onAll} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
-        {items.map((i) => (
-          <Card key={i.venueRef} item={i} crowd={crowdOf?.(i)} travel={travel} onOpen={() => onOpen(i)} />
-        ))}
+        {items.flatMap((i, n) => [
+          <Card key={i.venueRef} item={i} crowd={crowdOf?.(i)} travel={travel} onOpen={() => onOpen(i)} />,
+          ...(n === 0 ? (events ?? []).slice(0, 3).map((e) => <EventCard key={`ev-${e.id}`} e={e} mixed onOpen={() => onOpenEvent?.(e)} />) : []),
+        ])}
       </ScrollView>
     </View>
   );
@@ -226,6 +230,77 @@ function Card({ item, crowd, travel, onOpen }: { item: InspireItem; crowd?: Crow
       {item.closed?.status === 'temporarily_closed' ? <Text style={styles.tempClosed}>Temporarily closed</Text> : null}
       {price ? <Text style={styles.price}>{price}</Text> : null}
     </MediaCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Events near you (guest handoff G1, G1b, G1c)
+// ---------------------------------------------------------------------------
+
+const KIND_TAG: Record<string, string> = { oneoff: 'One-off', weekly: 'Weekly', course: 'Course', onrequest: 'On request' };
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const eventDay = (ymd: string) => { const d = new Date(`${ymd}T12:00:00Z`); return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
+const pounds = (p: number) => `£${(p / 100).toFixed(p % 100 ? 2 : 0)}`;
+
+/** "£12 a child", "£84", "Free". */
+export function eventPrice(e: EventNear): string {
+  const p = e.price;
+  if (p.mode === 'free' || !(p.pence || p.nowEach)) return 'Free';
+  if (p.mode === 'by_numbers' && p.nowEach != null) return pounds(p.nowEach);
+  const kidsOnly = e.who.dropOff || (e.who.ageMax != null && e.who.ageMax < 18);
+  return `${pounds(p.pence ?? 0)}${kidsOnly ? ' a child' : ''}`;
+}
+
+/** The badge on the photo (G1b): places left in lime, Needs N more in amber, Full in warm grey; none when there's room. */
+export function eventBadge(e: EventNear): { words: string; bg: string } | null {
+  if (e.full) return { words: 'Full', bg: INACTIVE };
+  if (e.needs) return { words: `Needs ${e.needs} more`, bg: AMBER };
+  if (e.placesLeft != null && e.placesLeft <= 3) return { words: `${e.placesLeft} ${e.placesLeft === 1 ? 'place' : 'places'} left`, bg: LIME };
+  return null;
+}
+
+/** "Sat 3 Oct · 8 min · £12 a child"; in a category lane it starts "Event ·" and leaves out the drive (G1b). */
+export function eventMeta(e: EventNear, mixed: boolean): string {
+  const when = e.date ? (e.lane === 'weekly' && (e.sessionsAhead ?? 0) > 1 ? `${DOW[new Date(`${e.date}T12:00:00Z`).getUTCDay()]}days` : eventDay(e.date)) : 'On request';
+  return mixed ? `Event · ${when} · ${eventPrice(e)}` : `${when} · ${e.minutesAway} min · ${eventPrice(e)}`;
+}
+
+/** The event's photo at the place card's size, with the kind tag top-left and the badge bottom-left. */
+function EventThumb({ e, width, height, fill }: { e: EventNear; width?: number; height?: number; fill?: boolean }) {
+  const badge = eventBadge(e);
+  const uri = mediaUrl(e.photo);
+  return (
+    <View style={[{ borderRadius: MEDIA_RADIUS, overflow: 'hidden', backgroundColor: INACTIVE }, fill ? { width: '100%', aspectRatio: CARD_W / CARD_H } : { width, height }]}>
+      {uri ? <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" accessibilityIgnoresInvertColors /> : null}
+      <Text style={styles.kindTag}>{KIND_TAG[e.lane] ?? 'Event'}</Text>
+      {badge ? <Text style={[styles.eventBadge, { backgroundColor: badge.bg }]}>{badge.words}</Text> : null}
+    </View>
+  );
+}
+
+/** An event as the Inspire card — not a second kind of card (README): the same name, rating and meta line. */
+export function EventCard({ e, mixed = false, wide = false, onOpen }: { e: EventNear; mixed?: boolean; wide?: boolean; onOpen: () => void }) {
+  return (
+    <MediaCard wide={wide} name={e.title ?? 'An event'} onPress={onOpen} thumb={<EventThumb e={e} width={CARD_W} height={CARD_H} fill={wide} />}>
+      <View style={styles.cardFoot}>
+        <Text style={styles.eventMeta} numberOfLines={1}>{eventMeta(e, mixed)}</Text>
+        {e.reviews ? <Crowd rating={e.rating} count={e.reviews} /> : null}
+      </View>
+    </MediaCard>
+  );
+}
+
+/** The Events near you lane (G1): first under Activities, and absent when nothing is near. */
+export function EventLane({ title = 'Events near you', events, onAll, onOpen }: { title?: string; events: EventNear[]; onAll: () => void; onOpen: (e: EventNear) => void }) {
+  if (!events.length) return null;
+  return (
+    <View style={styles.section}>
+      <SectionHead title={title} count={events.length} onAll={onAll} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
+        {events.slice(0, 8).map((e) => <EventCard key={e.id} e={e} onOpen={() => onOpen(e)} />)}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -336,6 +411,9 @@ export function EmptyMatch({ title = 'Nothing matches', body, action, onAction }
 
 const styles = StyleSheet.create({
   // A temporarily closed place stays in the list, said in ink (owner, 29 Sep 2026).
+  kindTag: { position: 'absolute', left: 10, top: 10, backgroundColor: CREAM, color: INK, fontFamily: fonts.body, fontSize: 11, fontWeight: '700', letterSpacing: 0.33, paddingVertical: 4, paddingHorizontal: 8 },
+  eventBadge: { position: 'absolute', left: 10, bottom: 10, color: INK, fontFamily: fonts.body, fontSize: 11.5, fontWeight: '800', paddingVertical: 4, paddingHorizontal: 8 },
+  eventMeta: { flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 12.5, color: colors.inkMuted },
   tempClosed: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: colors.ink },
   section: { gap: spacing.md },
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.md, paddingHorizontal: GUTTER },
