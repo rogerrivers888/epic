@@ -73,9 +73,10 @@ export function guideAlertsRouter({ lookup = placeOf } = {}) {
       if (refusal) return res.status(400).json(refusal);
 
       const place = await lookup(alert.placeTyped);
-      await addAlert({ ...alert, place, placeKey: placeKeyOf(alert.placeTyped) });
-      // Where it was filed, so the page can say it back; the same whether or not this was a repeat.
-      return res.json({ ok: true, place: place?.name ?? null });
+      const row = await addAlert({ ...alert, place, placeKey: placeKeyOf(alert.placeTyped) });
+      // Where the ask is filed, so the page can say it back — the row's, so a repeat whose
+      // lookup failed this time still names the place it was filed under before (Codex).
+      return res.json({ ok: true, place: row?.place_name ?? place?.name ?? null });
     } catch (err) {
       return next(err);
     }

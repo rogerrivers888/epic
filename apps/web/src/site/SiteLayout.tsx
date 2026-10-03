@@ -93,12 +93,18 @@ function SiteHeader({ locale, header }: { locale: SiteLocale; header: HeaderStyl
       <View {...(Platform.OS === 'web' ? ({ 'aria-current': 'page' } as object) : {})} style={styles.eventsNow}>
         <Text style={[styles.headLink, phone && { fontSize: 15 }]}>{w.events}</Text>
       </View>
-      <Pressable accessibilityRole="link" onPress={() => navigate(paths.siteHost(locale))}>
+      {/* Real addresses, so they open in a new tab and work before the script does (Codex). */}
+      <Pressable
+        accessibilityRole="link"
+        {...(Platform.OS === 'web' ? ({ href: paths.siteHost(locale) } as object) : {})}
+        onPress={(e: any) => { e?.preventDefault?.(); navigate(paths.siteHost(locale)); }}
+      >
         {({ hovered }: any) => <Text style={[styles.headLink, phone && { fontSize: 15 }, hovered && { color: MOSS }]}>{w.host}</Text>}
       </Pressable>
       <Pressable
         accessibilityRole="link"
-        onPress={() => navigate(paths.login())}
+        {...(Platform.OS === 'web' ? ({ href: paths.login() } as object) : {})}
+        onPress={(e: any) => { e?.preventDefault?.(); navigate(paths.login()); }}
         style={({ hovered }: any) => [styles.logInRuled, phone && { paddingHorizontal: 12 }, hovered && { backgroundColor: INACTIVE }]}
       >
         <Text style={[styles.headLink, phone && { fontSize: 15 }]}>{w.logIn}</Text>

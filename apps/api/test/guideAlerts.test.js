@@ -1,6 +1,6 @@
 /**
  * "Tell me when" on the subcategory guides (routes/guideAlerts.js,
- * sources/ukPlace.js, migration 372).
+ * sources/ukPlace.js, migration 373).
  *
  * The failures worth pinning are the quiet ones: a refusal in a different order
  * or different words from the page, a consent stored that nobody was shown, a
@@ -105,8 +105,9 @@ test('a second ask for the same place is the latest word: its radius wins, and a
   assert.equal(rows.length, 1);
   assert.equal(rows[0].within_miles, 50);
   assert.equal(rows[0].county, 'Lantern Waste');
-  // A lookup that fails the third time never erases what the second found.
-  await post({ ...POTTERY, email: 'latest@example.com', where: 'NARNIA', within: 10 });
+  // A lookup that fails the third time never erases what the second found, and the page is told where it is filed.
+  const third = await post({ ...POTTERY, email: 'latest@example.com', where: 'NARNIA', within: 10 });
+  assert.deepEqual(third.body, { ok: true, place: 'Narnia' });
   const [after] = await rowsFor('latest@example.com');
   assert.equal(after.within_miles, 10);
   assert.equal(after.county, 'Lantern Waste');

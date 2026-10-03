@@ -1,5 +1,5 @@
 /**
- * "Tell me when" on the subcategory guides (migration 372): who asked to hear
+ * "Tell me when" on the subcategory guides (migration 373): who asked to hear
  * when a subcategory starts near them, and where the demand is.
  *
  * All SQL lives in `repositories/`; every value is a parameter.
