@@ -262,3 +262,11 @@ test('a claim left behind by a cut-off send is taken again after ten minutes (Co
     assert.equal(busy.channels.email.reason, 'already_sent', 'a claim still in flight is left alone');
   } finally { Object.assign(templates.senders, was); }
 });
+
+test('a marketing e-mail whose unsubscribe link sits in a branch that is off is not sent (Codex, 3 Oct 2026)', async () => {
+  const t = await templates.getTemplate('tell_me_when');
+  await templates.saveVersion('tell_me_when', { channels: { email: { subject: t.channels.email.subject, body: 'On now: {{title}}{{#if where}}\n{{unsubscribeUrl}}{{/if}}' } } }, { who: 'Roger' });
+  const { rows: [a] } = await query(`insert into guide_alerts (email, subcategory, place_typed, place_key, within_miles, locale, consent_wording) values ('branch@example.com', 'pottery', 'Bath', 'bath-b', 10, 'en-GB', 'Yes') returning id`);
+  await assert.rejects(templates.deliver({ templateKey: 'tell_me_when', fields: { what: 'Pottery', where: '', title: 'Clay', url: 'u', unsubscribeUrl: 'https://epic.day/unsubscribe/x' }, to: { email: 'branch@example.com' }, consent: { alertId: a.id } }), { code: 'needs_unsubscribe' });
+  await templates.restoreVersion('tell_me_when', t.version, { who: 'Roger' });
+});

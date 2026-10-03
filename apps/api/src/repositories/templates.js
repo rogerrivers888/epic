@@ -284,7 +284,7 @@ async function logSend({ t, version = t.version, channel, purpose, toKind, toRef
  * E-mail and SMS deliveries are kept to their key as in-app ones are (Codex, 3 Oct 2026).
  */
 async function claim(t, channel, dedupeKey, toKind, toRef, by) {
-  if (!dedupeKey) return true;
+  if (!dedupeKey) return { id: null };
   // A claim nobody settled within ten minutes was a send cut off part-way (a deploy, a crash): it may be taken
   // again, so an interrupted message is retried rather than lost (Codex, 3 Oct 2026).
   const { rows } = await query(
@@ -293,22 +293,23 @@ async function claim(t, channel, dedupeKey, toKind, toRef, by) {
      on conflict (template_key, channel, dedupe_key) where purpose = 'deliver' and dedupe_key is not null
      do update set at = now(), version = excluded.version, to_ref = excluded.to_ref, by_account = excluded.by_account
       where message_sends.result = '{"claimed":true}'::jsonb and message_sends.at < now() - interval '10 minutes'
-     returning id`,
+     returning id, at::text as at`,
     [t.key, t.version, channel, toKind, toRef, by, dedupeKey],
   );
-  return rows.length > 0;
+  // The claim is this attempt's: its row and the moment it was taken (as text — a JavaScript Date drops the
+  // microseconds), so a later settle never touches a claim taken over since.
+  return rows[0] ?? null;
 }
 /** Write what became of a claimed send onto its claim; a send that did not go gives its claim back, so a retry can (Codex, 3 Oct 2026). */
-async function settle(t, channel, dedupeKey, result) {
+async function settle(held, result) {
+  if (!held?.id) return;
   if (!result?.sent) {
-    await query(`delete from message_sends where template_key = $1 and channel = $2 and dedupe_key = $3 and purpose = 'deliver'`, [t.key, channel, dedupeKey])
+    await query(`delete from message_sends where id = $1 and at::text = $2`, [held.id, held.at])
       .catch((err) => console.error(`epic-api: message log — ${err.message}`));
     return;
   }
-  await query(
-    `update message_sends set result = $4::jsonb where template_key = $1 and channel = $2 and dedupe_key = $3 and purpose = 'deliver'`,
-    [t.key, channel, dedupeKey, JSON.stringify(result ?? {})],
-  ).catch((err) => console.error(`epic-api: message log — ${err.message}`));
+  await query(`update message_sends set result = $3::jsonb where id = $1 and at::text = $2`, [held.id, held.at, JSON.stringify(result ?? {})])
+    .catch((err) => console.error(`epic-api: message log — ${err.message}`));
 }
 
 /** Whether a host switched this kind's e-mail off (E13); a guest's e-mail is never switched off here. */
@@ -371,6 +372,10 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
     if (!(await hasMarketingConsent(addr.email, t.trigger, { alertId: consent?.alertId ?? null, source: consent?.source ?? null }))) throw refuse(403, 'no_consent', 'That address has not said yes to marketing from Epic.');
   }
   const out = renderChannels(t.channels, values, want);
+  // The link must be in what is actually sent — not merely somewhere in a branch that did not render (Codex, 3 Oct 2026).
+  if (t.category === 'marketing' && !String(out.email?.body ?? '').includes(String(values[UNSUBSCRIBE_FIELD]))) {
+    throw refuse(409, 'needs_unsubscribe', `“${t.name}” would go out without its unsubscribe link: it must not sit inside a condition that is off.`);
+  }
   // A part a channel cannot go without that rendered to nothing is not sent as "null" or a blank (Codex, 3 Oct 2026).
   for (const c of want) {
     for (const part of CHANNELS[c].required) {
@@ -393,19 +398,25 @@ export async function deliver({ templateKey, fields = {}, to = {}, channels = nu
   if (want.includes('email')) {
     if (!addr.email) sent.email = { sent: false, reason: 'no_address' };
     else if (await hostSwitchedOff(t, to)) sent.email = { sent: false, reason: 'switched_off' };
-    else if (!(await claim(t, 'email', dedupeKey, 'email', addr.email, by))) sent.email = { sent: false, reason: 'already_sent' };
     else {
-      sent.email = await senders.mail({ to: addr.email, subject: out.email.subject, text: out.email.body, purpose: `template_${t.key}` }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));
-      if (dedupeKey) await settle(t, 'email', dedupeKey, sent.email);
+      const held = await claim(t, 'email', dedupeKey, 'email', addr.email, by);
+      if (!held) sent.email = { sent: false, reason: 'already_sent' };
+      else {
+        sent.email = await senders.mail({ to: addr.email, subject: out.email.subject, text: out.email.body, purpose: `template_${t.key}` }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));
+        await settle(held, sent.email);
+      }
     }
     if (!dedupeKey) await logSend({ t, channel: 'email', purpose: 'deliver', toKind: 'email', toRef: addr.email, result: sent.email, by });
   }
   if (want.includes('sms')) {
     if (!addr.mobile) sent.sms = { sent: false, reason: 'no_address' };
-    else if (!(await claim(t, 'sms', dedupeKey, 'mobile', addr.mobile, by))) sent.sms = { sent: false, reason: 'already_sent' };
     else {
-      sent.sms = await senders.sms({ to: addr.mobile, text: out.sms.body }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));
-      if (dedupeKey) await settle(t, 'sms', dedupeKey, sent.sms);
+      const held = await claim(t, 'sms', dedupeKey, 'mobile', addr.mobile, by);
+      if (!held) sent.sms = { sent: false, reason: 'already_sent' };
+      else {
+        sent.sms = await senders.sms({ to: addr.mobile, text: out.sms.body }).catch((e) => ({ sent: false, reason: 'send_failed', message: e.message }));
+        await settle(held, sent.sms);
+      }
     }
     if (!dedupeKey) await logSend({ t, channel: 'sms', purpose: 'deliver', toKind: 'mobile', toRef: addr.mobile, result: sent.sms, by });
   }
