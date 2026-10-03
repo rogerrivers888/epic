@@ -472,7 +472,7 @@ export const hostCanBeCharged = (h) => Boolean(h?.stripe_account_id && h.stripe_
 /** A booking is on: the guest and the host are told. */
 async function confirmed(b, o, host) {
   const own = await notifications.hostWords(host.id, 'confirmed');
-  await notifications.notify({ householdId: b.household_id, kind: 'booking_confirmed', title: `You’re booked: ${o.title ?? 'your event'}`, body: ['It’s in your Trips.', own].filter(Boolean).join('\n\n'), link: guestLink(b.id), dedupeKey: `confirmed:${b.id}` }).catch(() => null);
+  await notifications.notify({ householdId: b.household_id, kind: 'booking_confirmed', title: `You’re booked: ${o.title ?? 'your event'}`, body: ['It’s in your Plans.', own].filter(Boolean).join('\n\n'), link: guestLink(b.id), dedupeKey: `confirmed:${b.id}` }).catch(() => null);
   await notifications.notify({ householdId: host.household_id, kind: 'new_booking', title: `New booking: ${o.title ?? 'your event'}`, body: `${b.heads} ${b.heads === 1 ? 'person' : 'people'}`, link: hostLink(o.id), dedupeKey: `new_booking:${b.id}` }).catch(() => null);
 }
 

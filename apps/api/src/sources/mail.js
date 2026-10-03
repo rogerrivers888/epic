@@ -86,8 +86,11 @@ export function webUrl(req) {
  * `purpose` is Postmark's Tag and the log's own word for what this was —
  * `invitation`, `sign_in`, `code`, `host_message` — so the Activity view there
  * and the Mail screen here group the same way.
+ *
+ * `attachments` are `{ name, content, contentType }` — the booking's calendar
+ * file, so far (`sources/bookingCalendar.js`).
  */
-export async function sendMail({ to, subject, text, html, purpose = 'message' }) {
+export async function sendMail({ to, subject, text, html, purpose = 'message', attachments = [] }) {
   const status = mailStatus();
   if (!status.configured) return { sent: false, reason: status.reason, message: status.message };
   // An address that bounced hard or complained is not tried again for a while:
@@ -117,7 +120,7 @@ export async function sendMail({ to, subject, text, html, purpose = 'message' })
     const res = await fetch('https://api.postmarkapp.com/email', {
       method: 'POST',
       headers: { 'X-Postmark-Server-Token': KEY(), accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify({ From: process.env.EPIC_MAIL_FROM, To: to, Subject: subject, TextBody: text, HtmlBody: html, MessageStream: STREAM(), Tag: purpose, TrackOpens: true, ...(row ? { Metadata: { epic_id: row.id } } : {}) }),
+      body: JSON.stringify({ From: process.env.EPIC_MAIL_FROM, To: to, Subject: subject, TextBody: text, HtmlBody: html, MessageStream: STREAM(), Tag: purpose, TrackOpens: true, ...(attachments.length ? { Attachments: attachments.map((a) => ({ Name: a.name, Content: Buffer.from(a.content).toString('base64'), ContentType: a.contentType })) } : {}), ...(row ? { Metadata: { epic_id: row.id } } : {}) }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || Number(body?.ErrorCode ?? 0) !== 0) {

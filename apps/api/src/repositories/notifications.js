@@ -14,6 +14,7 @@
 
 import { query } from '../db.js';
 import { mailConfigured, sendMail } from '../sources/mail.js';
+import { bookingCalendar, bookingOfLink } from '../sources/bookingCalendar.js';
 
 /** The kinds, who they are for, and whether they e-mail by default. Add, never rename. */
 export const KINDS = Object.freeze({
@@ -112,11 +113,25 @@ async function addressOf(row) {
 const appUrl = () => (process.env.EPIC_APP_URL || process.env.APP_URL || 'https://epic.day').replace(/\/$/, '');
 
 /**
+ * The emailed calendar invite (3 Oct 2026): "You're booked" and "has moved" carry the booking's sessions as a
+ * calendar file, so a guest's calendar holds the dates and follows a host's change of date. A file that cannot be
+ * made never stops the email — it goes without it.
+ */
+const CALENDAR_KINDS = new Set(['booking_confirmed', 'date_changed']);
+async function attachmentsFor(row, calendar) {
+  if (!CALENDAR_KINDS.has(row.kind)) return [];
+  const id = bookingOfLink(row.link);
+  if (!id) return [];
+  const file = await calendar(id, { appUrl: appUrl() }).catch(() => null);
+  return file ? [file] : [];
+}
+
+/**
  * Send what is queued, oldest first, a batch at a time. Each row is claimed
  * (`queued` → `sent` in one update) before the send, so a second drain never
  * picks it up; a failed send is marked `failed` and not retried here.
  */
-export async function drainEmail({ batch = 20, send = sendMail, configured = mailConfigured } = {}) {
+export async function drainEmail({ batch = 20, send = sendMail, configured = mailConfigured, calendar = bookingCalendar } = {}) {
   if (!configured()) {
     const { rowCount } = await query(`update notifications set email_state = 'skipped' where email_state = 'queued' and created_at < now() - interval '1 day'`);
     return { sent: 0, failed: 0, skipped: rowCount };
@@ -135,7 +150,8 @@ export async function drainEmail({ batch = 20, send = sendMail, configured = mai
     const to = await addressOf(row).catch(() => null);
     if (!to) { skipped += 1; await query(`update notifications set email_state = 'skipped' where id = $1`, [row.id]); continue; }
     const text = [row.body, row.link ? `${appUrl()}${row.link}` : null].filter(Boolean).join('\n\n');
-    const r = await send({ to, subject: row.title, text: text || row.title, purpose: `notify_${row.kind}` }).catch((e) => ({ sent: false, message: e.message }));
+    const attachments = await attachmentsFor(row, calendar);
+    const r = await send({ to, subject: row.title, text: text || row.title, purpose: `notify_${row.kind}`, ...(attachments.length ? { attachments } : {}) }).catch((e) => ({ sent: false, message: e.message }));
     if (r?.sent) { sent += 1; await query(`update notifications set email_state = 'sent' where id = $1 and email_state = 'sending'`, [row.id]); }
     else { failed += 1; await query(`update notifications set email_state = 'failed' where id = $1`, [row.id]); }
   }
