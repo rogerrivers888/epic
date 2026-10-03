@@ -454,6 +454,21 @@ function olderRow(o, today) {
   };
 }
 
+/**
+ * Bookings still to happen on offers made before the lanes: their dates live on the booking, not in sessions, so
+ * Stop hosting and the settings that offer it count them the same way (Roger, 3 Oct 2026).
+ */
+async function olderBookingsAhead(hostId, c = null) {
+  const q = c ? (t, p) => c.query(t, p) : query;
+  const { rows } = await q(
+    `select b.occurrence, o.* from experience_bookings b join host_offers o on o.id = b.offer_id
+      where b.host_id = $1 and o.lane is null and b.state in ('pending', 'confirmed')`,
+    [hostId],
+  );
+  const today = localDay(new Date(), 'Europe/London');
+  return rows.filter((r) => (lastDate(r, r.occurrence) ?? today) >= today).length;
+}
+
 router.get('/host/desk/events', async (_req, res, next) => {
   try {
     const { host, account } = await me({ hostOptional: true });
@@ -1018,6 +1033,7 @@ router.get('/host/desk/profile', async (_req, res, next) => {
               (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`,
       [host.id],
     );
+    const olderAhead = await olderBookingsAhead(host.id);
     res.json({
       host: { id: host.id, name: host.name, place: host.location_label ?? null, photo: mediaRef(host.photo_id), responseMinutes: mins, responseWords: mins == null ? null : `usually replies within ${responseWords(mins)}` },
       videos: [host.intro_video_id ? { kind: 'about', url: mediaRef(host.intro_video_id) } : null].filter(Boolean),
@@ -1040,7 +1056,7 @@ router.get('/host/desk/profile', async (_req, res, next) => {
         cohosts: [...people.values()].map(({ key, ...p }) => ({ ...p, id: key })),
         notifications: host.notification_prefs ?? {}, goalPence: host.earnings_goal_pence ?? null,
         paused: Boolean(host.paused), stopped: Boolean(host.stopped_at),
-        canStop: !out.bookings && !out.payouts, outstanding: { bookings: out.bookings, payouts: out.payouts },
+        canStop: !(out.bookings + olderAhead) && !out.payouts, outstanding: { bookings: out.bookings + olderAhead, payouts: out.payouts },
       },
       autoMessages: AUTO_MESSAGES.map((m) => { const r = auto.find((x) => x.kind === m.kind); return { kind: m.kind, title: m.title, when: m.when, on: r ? r.is_on : true, body: r?.body ?? m.body }; }),
       quickReplies: quick,
@@ -1108,14 +1124,7 @@ router.post('/host/desk/stop', async (_req, res, next) => {
                 (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`,
         [host.id],
       );
-      // Bookings on offers made before the lanes count too: their dates live on the booking, not in sessions (Roger, 3 Oct 2026).
-      const { rows: olderBooked } = await c.query(
-        `select b.occurrence, o.* from experience_bookings b join host_offers o on o.id = b.offer_id
-          where b.host_id = $1 and o.lane is null and b.state in ('pending', 'confirmed')`,
-        [host.id],
-      );
-      const today = localDay(new Date(), 'Europe/London');
-      o.bookings += olderBooked.filter((r) => (lastDate(r, r.occurrence) ?? today) >= today).length;
+      o.bookings += await olderBookingsAhead(host.id, c);
       if (o.bookings || o.payouts) return { refused: o };
       await c.query(`update hosts set stopped_at = now(), paused = true, updated_at = now() where id = $1`, [host.id]);
       await c.query(`update host_offers set state = 'ended' where host_id = $1 and state in ('live', 'paused', 'approved', 'in_review')`, [host.id]);

@@ -297,6 +297,9 @@ test('profile: stop hosting is refused while a booking is outstanding; pause, co
     const stop = await srv.send('POST', '/api/host/desk/stop', {});
     assert.equal(stop.status, 409);
     assert.match(stop.body.message, /1 booking is still to happen/);
+    const prof = (await srv.get('/api/host/desk/profile')).body.settings;
+    assert.equal(prof.canStop, false, 'the settings say so before anyone presses Stop');
+    assert.equal(prof.outstanding.bookings, 1);
     assert.equal((await srv.send('POST', '/api/host/desk/pause', { paused: true })).body.paused, true);
 
     assert.equal((await srv.send('POST', '/api/host/desk/cohosts', { name: 'Lena', contact: 'not a contact' })).status, 400);
