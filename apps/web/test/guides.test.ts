@@ -70,6 +70,8 @@ test('the server writes the head from the same words: title, FAQPage = the FAQs,
   assert.equal(h.canonical, 'https://epic.day/en-gb/events/pottery');
   const [crumbs, article, faq] = h.jsonld as any[];
   assert.deepEqual(crumbs.itemListElement.map((i: { name: string }) => i.name), ['Events', 'Culture', 'Pottery']);
+  // Only the page itself is linked: Events and Culture have no page yet, and a crumb never points at a 404.
+  assert.deepEqual(crumbs.itemListElement.map((i: { item?: string }) => i.item ?? null), [null, null, 'https://epic.day/en-gb/events/pottery']);
   assert.equal(article['@type'], 'Article');
   assert.equal(article.dateModified, GUIDES.pottery.reviewed);
   assert.deepEqual(faq.mainEntity.map((q: { name: string; acceptedAnswer: { text: string } }) => [q.name, q.acceptedAnswer.text]), GUIDES.pottery.faqs);

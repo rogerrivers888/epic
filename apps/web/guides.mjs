@@ -27,12 +27,15 @@ export function guideHead(g, { appUrl, locale, slug }) {
   const url = `${appUrl}${path}`;
   const headline = `${g.h1a} ${g.h1b}`;
   const image = g.photos.find((p) => p.src)?.src;
+  // Events and the category have no page yet (the hub and category pages wait on
+  // their design), so they are named without a link rather than pointing a crawler
+  // at a 404. Give them `item` once /{locale}/events and its categories exist.
   const breadcrumbs = {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
     itemListElement: [
-      { '@type': 'ListItem', position: 1, name: 'Events', item: `${appUrl}/${locale}/events` },
-      { '@type': 'ListItem', position: 2, name: g.category.name, item: `${appUrl}/${locale}/events/${g.category.slug}` },
+      { '@type': 'ListItem', position: 1, name: 'Events' },
+      { '@type': 'ListItem', position: 2, name: g.category.name },
       { '@type': 'ListItem', position: 3, name: g.name, item: url },
     ],
   };
