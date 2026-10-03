@@ -11,7 +11,7 @@ import { CompactBand } from '../../components/Band';
 import { DEEP_GREEN, GuestPage, INK, Para, INK_MUTED, Rows, Waiting, gbp, shortDay, useToast } from './kit';
 
 const day = shortDay;
-const CAUSE: Record<string, string> = { called_off: 'called off', host_cancelled: 'the host cancelled', guest_cancelled: 'you cancelled', date_changed: 'the date moved', numbers_settled: 'more people came', declined: 'not accepted', lapsed: 'no answer in time' };
+const CAUSE: Record<string, string> = { called_off: 'called off', host_cancelled: 'the host cancelled', guest_cancelled: 'you cancelled', date_changed: 'the date moved', numbers_settled: 'more people came', declined: 'not accepted', lapsed: 'no answer in time', duplicate_tip: 'a second tip' };
 
 function line(p: GuestPayment): { title: string; sub: string; value: string; color?: string } {
   const what = p.title ?? 'A booking';

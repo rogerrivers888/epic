@@ -698,3 +698,36 @@ test('Codex: a host’s reviews past the first fifty come fifty at a time', asyn
   assert.deepEqual([first.length, rest.length], [50, 2]);
   assert.equal(new Set([...first, ...rest].map((r) => r.text)).size, 52, 'none twice, none missed');
 });
+
+test('Codex: a tip Stripe took late, after another was started, is never left unaccounted for', async () => {
+  settings.forget();
+  const { o } = await anEvent({ priceMode: 'same_each', price: 1000 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1, children: [] } });
+    pays(r.body.pay.paymentIntent);
+    await guest.applyPaymentIntent(intents.get(r.body.pay.paymentIntent));
+    await query(`update offer_sessions set on_date = $2 where offer_id = $1`, [o.id, plusDays(today(), -1)]);
+    const tipFor = async () => (await srv.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 500 })).body;
+    // The first fails; a second is started; then the first is charged after all — the second, unpaid, is stopped.
+    const first = await tipFor();
+    await query(`update booking_tips set state = 'failed' where id = $1`, [first.tip.id]);
+    const second = await tipFor();
+    pays(first.pay.paymentIntent);
+    await guest.applyPaymentIntent(intents.get(first.pay.paymentIntent));
+    assert.equal((await query('select state from booking_tips where id = $1', [first.tip.id])).rows[0].state, 'paid');
+    assert.equal((await query('select state from booking_tips where id = $1', [second.tip.id])).rows[0].state, 'failed');
+    assert.equal(intents.get(second.pay.paymentIntent).status, 'canceled');
+    // A third, charged late while the first is paid, is given back.
+    await query(`insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence, state, stripe_ref) select booking_id, offer_id, host_id, household_id, 500, 30, 'failed', 'pi_late' from booking_tips where id = $1`, [first.tip.id]);
+    const { rows: [late] } = await query(`select id from booking_tips where stripe_ref = 'pi_late'`);
+    const pi = { id: 'pi_late', status: 'succeeded', amount: 530, amount_received: 530, metadata: { epic_kind: 'tip', epic_tip_id: late.id } };
+    await guest.applyPaymentIntent(pi);
+    await guest.applyPaymentIntent(pi);
+    const { rows: back } = await query(`select amount_pence, state from hosting_payments where kind = 'refund' and cause = 'duplicate_tip' and booking_id = $1`, [r.body.booking.id]);
+    assert.deepEqual(back.map((x) => [x.amount_pence, x.state]), [[530, 'succeeded']], 'refunded once');
+    const card = (await srv.get('/api/booked')).body.past.concat((await srv.get('/api/booked')).body.upcoming).find((c) => c.id === r.body.booking.id);
+    assert.equal(card.refunded, false, 'a tip given back is not the booking refunded');
+  } finally { await srv.close(); }
+});

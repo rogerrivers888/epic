@@ -512,7 +512,7 @@ export async function applyPaymentIntent(pi) {
   return b.id;
 }
 
-async function applyTipIntent(pi) {
+async function applyTipIntent(pi, { again = true } = {}) {
   const tipId = pi?.metadata?.epic_tip_id;
   if (!tipId || !UUID.test(tipId)) return null;
   // As for a booking: Stripe may answer before our write of the tip's reference (Codex, 2 Oct 2026).
@@ -531,11 +531,42 @@ async function applyTipIntent(pi) {
         and not exists (select 1 from booking_tips x where x.booking_id = booking_tips.booking_id and x.id <> booking_tips.id and x.state in ('pending', 'paid')))) returning *`,
     [tipId, pi.id],
   );
-  if (!t) return null;
+  if (!t) return settleLateTip(pi, tipId, again);
   await ledger.record({ kind: 'tip', bookingId: t.booking_id, offerId: t.offer_id, hostId: t.host_id, householdId: t.household_id, amountPence: t.amount_pence + t.admin_fee_pence, epicPence: t.admin_fee_pence, hostPence: t.amount_pence, state: 'succeeded', stripeRef: pi.id, mode: 'test', reason: 'tip' });
   const h = await repo.hostById(t.host_id);
   await notifications.notify({ householdId: h.household_id, kind: 'new_tip', title: `A £${(t.amount_pence / 100).toFixed(2)} tip`, link: '/host/reviews?tab=tips', dedupeKey: `tip:${t.id}` }).catch(() => null);
   return t.id;
+}
+
+/**
+ * Stripe took a tip that had lost its place to another (failed, then charged late, after a newer tip was started).
+ * The money is never left unaccounted for (Codex, 3 Oct 2026): a newer tip not yet paid is stopped and this one
+ * stands; one already paid, or one Stripe won't stop, means this one is given back. A refund Stripe refuses throws,
+ * so the webhook is retried rather than the charge forgotten.
+ */
+async function settleLateTip(pi, tipId, again) {
+  const { rows: [mine] } = await query('select * from booking_tips where id = $1 and stripe_ref = $2', [tipId, pi.id]);
+  if (!mine || mine.state === 'paid') return null;
+  const { rows: [rival] } = await query(`select * from booking_tips where booking_id = $1 and id <> $2 and state = 'pending'`, [mine.booking_id, mine.id]);
+  if (rival && again) {
+    const stopped = !rival.stripe_ref
+      || (await stripe.cancelPayment(rival.stripe_ref, { householdId: rival.household_id, idempotencyKey: `tip-rival-${rival.id}` }).catch(() => null))?.status === 'canceled';
+    if (stopped) {
+      await query(`update booking_tips set state = 'failed' where id = $1 and state = 'pending'`, [rival.id]);
+      return applyTipIntent(pi, { again: false });
+    }
+  }
+  const key = `tip-dup-${pi.id}`;
+  const { rows: [done] } = await query('select 1 from hosting_payments where idem_key = $1', [key]);
+  if (done) return null;
+  const amount = Number(pi.amount_received || pi.amount || mine.amount_pence + mine.admin_fee_pence);
+  const r = await stripe.refund({ paymentIntentId: pi.id, amountPence: amount, cause: 'duplicate_tip', bookingId: mine.booking_id, householdId: mine.household_id, idempotencyKey: key });
+  await query(
+    `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, state, mode, cause, idem_key, stripe_ref)
+     values ('refund', $1, $2, $3, $4, $5, 'succeeded', 'test', 'duplicate_tip', $6, $7) on conflict (idem_key) where idem_key is not null do nothing`,
+    [mine.booking_id, mine.offer_id, mine.host_id, mine.household_id, amount, key, r?.id ?? null],
+  );
+  return null;
 }
 
 router.post('/booked/:id/payment', async (req, res, next) => {
@@ -661,7 +692,7 @@ export async function offerFreedPlaces({ now = new Date() } = {}) {
 async function bookingsOfHousehold(householdId) {
   const { rows } = await query(
     `select b.*, o.title, o.lane, o.photo_ids, o.min_count, o.time_zone, o.price_mode, o.total_pence, o.state as offer_state, o.host_id as offer_host,
-            exists (select 1 from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state = 'succeeded') as refund_done,
+            exists (select 1 from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state = 'succeeded' and p.cause is distinct from 'duplicate_tip') as refund_done,
             o.venue_label, o.venue, o.address_hidden, o.parents
        from experience_bookings b join host_offers o on o.id = b.offer_id
       where b.household_id = $1 and o.lane is not null
@@ -813,7 +844,7 @@ router.get('/booked/:id', async (req, res, next) => {
     const o = await repo.offerById(b.offer_id);
     const host = await repo.hostById(b.host_id);
     const { rows: kids } = await query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1 order by created_at', [b.id]);
-    const { rows: refunds } = await query(`select amount_pence, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
+    const { rows: refunds } = await query(`select amount_pence, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') and cause is distinct from 'duplicate_tip' order by created_at`, [b.id]);
     const live = b.sessionsList.filter((x) => x.held === 'booked' && x.state === 'scheduled');
     const firstAhead = live.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     const lastEnd = b.sessionsList.length ? new Date(Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime()))) : null;
