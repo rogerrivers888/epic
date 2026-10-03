@@ -450,7 +450,8 @@ function olderRow(o, today) {
   // A series under way shows its next date, not its first (Codex, 3 Oct 2026).
   const on = finished ? null : o.shape === 'series' ? (seriesDates(o).find((d) => d >= today) ?? null) : occurrenceDate(o, null);
   return {
-    id: o.id, title: o.title, lane: null, older: true, visibility: o.visibility, photo: mediaRef(o.photo_ids?.[0]),
+    // A link-only offer from before the lanes is private, as an invite-only one is (Codex, 3 Oct 2026).
+    id: o.id, title: o.title, lane: null, older: true, visibility: o.visibility === 'public' ? 'public' : 'invite', photo: mediaRef(o.photo_ids?.[0]),
     group: finished ? 'finished' : 'live',
     next: on ? { date: on, time: o.starts_at ? String(o.starts_at).slice(0, 5) : null, booked: null, max: o.max_count ?? null } : null,
     endedOn: finished ? last ?? null : null, came: null, draft: null,
