@@ -829,3 +829,21 @@ test('Codex: a host stored before the watch who had finished sign-up still shows
   assert.equal(now.stripe_requirements.everSubmitted, true);
   assert.equal(stripe.accountTrouble(now.stripe_requirements)?.reason, 'requirements.past_due');
 });
+
+test('Codex: a host whose Stripe account was closed gets a new one at payouts; the old one is kept, set aside', async () => {
+  const { household: h, member } = await aHousehold(query);
+  const srv = await server(await readyHost(h, member));
+  try {
+    const host = await repo.hostByHousehold(h.id);
+    await repo.updateHost(host.id, { stripeAccountId: 'acct_closed_old', stripeAccountModel: 'v2', stripeRequirements: { disabledReason: 'account_closed' }, stripeLinkMadeAt: new Date() });
+    const made = () => calls.filter((c) => c.url === '/v2/core/accounts' && c.method === 'POST').length;
+    const before = made();
+    await withStripe('sk_test_fake', async () => {
+      const r = await srv.send('POST', '/api/host/lanes/payouts', { offerId: null });
+      assert.equal(r.body.url, 'https://connect.stripe.test/onboard');
+    });
+    assert.equal(made(), before + 1, 'a new account');
+    const now = await repo.hostById(host.id);
+    assert.deepEqual([now.stripe_account_id, now.stripe_void_account_id], ['acct_test_1', 'acct_closed_old']);
+  } finally { await srv.close(); }
+});

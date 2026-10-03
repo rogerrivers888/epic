@@ -769,6 +769,18 @@ async function ensureStripeAccount(host, { account, household, dormant = false }
   // (G7), which keeps its id; until then it is left exactly as it is, and set-up waits rather than replacing it
   // (owner, 3 Oct 2026: void the old, recreate under the new model). Once voided, a new one is made the L1 way.
   if (host.stripe_account_id && host.stripe_account_model !== 'v2') throw refuse(409, 'old_stripe_account', 'Payouts are being moved to a new set-up. Try again shortly.');
+  // An account Stripe has closed or disconnected can't be used again: it is kept beside the host as set aside, and a new
+  // one is made (Codex, 3 Oct 2026). Their passport check was tied to the old one, so Stripe may ask for ID; if it
+  // does, it shows in Safety › ID asked again, never sent to the host by Epic.
+  if (host.stripe_account_id && host.stripe_requirements?.disabledReason === 'account_closed') {
+    const { rows: [moved] } = await query(
+      `update hosts set stripe_void_account_id = stripe_account_id, stripe_voided_at = now(), stripe_account_id = null, stripe_person_id = null,
+              stripe_link_made_at = null, stripe_requirements = null, payouts_state = 'none', updated_at = now()
+        where id = $1 and stripe_account_id = $2 returning *`,
+      [host.id, host.stripe_account_id],
+    );
+    host = moved ?? (await repo.hostById(host.id));
+  }
   if (host.stripe_account_id) return host;
   const a = await stripe.createConnectAccount({
     email: account?.email, householdId: household.id, hostId: host.id,
@@ -1147,7 +1159,8 @@ export async function applyAccountFacts(hostId, patchOrRead) {
   // needs one (Codex, 3 Oct 2026) — and the read is stamped with when it began. Under the host row's lock it is then
   // stored only if no read that began later has been stored already, so overlapping deliveries can't put an older
   // view back over a newer one.
-  const readAt = typeof patchOrRead === 'function' ? await readStamp() : null;
+  // Stamped before any connection is held, a read and a direct update alike (Codex, 3 Oct 2026).
+  const readAt = await readStamp();
   const read = typeof patchOrRead === 'function' ? await patchOrRead() : patchOrRead;
   return withTransaction(async (c) => {
     const { rows: [was] } = await c.query('select * from hosts where id = $1 for update', [hostId]);
@@ -1159,7 +1172,7 @@ export async function applyAccountFacts(hostId, patchOrRead) {
     // Once sign-up was finished it stays finished for the trouble watch: Stripe un-marks it when new requirements go
     // overdue, which is exactly the account the watch must keep showing (Codex, 3 Oct 2026).
     const patch = read.stripeRequirements
-      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted || prev.detailsSubmitted || was.payouts_state === 'ready' || was.stripe_charges_enabled), readAt: readAt ?? await readStamp() } }
+      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted || prev.detailsSubmitted || was.payouts_state === 'ready' || was.stripe_charges_enabled), readAt } }
       : read;
     const before = stripe.accountTrouble(prev);
     const now = stripe.accountTrouble(patch.stripeRequirements ?? prev);
