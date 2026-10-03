@@ -529,7 +529,13 @@ test('Codex: two tips at once make one, and a request cancelled before its hold 
     const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
     await query(`update offer_sessions set on_date = $2 where offer_id = $1`, [o.id, plusDays(today(), -1)]);
     const both = await Promise.all([srv.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 500 }), srv.send('POST', `/api/booked/${r.body.booking.id}/tip`, { amountPence: 500 })]);
-    assert.deepEqual(both.map((x) => x.status).sort(), [201, 409]);
+    // One tip, never two. The second request is refused (409) if it lands before the first reaches Stripe, or handed
+    // that same tip back to pay (200) if it lands after — both keep the rule, and which one is timing.
+    const made = both.find((x) => x.status === 201);
+    const other = both.find((x) => x !== made);
+    assert.ok(made, 'one is made');
+    assert.ok(other.status === 409 || (other.status === 200 && other.body.tip?.id === made.body.tip.id), `the other is refused or is the same tip (${other.status})`);
+    assert.equal((await query(`select count(*)::int as n from booking_tips where booking_id = $1`, [r.body.booking.id])).rows[0].n, 1, 'one tip row');
   } finally { await srv.close(); }
 
   const ask = await anEvent({ lane: 'onrequest', price: 6000, priceMode: 'same_each' });
