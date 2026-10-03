@@ -178,6 +178,18 @@ export function wakeAccount(accountId, { householdId = null, businessUrl = null 
   }, { householdId, purpose: 'host.payouts.wake', idempotencyKey: `wake-${accountId}`, v2: true });
 }
 
+/**
+ * Ask for the transfers capability (Accounts v2's recipient configuration), which a destination charge needs. On its
+ * own and safe to repeat: an account made before it was known to be needed (Phase 1, live from 488be135) is
+ * upgraded the next time its host goes to payouts or comes back from Stripe; Stripe accepts it after onboarding too
+ * and asks the host for nothing new (sandbox, 3 Oct 2026). Never for a dormant account.
+ */
+export function ensureTransfers(accountId, { householdId = null } = {}) {
+  return call('POST', `/v2/core/accounts/${encodeURIComponent(accountId)}`, {
+    configuration: { recipient: { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } } },
+  }, { householdId, purpose: 'host.payouts.transfers', idempotencyKey: `transfers-${accountId}`, v2: true });
+}
+
 /** Has the account been asked for card payments yet? A dormant one has no capabilities at all. */
 export const accountAwake = (a) => Boolean(a?.capabilities && 'card_payments' in a.capabilities);
 

@@ -803,6 +803,9 @@ router.post('/host/lanes/payouts', async (req, res, next) => {
       const now = await stripe.retrieveAccount(accountId, { householdId: household.id });
       if (!stripe.accountAwake(now)) await stripe.wakeAccount(accountId, { householdId: household.id, businessUrl: `${appUrl()}/hosts/${host.id}` });
     }
+    // Every time, woken just now or long ago: an account from before the transfers capability was known to be needed
+    // is upgraded here, so a guest's payment to it is never refused (Codex, 3 Oct 2026).
+    await stripe.ensureTransfers(accountId, { householdId: household.id });
     const link = await stripe.accountLink({ accountId, refreshUrl: back, returnUrl: back, householdId: household.id });
     // From here Stripe no longer lets an Identity check be tied to the account's Person (L7).
     if (!host.stripe_link_made_at) await repo.updateHost(host.id, { stripeLinkMadeAt: new Date() });
@@ -872,6 +875,8 @@ router.post('/host/lanes/offers/:id/sync', async (req, res, next) => {
     let current = offer;
     if (stripe.stripeStatus().ready) {
       if (host.stripe_account_id && host.stripe_account_model === 'v2' && host.payouts_state !== 'ready') {
+        // Back from Stripe's form: transfers asked for too, for an account made before it was known to be needed.
+        if (host.stripe_link_made_at) await stripe.ensureTransfers(host.stripe_account_id, { householdId: household.id }).catch(() => null);
         const a = await stripe.retrieveAccount(host.stripe_account_id, { householdId: household.id });
         host = await repo.updateHost(host.id, stripe.hostPatchFromAccount(a));
       }

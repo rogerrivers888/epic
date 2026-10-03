@@ -695,7 +695,7 @@ test('the dormant account wakes when its host first takes money: card payments a
     const host = await repo.hostByHousehold(h.id);
     await repo.updateHost(host.id, { stripeAccountId: 'acct_test_1', stripeAccountModel: 'v2', stripePersonId: 'person_test_1' });
     // The fake reads card_payments as asked for already; make this read dormant so the wake is exercised.
-    const wakes = () => calls.filter((c) => c.url === '/v2/core/accounts/acct_test_1' && c.method === 'POST');
+    const wakes = () => calls.filter((c) => c.url === '/v2/core/accounts/acct_test_1' && c.method === 'POST' && /card_payments/.test(c.body ?? ''));
     const before = wakes().length;
     dormantRead = true;
     try {
@@ -711,6 +711,12 @@ test('the dormant account wakes when its host first takes money: card payments a
     const wakeAt = calls.findLastIndex((c) => c.url === '/v2/core/accounts/acct_test_1');
     const linkAt = calls.findLastIndex((c) => c.url === '/v1/account_links');
     assert.ok(wakeAt < linkAt, 'woken before Stripe’s form opens');
+    // An account made before transfers were known to be needed — awake, Stripe's form already opened — is upgraded too.
+    await repo.updateHost(host.id, { stripeLinkMadeAt: new Date() });
+    const asked = () => calls.filter((c) => c.url === '/v2/core/accounts/acct_test_1' && c.method === 'POST' && /stripe_transfers/.test(c.body ?? '') && !/card_payments/.test(c.body ?? '')).length;
+    const n = asked();
+    await withStripe('sk_test_fake', async () => { await srv.send('POST', '/api/host/lanes/payouts', { offerId: null }); });
+    assert.equal(asked(), n + 1, 'transfers asked for on its own, every time');
   } finally { await srv.close(); }
 });
 
