@@ -258,3 +258,9 @@ export async function recordCheckout(householdId, sessionId, lease) {
 export async function releaseCheckout(householdId, lease) {
   await query('update households set membership_checkout_at = null where id = $1 and membership_checkout_at = $2::timestamptz', [householdId, lease]);
 }
+
+/** Whether this press still holds the household's checkout slot. */
+export async function holdsCheckout(householdId, lease) {
+  const { rows: [r] } = await query('select 1 from households where id = $1 and membership_checkout_at = $2::timestamptz', [householdId, lease]);
+  return Boolean(r);
+}

@@ -574,3 +574,11 @@ test('a stale event never dates a change before one already recorded; a mid-cycl
   await applyStripeEvent(event('invoice.payment_failed', { id: 'in_p', object: 'invoice', subscription: sub.id, billing_reason: 'subscription_update' }));
   assert.ok(new Date((await billing.membershipBySubscription(sub.id)).paused_at).getFullYear() >= 2026);
 });
+
+test('a press that lost its slot closes nobody else’s session', async () => {
+  const { household } = await aMember();
+  const slot = await billing.claimCheckout(household.id);
+  assert.equal(await billing.holdsCheckout(household.id, slot.lease), true);
+  await query("update households set membership_checkout_at = now() where id = $1", [household.id]);
+  assert.equal(await billing.holdsCheckout(household.id, slot.lease), false);
+});

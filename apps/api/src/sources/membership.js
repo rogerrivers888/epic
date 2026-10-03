@@ -77,6 +77,8 @@ export async function startCheckout({ householdId, email, name, planKey }) {
     const customerId = await ensureCustomer({ householdId, email, name });
     // Every session still open for this customer is closed first — the recorded one, and any whose answer was lost on
     // the way back from Stripe and so was never written down (Codex, 3 Oct 2026). Only one is ever payable.
+    // Only while this press still holds the slot: one that outlived it would close the newer press's session (Codex).
+    if (!(await billing.holdsCheckout(householdId, slot.lease))) throw refuse(409, 'checkout_opening', 'Opening the payment page already — give it a moment.');
     for (const open of await stripe.openCheckouts(customerId, { householdId })) {
       if (open?.metadata?.epic_kind === 'membership') await stripe.expireCheckout(open.id, { householdId });
     }
