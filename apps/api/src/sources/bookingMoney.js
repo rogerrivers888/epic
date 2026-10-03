@@ -453,9 +453,14 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
         else if (p.tip_id) await c.query(`update booking_tips set state = 'refunded' where id = $1`, [p.tip_id]);
         else {
           await c.query(
-            `update experience_bookings set payment_state = case when refunded_pence + cancellation_fee_pence >= charged_pence then 'refunded' else 'partially_refunded' end
+            // Refunded only once nothing else owed on it is still waiting or failed: a cancellation split into two lines
+            // (a moved session and the guest's own) isn't done until both are (Codex, 3 Oct 2026).
+            `update experience_bookings set payment_state = case
+                 when refunded_pence + cancellation_fee_pence >= charged_pence
+                  and not exists (select 1 from hosting_payments o where o.booking_id = $1 and o.id <> $2 and o.kind = 'refund' and o.state in ('pending', 'failed') and o.voided_at is null)
+                 then 'refunded' else 'partially_refunded' end
               where id = $1 and payment_state in ('charged', 'partially_refunded')`,
-            [p.booking_id],
+            [p.booking_id, p.id],
           );
           // The host caused it — cancelled, or moved a date the guest then left (owner, 3 Oct 2026) — so Epic recovers
           // the cancellation fee from the host's own balance. Not for a missed minimum unless the owner switches it on.

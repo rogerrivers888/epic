@@ -525,7 +525,7 @@ export async function applyPaymentIntent(pi) {
       const { rows: [now] } = await c.query('select * from experience_bookings where id = $1 for update', [b.id]);
       if (!now || now.payment_state !== 'none') return null;
       const { rows: [held] } = await c.query(`update experience_bookings set payment_state = 'held', held_pence = $2 where id = $1 returning *`, [b.id, pi.amount_capturable ?? b.value_pence]);
-      if (held.state === 'cancelled') { await owe(c, held, { amountPence: 0, cause: 'cancelled_before_hold', key: `release-late:${b.id}`, wholeBooking: true }); return 'released'; }
+      if (held.state === 'cancelled') { await owe(c, held, { amountPence: 0, cause: 'cancelled_before_hold', key: `release-late:${b.id}`, wholeBooking: true, triggeredBy: 'guest' }); return 'released'; }
       return 'held';
     });
     if (outcome === 'held') await notifications.notify({ householdId: host.household_id, kind: 'ask_to_book_request', title: `Ask to book: ${o?.title ?? 'your offer'}`, body: `${b.requested_date ? ymd(b.requested_date) : ''} ${hm(b.requested_time) ?? ''}`.trim(), link: hostLink(b.offer_id), dedupeKey: `ask:${b.id}` }).catch(() => null);
@@ -1083,7 +1083,7 @@ export async function cancelBooking({ bookingId, household, account, sessionIds 
       const q = await quoteFor(b, o, ids);
       const whole = q.losing.length === q.liveCount;
       if (q.release) {
-        await owe(c, b, { amountPence: 0, cause: 'declined', key: `guest_cancel:${b.id}`, wholeBooking: true });
+        await owe(c, b, { amountPence: 0, cause: 'declined', key: `guest_cancel:${b.id}`, wholeBooking: true, triggeredBy: 'guest' });
         await c.query(`update experience_bookings set request_state = 'declined', state = 'cancelled', cancelled_by = 'guest', cancel_cause = 'guest_cancelled' where id = $1`, [b.id]);
       } else {
         if (q.pence == null) throw refuse(409, 'needs_a_person', q.words);
