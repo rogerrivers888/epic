@@ -247,3 +247,18 @@ test('an in-app message already written does not stop a retry of the e-mail that
     assert.equal(second.channels.email.sent, true);
   } finally { Object.assign(templates.senders, was); }
 });
+
+test('a claim left behind by a cut-off send is taken again after ten minutes (Codex, 3 Oct 2026)', async () => {
+  const was = { ...templates.senders };
+  templates.senders.mail = async () => ({ sent: true });
+  try {
+    await query(`insert into message_sends (template_key, version, channel, purpose, to_kind, to_ref, result, dedupe_key, at)
+                 values ('renewal_failed', 1, 'email', 'deliver', 'email', 'cut@example.com', '{"claimed":true}'::jsonb, 'renewal:cut', now() - interval '11 minutes')`);
+    const r = await templates.deliver({ templateKey: 'renewal_failed', fields: { plan: 'Solo', amount: '5.99', retryOn: 'x', updateUrl: 'y' }, to: { email: 'cut@example.com' }, dedupeKey: 'renewal:cut' });
+    assert.equal(r.channels.email.sent, true);
+    await query(`insert into message_sends (template_key, version, channel, purpose, to_kind, to_ref, result, dedupe_key)
+                 values ('renewal_failed', 1, 'email', 'deliver', 'email', 'fresh@example.com', '{"claimed":true}'::jsonb, 'renewal:fresh')`);
+    const busy = await templates.deliver({ templateKey: 'renewal_failed', fields: { plan: 'Solo', amount: '5.99', retryOn: 'x', updateUrl: 'y' }, to: { email: 'fresh@example.com' }, dedupeKey: 'renewal:fresh' });
+    assert.equal(busy.channels.email.reason, 'already_sent', 'a claim still in flight is left alone');
+  } finally { Object.assign(templates.senders, was); }
+});

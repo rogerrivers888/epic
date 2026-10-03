@@ -285,9 +285,15 @@ async function logSend({ t, version = t.version, channel, purpose, toKind, toRef
  */
 async function claim(t, channel, dedupeKey, toKind, toRef, by) {
   if (!dedupeKey) return true;
+  // A claim nobody settled within ten minutes was a send cut off part-way (a deploy, a crash): it may be taken
+  // again, so an interrupted message is retried rather than lost (Codex, 3 Oct 2026).
   const { rows } = await query(
     `insert into message_sends (template_key, version, channel, purpose, to_kind, to_ref, result, by_account, dedupe_key)
-     values ($1, $2, $3, 'deliver', $4, $5, '{"claimed":true}'::jsonb, $6, $7) on conflict do nothing returning id`,
+     values ($1, $2, $3, 'deliver', $4, $5, '{"claimed":true}'::jsonb, $6, $7)
+     on conflict (template_key, channel, dedupe_key) where purpose = 'deliver' and dedupe_key is not null
+     do update set at = now(), version = excluded.version, to_ref = excluded.to_ref, by_account = excluded.by_account
+      where message_sends.result = '{"claimed":true}'::jsonb and message_sends.at < now() - interval '10 minutes'
+     returning id`,
     [t.key, t.version, channel, toKind, toRef, by, dedupeKey],
   );
   return rows.length > 0;
