@@ -15,6 +15,7 @@
  * with the publish.
  */
 
+import { insetTop } from '../../../insets';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../../../components/press';
@@ -279,7 +280,7 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: CREAM },
   wide: { maxWidth: 560, width: '100%', alignSelf: 'center' },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: CREAM },
-  headRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 12, paddingHorizontal: 20 },
+  headRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: insetTop(12), paddingHorizontal: 20 },
   tag: { backgroundColor: LIME, paddingVertical: 3, paddingHorizontal: 7 },
   tagText: { fontFamily: fonts.heading, fontSize: 13, fontWeight: '800', color: INK },
   preview: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 11 },

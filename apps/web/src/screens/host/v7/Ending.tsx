@@ -12,6 +12,7 @@
  *   …?preview=1                       the guest page
  */
 
+import { insetTop } from '../../../insets';
 import { mediaUrl } from '../../../components/hosting';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -135,7 +136,7 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: CREAM },
   wide: { maxWidth: 560, width: '100%', alignSelf: 'center' },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: CREAM },
-  band: { backgroundColor: LIME, paddingTop: 24, paddingHorizontal: 20, paddingBottom: 18, gap: 4 },
+  band: { backgroundColor: LIME, paddingTop: insetTop(24), paddingHorizontal: 20, paddingBottom: 18, gap: 4 },
   body: { paddingTop: 16, paddingHorizontal: 20, paddingBottom: 12, gap: 12 },
   offerRow: { flexDirection: 'row', gap: 11, alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: HAIRLINE },
   thumb: { width: 48, height: 48, borderRadius: 8, overflow: 'hidden', backgroundColor: INACTIVE },

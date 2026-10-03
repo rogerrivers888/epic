@@ -6,6 +6,7 @@
  * avatars, kickers 11px/700/0.06em uppercase grey.
  */
 
+import { insetTop } from '../../../insets';
 import React from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, View, type TextStyle, type ViewStyle } from 'react-native';
 import { Press } from '../../../components/press';
@@ -27,7 +28,8 @@ export function Page({ children, footer }: { children: React.ReactNode; footer?:
   const { width } = useViewport();
   const wide = width >= 900;
   return (
-    <View style={{ flex: 1, backgroundColor: CREAM }}>
+    // The Host tab draws its own head (routes.ownsHeader), so each page takes the status bar's height itself.
+    <View style={{ flex: 1, backgroundColor: CREAM, paddingTop: insetTop(0) }}>
       <ScrollView contentContainerStyle={[{ paddingBottom: 24 }, wide && { width: 560, alignSelf: 'center' }]}>{children}</ScrollView>
       {footer ? <View style={[wide && { width: 560, alignSelf: 'center' }]}>{footer}</View> : null}
     </View>

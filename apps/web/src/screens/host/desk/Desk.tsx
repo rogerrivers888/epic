@@ -10,6 +10,7 @@
  * above the tab bar.
  */
 
+import { insetTop } from '../../../insets';
 import React, { useEffect, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 import { Press } from '../../../components/press';
@@ -62,7 +63,7 @@ function DeskHomeView({ d }: { d: Desk }) {
   const col = wide ? { width: 560, alignSelf: 'center' as const } : null;
   const t = d.tiles;
   return (
-    <View style={{ flex: 1, backgroundColor: CREAM }}>
+    <View style={{ flex: 1, backgroundColor: CREAM, paddingTop: insetTop(0) }}>
       <ScrollView contentContainerStyle={[{ paddingBottom: 20 }, col]}>
         <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Text style={hx(32)} accessibilityRole="header">Host</Text>

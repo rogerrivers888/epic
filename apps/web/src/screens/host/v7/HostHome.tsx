@@ -14,6 +14,7 @@
  * Start · {lane}.
  */
 
+import { insetTop } from '../../../insets';
 import React, { useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import { Press } from '../../../components/press';
@@ -89,7 +90,7 @@ export function LaneScreen({ lane }: { lane: HostLane }) {
   const card = page.kinds.find((k) => k.key === CARD_KEY[lane]);
   return (
     <View style={[styles.page, wide && styles.wide]}>
-      <View style={{ backgroundColor: look.bg, paddingTop: 10, paddingHorizontal: 20, paddingBottom: 18, gap: 12 }}>
+      <View style={{ backgroundColor: look.bg, paddingTop: insetTop(10), paddingHorizontal: 20, paddingBottom: 18, gap: 12 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Press onPress={() => navigate(paths.hostLanes())} accessibilityRole="button" accessibilityLabel="Back to Host" style={[{ flexDirection: 'row', alignItems: 'center', gap: 6 }, pointer]}>
             <Icon name="previous" size={20} color={look.fg} strokeWidth={2.2} />
@@ -115,7 +116,7 @@ export function LaneScreen({ lane }: { lane: HostLane }) {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: CREAM },
   wide: { maxWidth: 720, width: '100%', alignSelf: 'center' },
-  hero: { backgroundColor: LIME, paddingTop: 22, paddingHorizontal: 20, paddingBottom: 16, gap: 8 },
+  hero: { backgroundColor: LIME, paddingTop: insetTop(22), paddingHorizontal: 20, paddingBottom: 16, gap: 8 },
   grid: { flex: 1, minHeight: 360 },
   gridRow: { flex: 1, flexDirection: 'row' },
   block: { flex: 1, paddingTop: 16, paddingHorizontal: 14, paddingBottom: 14, justifyContent: 'space-between' },

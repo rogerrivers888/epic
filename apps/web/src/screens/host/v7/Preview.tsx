@@ -11,6 +11,7 @@
  * Drawn in the tree (not a Modal), so it stays inside the phone frame.
  */
 
+import { insetTop } from '../../../insets';
 import React, { useMemo, useState } from 'react';
 import { DimensionValue, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TextStyle, View } from 'react-native';
 import { Press } from '../../../components/press';
@@ -238,7 +239,7 @@ export function Preview({ offer: o, lane, config, home, step, onClose }: {
 
   return (
     <View style={[StyleSheet.absoluteFill, { zIndex: 30, backgroundColor: CREAM, flexDirection: 'column' }]}>
-      <View style={{ borderBottomWidth: 1, borderBottomColor: HAIRLINE, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 20, gap: 12 }}>
+      <View style={{ borderBottomWidth: 1, borderBottomColor: HAIRLINE, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: insetTop(10), paddingBottom: 10, paddingHorizontal: 20, gap: 12 }}>
         <Press onPress={onClose} accessibilityRole="button" accessibilityLabel="Back to editing" style={[{ flexDirection: 'row', alignItems: 'center', gap: 2 }, pointer]}>
           <Icon name="previous" size={16} color={INK} strokeWidth={2.4} />
           <Text style={tx(14, '700')}>Back to editing</Text>

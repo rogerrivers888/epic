@@ -76,3 +76,22 @@ test('the two ends of the app each apply the inset once', () => {
   // Inspire draws its own head, so it takes the top inset itself.
   assert.match(read('src/components/InspireHeader.tsx'), /max\(16px, calc\(var\(--epic-sat\) \+ 10px\)\)/);
 });
+
+/**
+ * The Host tab draws its own head (routes.ownsHeader), so the shell adds no
+ * status-bar inset above it and every page's first row must take it. On a
+ * home-screen iPhone "Host it." sat under the clock (owner, 3 Oct 2026).
+ */
+test('every Host page that starts the screen takes the status bar into its first row', () => {
+  const tops: [string, RegExp][] = [
+    ['src/screens/host/v7/HostHome.tsx', /hero: \{[^}]*paddingTop: insetTop\(/],
+    ['src/screens/host/v7/HostHome.tsx', /backgroundColor: look\.bg, paddingTop: insetTop\(/],
+    ['src/screens/host/v7/Setup.tsx', /headRow: \{[^}]*paddingTop: insetTop\(/],
+    ['src/screens/host/v7/Publish.tsx', /headRow: \{[^}]*paddingTop: insetTop\(/],
+    ['src/screens/host/v7/Ending.tsx', /band: \{[^}]*paddingTop: insetTop\(/],
+    ['src/screens/host/v7/Preview.tsx', /paddingTop: insetTop\(10\), paddingBottom: 10/],
+    ['src/screens/host/desk/kit.tsx', /backgroundColor: CREAM, paddingTop: insetTop\(0\)/],
+    ['src/screens/host/desk/Desk.tsx', /backgroundColor: CREAM, paddingTop: insetTop\(0\)/],
+  ];
+  for (const [file, re] of tops) assert.match(read(file), re, file);
+});
