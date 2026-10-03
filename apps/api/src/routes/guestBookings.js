@@ -655,6 +655,7 @@ export async function offerFreedPlaces({ now = new Date() } = {}) {
 async function bookingsOfHousehold(householdId) {
   const { rows } = await query(
     `select b.*, o.title, o.lane, o.photo_ids, o.min_count, o.time_zone, o.price_mode, o.total_pence, o.state as offer_state, o.host_id as offer_host,
+            exists (select 1 from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state = 'succeeded') as refund_done,
             o.venue_label, o.venue, o.address_hidden, o.parents
        from experience_bookings b join host_offers o on o.id = b.offer_id
       where b.household_id = $1 and o.lane is not null
@@ -697,7 +698,8 @@ function card(b, now) {
     rateIt: Boolean(lastEnd && lastEnd <= now.getTime() && !b.rated_at && b.state !== 'cancelled'),
     upcoming: Boolean(nextS) || b.request_state === 'asked',
     holdReleased: notThisTime,
-    refunded: Number(b.refunded_pence ?? 0) > 0,
+    // Only once Stripe has done it: a queued or stuck refund isn't one yet (Codex, 3 Oct 2026).
+    refunded: Boolean(b.refund_done),
   };
 }
 

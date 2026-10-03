@@ -65,7 +65,13 @@ export function priceWords(o: Experience, opt: GuestOptions | null): { big: stri
   const kidsOnly = Boolean(who?.dropOff) || (who?.ageMax != null && who.ageMax < 18);
   const each = kidsOnly ? 'a child' : p?.per === 'booking' ? `up to ${who?.partyMax ?? 2} people` : 'each';
   const child = p?.childPence != null && !kidsOnly && p.per !== 'booking' ? ` · ${gbp(p.childPence)} a child` : '';
-  if (o.lane === 'weekly') return { big: gbp(p?.pence ?? null), small: `${each === 'each' ? 'a session' : `${each}, each session`}${child}` };
+  if (o.lane === 'weekly') {
+    // Drop in and book ahead can cost different amounts: the lower one, as "from" (Codex, 3 Oct 2026).
+    const both = [p?.dropInPence, p?.bookAheadPence].filter((x): x is number => x != null);
+    const low = both.length ? Math.min(...both) : p?.pence ?? null;
+    const from = both.length === 2 && both[0] !== both[1] ? 'from ' : '';
+    return { big: `${from}${gbp(low)}`, small: `${each === 'each' ? 'a session' : `${each}, each session`}${child}` };
+  }
   if (o.lane === 'course') return { big: gbp(p?.pence ?? null), small: `${each === 'each' ? 'each' : each} · all ${opt?.sessions.length ?? o.sessions ?? ''} sessions`.replace(' ·  ', ' · ') + child };
   return { big: gbp(p?.pence ?? null), small: `${each}${child}` };
 }

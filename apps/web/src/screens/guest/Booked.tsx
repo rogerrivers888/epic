@@ -57,7 +57,8 @@ export function Booked({ id }: { id: string }) {
       <Notice bg={LIME} weight="700">{asked ? `${host} has 24 hours to say yes. Your card is held, not charged.` : 'It’s in your Plans.'}</Notice>
       <BookingRows items={[{ key: b.id, photo: mediaUrl(b.event.photo), title: b.event.title ?? 'Your booking', line, chip: b.chipWords, chipBg: CHIP_BG[b.chip] ?? AMBER, extra, onPress: () => navigate(paths.booking(b.id)) }]} />
       <Buttons items={[
-        { label: 'Add to calendar', icon: 'calendar', onPress: () => { if (addToCalendar(b)) toast.show('Added to your calendar'); } },
+        // Nothing to put in a calendar until there's a session: an Ask to book has one only once the host accepts.
+        ...(b.sessions.some((s) => s.booked) ? [{ label: 'Add to calendar', icon: 'calendar' as const, onPress: () => { if (addToCalendar(b)) toast.show('Added to your calendar'); } }] : []),
         { label: 'Message the host', icon: 'message', onPress: () => navigate(paths.bookingChat(b.id)) },
       ]} />
     </GuestPage>

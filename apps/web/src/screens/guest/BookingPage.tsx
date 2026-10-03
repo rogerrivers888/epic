@@ -143,7 +143,7 @@ export function BookingPage({ id }: { id: string }) {
       <Rows key="told" items={[{ title: answered.length ? answered.join(' · ') : 'Nothing yet', sub: b.answersEditable ? 'You can change this until 24 hours before' : null, onPress: b.answersEditable ? () => setEditing(true) : undefined }]} />,
       <Rows key="acts" items={[
         { title: `Message ${host}`, onPress: () => navigate(paths.bookingChat(b.id)) },
-        { title: 'Add to calendar', onPress: () => { if (addToCalendar(b)) toast.show('Added'); } },
+        ...(b.sessions.some((s) => s.booked) ? [{ title: 'Add to calendar', onPress: () => { if (addToCalendar(b)) toast.show('Added'); } }] : []),
         { title: 'Share with someone going', onPress: async () => {
           const url = Platform.OS === 'web' && typeof location !== 'undefined' ? `${location.origin}${paths.experience(b.event.id)}` : paths.experience(b.event.id);
           try { if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) { await navigator.clipboard.writeText(url); toast.show('Link copied'); } else await Share.share({ message: url }); } catch { /* closed */ }
@@ -153,7 +153,7 @@ export function BookingPage({ id }: { id: string }) {
       <Kick key="manage-k" top={4}>Manage</Kick>,
       <Rows key="manage" items={[
         ...(lane === 'weekly' ? [{ title: 'Book more sessions', onPress: () => navigate(paths.experienceBook(b.event.id)) }] : []),
-        { title: 'Change how many are going', sub: 'Add places if there’s room · remove under the refund policy', onPress: () => navigate(paths.experienceBook(b.event.id)) },
+        // "Change how many are going" waits for a way to change a booking in place: opening Book here would make a second one (Codex, 3 Oct 2026).
         { title: 'Cancel', weight: '700' as const, valueColor: GUEST_RED, onPress: async () => {
           setCancelling({ whole: lane !== 'weekly', quote: null });
           const q = await api.guestCancelQuote(b.id, lane === 'weekly' && next ? [next.id] : null).catch(() => null);
