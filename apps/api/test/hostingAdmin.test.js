@@ -272,7 +272,13 @@ test('voiding the old model: the owner only, test rows kept and marked, a v2 hos
       `insert into host_payouts (host_id, offer_id, amount_pence, release_at, lines) values ($1, $2, 800, now(), $3::jsonb) returning *`,
       [h.id, o.id, JSON.stringify([{ bookingId: b.id, pence: 800 }])],
     );
-    return { h, b, line, p };
+    // A tip charged the same way, already claimed by that payout (Codex, 3 Oct 2026).
+    const { rows: [tip] } = await query(
+      `insert into booking_tips (booking_id, offer_id, host_id, household_id, amount_pence, admin_fee_pence, state, stripe_ref, payout_id, charge_model)
+       values ($1, $2, $3, $4, 300, 30, 'paid', $5, $6, $7) returning *`,
+      [b.id, o.id, h.id, g.id, `pi_t_${crypto.randomUUID().slice(0, 8)}`, p.id, model ? 'destination' : null],
+    );
+    return { h, b, line, p, tip };
   };
   const old = await mk(null);
   const kept = await mk('v2');
@@ -298,6 +304,8 @@ test('voiding the old model: the owner only, test rows kept and marked, a v2 hos
     assert.ok((await query('select money_voided_at from experience_bookings where id = $1', [old.b.id])).rows[0].money_voided_at, 'the booking kept, and marked');
     assert.ok((await query('select voided_at from hosting_payments where id = $1', [old.line.id])).rows[0].voided_at, 'its pending refund will never be sent');
     assert.equal((await query('select state from host_payouts where id = $1', [old.p.id])).rows[0].state, 'void');
+    assert.equal((await query('select state from booking_tips where id = $1', [old.tip.id])).rows[0].state, 'void', 'a tip the voided payout had claimed goes with it');
+    assert.equal((await query('select state from booking_tips where id = $1', [kept.tip.id])).rows[0].state, 'paid');
     // A host made the L1 way is not touched.
     const v2 = (await query('select * from hosts where id = $1', [kept.h.id])).rows[0];
     assert.equal(v2.stripe_account_id, kept.h.stripe_account_id);

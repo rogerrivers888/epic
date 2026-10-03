@@ -410,3 +410,24 @@ test('Codex: a payout that failed for certain is retried as a new Payout; one St
   // Another host's account can't touch it.
   assert.equal(await ledger.markPayoutOutcome({ stripePayout: 'po_second', accountId: 'acct_someone_else', paid: false }), null);
 });
+
+test('Codex: Stripe’s payout.failed arriving before Epic wrote the Payout down still fails it, and it is never announced as paid', async () => {
+  settings.forget();
+  const status = () => ({ ready: true, mode: 'test' });
+  const a = await aPaidSession({ endedHoursAgo: 100 });
+  await money.schedulePayouts();
+  const { rows: [p] } = await query('select * from host_payouts where session_id = $1', [a.sessions[0].id]);
+  // The webhook lands while the Payout call is still in flight: the row is released, with no Stripe id yet.
+  await money.releasePayouts({
+    payout: async (x) => {
+      if (x.hostId !== a.host.id) return { id: 'po_other' };
+      await ledger.markPayoutOutcome({ stripePayout: 'po_early', accountId: a.host.stripe_account_id, paid: false, failure: 'account_closed', payoutId: x.payoutId });
+      return { id: 'po_early' };
+    },
+    status,
+  });
+  const { rows: [after] } = await query('select * from host_payouts where id = $1', [p.id]);
+  assert.deepEqual([after.state, after.stripe_payout, after.attempt], ['failed', 'po_early', 1]);
+  assert.equal((await query(`select count(*)::int as n from hosting_payments where stripe_ref = 'po_early' and kind = 'payout'`)).rows[0].n, 0, 'never recorded as paid');
+  assert.equal((await query(`select count(*)::int as n from notifications where dedupe_key = $1`, [`payout_sent:${p.id}`])).rows[0].n, 0, 'nor announced');
+});

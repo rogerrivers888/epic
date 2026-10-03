@@ -103,7 +103,10 @@ export async function releasePayouts({ now = new Date(), payout = stripe.payout,
     const amount = claimed.amount_pence + claimed.tips_pence;
     try {
       const po = await payout({ accountId: p.stripe_account_id, amountPence: amount, payoutId: p.id, hostId: p.host_id, householdId: p.household_id, idempotencyKey: payoutKey(claimed) });
-      await ledger.finishPayout(p.id, { state: 'paid', stripePayout: po.id, mode: 'test' });
+      // Stripe's payout.failed can land before this write: then the row is failed already, and it is neither
+      // recorded as paid nor announced (Codex, 3 Oct 2026).
+      const done = await ledger.finishPayout(p.id, { state: 'paid', stripePayout: po.id, mode: 'test' });
+      if (!done) { out.failed += 1; continue; }
       await ledger.record({ kind: 'payout', hostId: p.host_id, offerId: p.offer_id, sessionId: p.session_id, householdId: p.household_id, payoutId: p.id, amountPence: amount, hostPence: amount, state: 'succeeded', stripeRef: po.id, mode: 'test', reason: d.by });
       await notifications.notify({
         householdId: p.household_id, kind: 'payout_sent', title: `£${(amount / 100).toFixed(2)} is on its way`,

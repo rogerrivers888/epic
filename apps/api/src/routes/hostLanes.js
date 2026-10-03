@@ -1100,7 +1100,7 @@ export async function applyStripeEvent(event) {
     } else if ((event.type === 'payout.paid' || event.type === 'payout.failed') && obj.id && typeof event.account === 'string') {
       // A released payout reaching the host's bank, or bouncing: the host's own account's event (Connect endpoint).
       const { markPayoutOutcome } = await import('../repositories/hostingLedger.js');
-      await markPayoutOutcome({ stripePayout: obj.id, accountId: event.account, paid: event.type === 'payout.paid', failure: obj.failure_code ?? null });
+      await markPayoutOutcome({ stripePayout: obj.id, accountId: event.account, paid: event.type === 'payout.paid', failure: obj.failure_code ?? null, payoutId: obj.metadata?.epic_payout_id ?? null });
     } else if ((event.type === 'charge.dispute.created' || event.type === 'charge.dispute.closed') && obj.payment_intent) {
       // A chargeback is the guest's bank's decision (L3); while it is open the booking's payout waits, like a complaint.
       const { markDispute } = await import('../repositories/hostingLedger.js');

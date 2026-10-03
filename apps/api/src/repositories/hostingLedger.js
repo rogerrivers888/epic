@@ -215,14 +215,20 @@ export async function finishPayout(id, { state, stripePayout = null, mode = 'tes
  * landed stays paid. Matched on the account as well as the id, so another
  * host's event can never touch it.
  */
-export async function markPayoutOutcome({ stripePayout, accountId, paid, failure = null }) {
+export async function markPayoutOutcome({ stripePayout, accountId, paid, failure = null, payoutId = null }) {
   if (paid) return null;
   return withTransaction(async (c) => {
+    // Matched by Stripe's Payout id once Epic has written it down — or, when Stripe's event outruns that write, by
+    // Epic's own payout id from the Payout's metadata while the row is still released (Codex, 3 Oct 2026). Either
+    // way only on the host's own account, so another host's event can never touch it.
     const { rows: [row] } = await c.query(
-      `update host_payouts p set state = 'failed', hold_reason = $3, attempt = attempt + 1, updated_at = now()
+      `update host_payouts p set state = 'failed', hold_reason = $3, attempt = attempt + 1, stripe_payout = $1, updated_at = now()
          from hosts h
-        where p.stripe_payout = $1 and h.id = p.host_id and h.stripe_account_id = $2 and p.state = 'paid' returning p.*`,
-      [stripePayout, accountId, failure ? `payout_failed:${String(failure).slice(0, 40)}` : 'payout_failed'],
+        where h.id = p.host_id and h.stripe_account_id = $2
+          and ((p.stripe_payout = $1 and p.state = 'paid') or ($4::uuid is not null and p.id = $4::uuid and p.state = 'released'))
+        returning p.*`,
+      [stripePayout, accountId, failure ? `payout_failed:${String(failure).slice(0, 40)}` : 'payout_failed',
+        /^[0-9a-f-]{36}$/i.test(String(payoutId ?? '')) ? payoutId : null],
     );
     // The ledger says so too, so no report or reconciliation goes on counting it as paid.
     if (row) await c.query(`update hosting_payments set state = 'failed', reason = $2, updated_at = now() where stripe_ref = $1 and kind = 'payout'`, [stripePayout, row.hold_reason]);
@@ -347,8 +353,14 @@ export async function voidOldModel() {
   return withTransaction(async (c) => {
     const before = await oldModelCounts(c);
     if (before.live_lines || before.live_payouts) throw Object.assign(new Error('There is live-mode money on the ledger. Nothing was voided.'), { status: 409, code: 'live_rows' });
-    const { rowCount: payouts } = await c.query(`update host_payouts p set state = 'void', hold_reason = 'old_model', updated_at = now() where ${OLD_PAYOUTS}`);
-    const { rowCount: tips } = await c.query(`update booking_tips set state = 'void' where ${OLD_TIPS}`);
+    const { rows: voidedPayouts } = await c.query(`update host_payouts p set state = 'void', hold_reason = 'old_model', updated_at = now() where ${OLD_PAYOUTS} returning id`);
+    const payouts = voidedPayouts.length;
+    // Old tips not yet attached to a payout, and those a payout being voided had already claimed (Codex, 3 Oct 2026).
+    const { rowCount: tips } = await c.query(
+      `update booking_tips set state = 'void'
+        where (${OLD_TIPS}) or (charge_model is null and state = 'paid' and payout_id = any($1::uuid[]))`,
+      [voidedPayouts.map((p) => p.id)],
+    );
     const { rowCount: lines } = await c.query(
       `update hosting_payments m set voided_at = now(), updated_at = now() from experience_bookings b
         where b.id = m.booking_id and b.charge_model is null and b.stripe_payment_intent is not null and m.state = 'pending' and m.voided_at is null`,

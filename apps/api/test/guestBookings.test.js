@@ -103,8 +103,8 @@ async function anEvent({ lane = 'oneoff', price = null, priceMode = 'free', max 
   const host = await aPerson('Kate Morris');
   // The host's own Stripe account, made the L1 way, takes the guest's money (register L, 3 Oct 2026).
   const { rows: [h] } = await query(
-    `insert into hosts (household_id, name, created_at, stripe_account_id, stripe_account_model, stripe_charges_enabled, stripe_payouts_manual, payouts_state)
-     values ($1, 'Kate Morris', $2, $3, 'v2', true, true, 'ready') returning *`,
+    `insert into hosts (household_id, name, created_at, stripe_account_id, stripe_account_model, stripe_charges_enabled, stripe_payouts_enabled, stripe_payouts_manual, payouts_state)
+     values ($1, 'Kate Morris', $2, $3, 'v2', true, true, true, 'ready') returning *`,
     [host.household.id, hostOld ? new Date(Date.now() - 400 * 86_400_000) : new Date(), `acct_test_${Math.random().toString(36).slice(2, 10)}`],
   );
   const { rows: [o] } = await query(
@@ -824,6 +824,14 @@ test('L1: a host whose account was made the old way can’t be booked or tipped 
     assert.deepEqual([r.status, r.body.error], [409, 'host_not_ready']);
     assert.equal(calls.filter((c) => c.url === '/v1/payment_intents').length, before, 'no payment was even started');
     assert.equal((await query('select count(*)::int as n from experience_bookings where offer_id = $1', [o.id])).rows[0].n, 0, 'and no booking written');
+    // A new-model account off manual payouts, or with payouts off, is refused too: Stripe could pay the money out
+    // before Epic's release checks, or not be able to pay it out at all (Codex, 3 Oct 2026).
+    for (const set of ['stripe_payouts_manual = false', 'stripe_payouts_enabled = false']) {
+      await query(`update hosts set stripe_account_model = 'v2', stripe_payouts_manual = true, stripe_payouts_enabled = true where id = $1`, [h.id]);
+      await query(`update hosts set ${set} where id = $1`, [h.id]);
+      const x = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+      assert.deepEqual([x.status, x.body.error], [409, 'host_not_ready'], set);
+    }
   } finally { await srv.close(); }
 });
 

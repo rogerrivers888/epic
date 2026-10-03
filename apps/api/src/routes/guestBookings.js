@@ -457,10 +457,14 @@ async function restoreWaitlist(bookingId) {
 
 /**
  * Can a guest's card be charged to this host's account (L1)? An account made
- * the L1 way, that Stripe says can take card payments. An account from before
+ * the L1 way, that Stripe says can take card payments and pay out, on manual
+ * payouts. An account from before
  * this build took money on Epic's balance and is never charged to again.
  */
-export const hostCanBeCharged = (h) => Boolean(h?.stripe_account_id && h.stripe_account_model === 'v2' && h.stripe_charges_enabled);
+// Payouts on, and manual: on any other schedule Stripe could pay the balance out before Epic's release checks ran
+// (L3), and with payouts off the money could not reach the host at all (Codex, 3 Oct 2026).
+export const hostCanBeCharged = (h) => Boolean(h?.stripe_account_id && h.stripe_account_model === 'v2' && h.stripe_charges_enabled
+  && h.stripe_payouts_enabled && h.stripe_payouts_manual);
 
 /** A booking is on: the guest and the host are told. */
 async function confirmed(b, o, host) {
