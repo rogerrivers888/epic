@@ -272,9 +272,10 @@ router.get('/host/lanes/offers/:id', async (req, res, next) => {
 router.patch('/host/lanes/offers/:id', async (req, res, next) => {
   try {
     const { host, account, offer } = await myLaneOffer(req.params.id);
-    if (offer.state === 'in_review' || offer.state === 'live') {
-      // A published offer is changed through host management (its own brief); the set-up only edits drafts.
-      throw refuse(409, 'already_sent', offer.state === 'live' ? 'This one is out already.' : 'This one is with us for review. We’ll be back to you within 48 hours.');
+    // The set-up edits drafts only: an approved one waiting on Checked is what was approved (Codex, 2 Oct 2026),
+    // and a published one changes through its own page (E8).
+    if (offer.state !== 'draft') {
+      throw refuse(409, 'already_sent', offer.state === 'in_review' ? 'This one is with us for review. We’ll be back to you within 48 hours.' : offer.state === 'approved' ? 'This one is approved and goes live once Checked is done.' : 'This one is out already.');
     }
     const b = req.body ?? {};
     const patch = derive(laneBody(b, offer), offer);

@@ -655,9 +655,13 @@ router.get('/reports/money', requires('view_hosting'), async (req, res, next) =>
   try {
     const kind = kindOf(req.query.kind);
     const { rows } = await query(
+      // Net of refunds, as the streams are (Codex, 2 Oct 2026).
       `select to_char(date_trunc('month', b.created_at), 'YYYY-MM') as month, o.lane,
-              coalesce(sum(b.value_pence), 0)::int as value, coalesce(sum(b.fee_pence), 0)::int as epic, coalesce(sum(b.host_pence), 0)::int as host, count(*)::int as n
+              coalesce(sum(b.value_pence - coalesce(r.amount, 0)), 0)::int as value, coalesce(sum(b.fee_pence - coalesce(r.epic, 0)), 0)::int as epic,
+              coalesce(sum(b.host_pence - coalesce(r.host, 0)), 0)::int as host, count(*)::int as n
          from experience_bookings b join host_offers o on o.id = b.offer_id
+         left join lateral (select sum(p.amount_pence)::int as amount, sum(coalesce(p.epic_pence, 0))::int as epic, sum(coalesce(p.host_pence, 0))::int as host
+                              from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state in ('pending', 'succeeded')) r on true
         where b.payment_state in ('charged', 'partially_refunded', 'refunded') and b.created_at > now() - interval '12 months' and ($1::text is null or o.lane = $1)
         group by 1, 2 order by 1`,
       [kind],

@@ -554,7 +554,12 @@ router.post('/experiences/:id/waitlist', async (req, res, next) => {
 router.delete('/experiences/:id/waitlist', async (req, res, next) => {
   try {
     const { household } = await me();
-    const { rowCount } = await query(`update offer_waitlist set state = 'left' where offer_id = $1 and household_id = $2 and state in ('waiting', 'offered')`, [req.params.id, household.id]);
+    // Leaving one weekly session's list leaves only that one (Codex, 2 Oct 2026).
+    const sessionId = typeof req.query.session === 'string' && UUID.test(req.query.session) ? req.query.session : (typeof req.body?.sessionId === 'string' && UUID.test(req.body.sessionId) ? req.body.sessionId : null);
+    const { rowCount } = await query(
+      `update offer_waitlist set state = 'left' where offer_id = $1 and household_id = $2 and state in ('waiting', 'offered') and ($3::uuid is null or session_id = $3)`,
+      [req.params.id, household.id, sessionId],
+    );
     res.json({ left: rowCount > 0 });
   } catch (err) { next(err); }
 });
@@ -849,16 +854,19 @@ router.post('/booked/:id/happened', async (req, res, next) => {
     const { b, held } = await finishedBooking(req.params.id, household.id);
     const answer = ['yes', 'no', 'wrong'].includes(req.body?.answer) ? req.body.answer : null;
     if (!answer) throw refuse(400, 'answer', 'Yes, no, or something went wrong.');
-    const { rowCount } = await query(`update experience_bookings set confirmed_happened = $2, confirmed_at = now() where id = $1 and confirmed_happened is null`, [b.id, answer]);
-    if (!rowCount) throw refuse(409, 'answered', 'You’ve answered this one.');
-    if (answer !== 'yes') {
-      // "No" or "something went wrong" opens a complaint on the session; it holds the payout until it is sorted.
-      const last = held.at(-1);
-      await query(
-        `insert into hosting_complaints (booking_id, session_id, offer_id, host_id, household_id, kind, reason) values ($1, $2, $3, $4, $5, $6, $7)`,
-        [b.id, last?.id ?? null, b.offer_id, b.host_id, household.id, answer === 'no' ? 'host_no_show' : 'complaint', String(req.body?.reason ?? '').trim().slice(0, 2000) || null],
-      );
-    }
+    // The answer and the complaint it opens land together, so a payout can't go between them (Codex, 2 Oct 2026).
+    await withTransaction(async (c) => {
+      const { rowCount } = await c.query(`update experience_bookings set confirmed_happened = $2, confirmed_at = now() where id = $1 and confirmed_happened is null`, [b.id, answer]);
+      if (!rowCount) throw refuse(409, 'answered', 'You’ve answered this one.');
+      if (answer !== 'yes') {
+        // "No" or "something went wrong" opens a complaint on the session; it holds the payout until it is sorted.
+        const last = held.at(-1);
+        await c.query(
+          `insert into hosting_complaints (booking_id, session_id, offer_id, host_id, household_id, kind, reason) values ($1, $2, $3, $4, $5, $6, $7)`,
+          [b.id, last?.id ?? null, b.offer_id, b.host_id, household.id, answer === 'no' ? 'host_no_show' : 'complaint', String(req.body?.reason ?? '').trim().slice(0, 2000) || null],
+        );
+      }
+    });
     res.json({ recorded: answer });
   } catch (err) { next(err); }
 });
