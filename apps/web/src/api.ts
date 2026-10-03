@@ -6308,7 +6308,9 @@ export type GuestBooking = {
     /** A booking far ahead (L4): when the saved card is charged, how much, and whether that charge was refused. */
     later?: { chargeOn: string | null; pence: number; failed: boolean } | null;
     /** feeKeptPence: the cancellation fee Epic kept from this refund (L5); triggeredBy: who set it off. */
-    refunds: { pence: number; feeKeptPence?: number; triggeredBy?: 'guest' | 'host' | 'epic' | 'staff' | null; cause: string | null; state: string; at: string }[] };
+    refunds: { pence: number; feeKeptPence?: number; triggeredBy?: 'guest' | 'host' | 'epic' | 'staff' | null; cause: string | null; state: string; at: string;
+      /** When a refund went through — not when it was first written down (Codex, 3 Oct 2026). */
+      doneAt?: string | null }[] };
   after: { happened: string | null; rated: boolean; tipOpen: boolean; tipFee?: { pct: number; minPence: number } | null } | null;
   dropOff: boolean;
   /** A free guest account (not a member): Booked says the confirmation and calendar invite were emailed (G11). */

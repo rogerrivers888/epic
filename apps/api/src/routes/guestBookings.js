@@ -1435,7 +1435,7 @@ router.get('/booked/:id', async (req, res, next) => {
     const o = await repo.offerById(b.offer_id);
     const host = await repo.hostById(b.host_id);
     const { rows: kids } = await query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1 order by created_at', [b.id]);
-    const { rows: refunds } = await query(`select amount_pence, fee_kept_pence, triggered_by, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
+    const { rows: refunds } = await query(`select amount_pence, fee_kept_pence, triggered_by, cause, state, created_at, updated_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
     const live = b.sessionsList.filter((x) => x.held === 'booked' && x.state === 'scheduled');
     const firstAhead = live.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     const lastEnd = b.sessionsList.length ? new Date(Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime()))) : null;
@@ -1468,7 +1468,7 @@ router.get('/booked/:id', async (req, res, next) => {
         dateChange: changed.some((x) => !b.change_seen_at || new Date(x.changed_from.at) > new Date(b.change_seen_at)) ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
         money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy,
           // A booking far ahead (L4): when its card is charged and how much — or, refused, what is due now.
-          later: ['card_saved', 'charge_failed'].includes(b.payment_state) ? { chargeOn: b.charge_due_at, pence: laterAmounts(b).amountPence, failed: b.payment_state === 'charge_failed' } : null, refunds: refunds.map((r) => ({ pence: r.amount_pence, feeKeptPence: r.fee_kept_pence ?? 0, triggeredBy: r.triggered_by ?? null, cause: r.cause, state: r.state, at: r.created_at })) },
+          later: ['card_saved', 'charge_failed'].includes(b.payment_state) ? { chargeOn: b.charge_due_at, pence: laterAmounts(b).amountPence, failed: b.payment_state === 'charge_failed' } : null, refunds: refunds.map((r) => ({ pence: r.amount_pence, feeKeptPence: r.fee_kept_pence ?? 0, triggeredBy: r.triggered_by ?? null, cause: r.cause, state: r.state, at: r.created_at, doneAt: r.state === 'succeeded' ? r.updated_at : null })) },
         // The fee rule as the server will charge it, so the screen never shows a different one (Codex, 3 Oct 2026).
         after: lastEnd && lastEnd <= now ? { happened: b.confirmed_happened ?? null, rated: Boolean(b.rated_at), tipOpen: tipOpen(lastEnd, now), tipFee: await tipFeeRule() } : null,
         dropOff: o.parents === 'drop_off',

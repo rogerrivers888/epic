@@ -382,6 +382,23 @@ test('G11: the booking page says whether the account is a free guest one, so Boo
   } finally { await ms.close(); await vs.close(); }
 });
 
+test('a refund says the day it went through, not the day it was first written down', async () => {
+  const { o } = await anEvent({ firstIn: 3 });
+  const p = await aPerson();
+  const srv = await server(p.account);
+  try {
+    const made = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    const id = made.body.booking.id;
+    await query(`insert into hosting_payments (kind, booking_id, host_id, amount_pence, state, mode, created_at, updated_at)
+                 values ('refund', $1, $2, 500, 'succeeded', 'test', now() - interval '3 days', now() - interval '1 day'),
+                        ('refund', $1, $2, 300, 'pending', 'test', now() - interval '2 days', now() - interval '2 days')`, [id, o.host_id]);
+    const refunds = (await srv.get(`/api/booked/${id}`)).body.booking.money.refunds;
+    const done = refunds.find((r) => r.state === 'succeeded');
+    assert.ok(done.doneAt && new Date(done.doneAt) > new Date(done.at), 'the day it went through');
+    assert.equal(refunds.find((r) => r.state === 'pending').doneAt, null, 'a refund still waiting has no such day');
+  } finally { await srv.close(); }
+});
+
 test('after the event: did it happen (a complaint holds the payout), rate once, tip within a week', async () => {
   settings.forget();
   const { o, h } = await anEvent({ firstIn: 1 });

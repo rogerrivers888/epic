@@ -130,8 +130,8 @@ export function BookingPage({ id }: { id: string }) {
   } else if (calledOff) {
     const gone = b.money.refunds.filter((r) => r.state === 'succeeded');
     const back = gone.reduce((n, r) => n + r.pence, 0);
-    // The day the money went back: the latest refund's, in the screen's own "21 Sep".
-    const backOn = lastRefundAt(gone);
+    // The day the money went back: when the latest refund went through, in the screen's own "21 Sep".
+    const backOn = lastRefundAt(gone.map((r) => ({ at: r.doneAt ?? null })));
     const ga = b.goingAhead;
     blocks.push(<Notice key="off">{`Called off.${ga ? ` It needed ${ga.min}${ga.decidesOn ? ` by ${dayWords(ga.decidesOn)}` : ''} and had ${ga.booked}.` : ''}${back ? ` ${gbp(back)} went back to your card${backOn ? ` on ${shortDay(backOn)}` : ''}.` : ''}`}</Notice>);
   } else if (b.request?.state === 'asked') {
