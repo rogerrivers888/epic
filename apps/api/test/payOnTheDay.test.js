@@ -75,7 +75,7 @@ test('no card, or a card refused: the organiser is told, the problem is logged, 
   assert.equal((await query(`select count(*)::int as n from notifications where household_id = $1 and kind = 'organiser_fee_failed'`, [host.household_id])).rows[0].n, 1);
   assert.equal((await query('select state from host_offers where id = $1', [offer.id])).rows[0].state, 'live');
   // A card saved later: the refused fee is taken then, and the problem put right.
-  await query(`update hosts set fee_payment_method = 'pm_new', fee_card_saved_at = now() + interval '1 second' where id = $1`, [host.id]);
+  await query(`update hosts set fee_payment_method = 'pm_new', fee_card_saved_at = now() where id = $1`, [host.id]);
   assert.equal(await pod.retryOrganiserFees({ status: ready, charge: async () => ({ id: 'pi_late', status: 'succeeded' }) }), 1);
   assert.equal((await query(`select status from payment_problems where host_id = $1`, [host.id])).rows[0].status, 'resolved');
 });
@@ -130,8 +130,29 @@ test('a fee the card refused is tried on a new card under a new key, and the che
   const { rows: [h] } = await query('select * from hosts where id = $1', [host.id]);
   assert.ok(h.fee_card_failed_at);
   assert.equal(checklist({ visibility: 'private', money: 'direct', price_mode: 'same_each' }, { host: h, account: {} }).find((i) => i.key === 'fee_card').done, false);
-  await query(`update hosts set fee_payment_method = 'pm_new2', fee_card_saved_at = now() + interval '1 second', fee_card_failed_at = null where id = $1`, [host.id]);
+  await query(`update hosts set fee_payment_method = 'pm_new2', fee_card_saved_at = now(), fee_card_failed_at = null where id = $1`, [host.id]);
   await pod.retryOrganiserFees({ status: ready, charge: async (a) => { if (a.sessionId === session.id) keys.push(a.attempt); return { id: `pi_ok_${a.feeId}`, status: 'succeeded' }; } });
   assert.deepEqual(keys, [0, 1], 'a new attempt, so a new key');
   assert.equal((await query(`select state from organiser_fees where session_id = $1`, [session.id])).rows[0].state, 'paid');
+});
+
+test('a fee the bank is still processing stays pending until Stripe settles it; a refused card is tried once', async () => {
+  settings.forget();
+  const { session, host } = await anEvent({ startsInHours: 8 });
+  await pod.chargeUpfrontFees({ status: ready, charge: async (a) => (a.sessionId === session.id ? { id: 'pi_proc', status: 'processing' } : { id: `pi_${a.feeId}`, status: 'succeeded' }) });
+  let [f] = (await query(`select * from organiser_fees where session_id = $1`, [session.id])).rows;
+  assert.deepEqual([f.state, f.stripe_payment_intent], ['pending', 'pi_proc']);
+  assert.equal((await query(`select count(*)::int as n from notifications where household_id = $1 and kind = 'organiser_fee_failed'`, [host.household_id])).rows[0].n, 0, 'not told it was declined');
+  await pod.applyOrganiserFeeIntent({ id: 'pi_proc', status: 'succeeded', metadata: { epic_fee_id: f.id } });
+  [f] = (await query(`select state from organiser_fees where session_id = $1`, [session.id])).rows;
+  assert.equal(f.state, 'paid');
+
+  const other = await anEvent({ startsInHours: 8 });
+  await pod.chargeUpfrontFees({ status: ready, charge: async (a) => { if (a.sessionId === other.session.id) throw Object.assign(new Error('no'), { code: 'stripe_refused', detail: 'card_declined' }); return { id: `pi_${a.feeId}`, status: 'succeeded' }; } });
+  await query(`update hosts set fee_payment_method = 'pm_other_new', fee_card_saved_at = now(), fee_card_failed_at = null where id = $1`, [other.host.id]);
+  let tries = 0;
+  const refuse = async (a) => { if (a.sessionId === other.session.id) { tries += 1; throw Object.assign(new Error('no'), { code: 'stripe_refused', detail: 'card_declined' }); } return { id: `pi_${a.feeId}_${a.attempt}`, status: 'succeeded' }; };
+  await pod.retryOrganiserFees({ status: ready, charge: refuse });
+  await pod.retryOrganiserFees({ status: ready, charge: refuse });
+  assert.equal(tries, 1, 'the new card once, not every tick');
 });

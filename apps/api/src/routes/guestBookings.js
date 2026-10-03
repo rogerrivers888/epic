@@ -586,6 +586,7 @@ export async function applyPaymentIntent(pi) {
   const bookingId = pi?.metadata?.epic_booking_id;
   if (pi?.metadata?.epic_kind === 'tip') return applyTipIntent(pi);
   if (pi?.metadata?.epic_kind === 'party_change') return applyPartyIntent(pi);
+  if (pi?.metadata?.epic_kind === 'organiser_fee') return (await import('../sources/payOnTheDay.js')).applyOrganiserFeeIntent(pi);
   if (!bookingId || !UUID.test(bookingId)) return null;
   // The PaymentIntent was read back from Stripe, so its metadata is Stripe's word. Stripe can answer before our own
   // write of the intent's id has landed: a booking with no intent yet takes this one (Codex, 2 Oct 2026).
@@ -992,6 +993,17 @@ export async function applyPartyIntent(pi) {
   await query('update booking_party_changes set stripe_payment_intent = $2 where id = $1 and stripe_payment_intent is null', [changeId, pi.id]);
   return withTransaction(async (c) => {
     const { rows: [x] } = await c.query('select * from booking_party_changes where id = $1 and stripe_payment_intent = $2 for update', [changeId, pi.id]);
+    // Paid after the change had been let go (expired, or failed): given straight back from its own payment.
+    if (x && x.state !== 'pending' && x.state !== 'done' && pi.status === 'succeeded') {
+      const { rows: [bk] } = await c.query('select offer_id, host_id, household_id from experience_bookings where id = $1', [x.booking_id]);
+      await c.query(`update hosting_payments set state = 'succeeded', updated_at = now() where stripe_ref = $1 and kind = 'charge'`, [pi.id]);
+      await c.query(
+        `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, epic_pence, host_pence, state, mode, cause, idem_key, refund_of, triggered_by, refund_mode)
+         values ('refund', $1, $2, $3, $4, $5, $6, $7, 'pending', 'test', 'party_paid_after_cancel', $8, $9, 'epic', 'proportional')
+         on conflict (idem_key) where idem_key is not null do nothing`,
+        [x.booking_id, bk?.offer_id ?? null, bk?.host_id ?? null, bk?.household_id ?? null, x.charge_pence, x.fee_pence, x.charge_pence - x.fee_pence, `party_after_cancel:${x.id}`, pi.id]);
+      return x.id;
+    }
     if (!x || x.state !== 'pending') return x?.id ?? null;
     if (pi.status === 'succeeded') {
       const { rows: [bk] } = await c.query('select * from experience_bookings where id = $1 for update', [x.booking_id]);
@@ -1029,8 +1041,10 @@ export async function expirePartyChanges({ now = new Date(), cancel = stripe.can
   for (const x of rows) {
     if (x.stripe_payment_intent) {
       const pi = await read(x.stripe_payment_intent).catch(() => null);
-      if (pi?.status === 'succeeded') { await applyPartyIntent(pi); continue; }
-      if (pi && pi.status !== 'canceled') { try { await cancel(x.stripe_payment_intent, { idempotencyKey: `party-cancel-${x.id}` }); } catch { continue; } }
+      // Stripe can't be read: nothing is decided — the payment may still go through (Codex, 3 Oct 2026).
+      if (!pi) continue;
+      if (pi.status === 'succeeded') { await applyPartyIntent(pi); continue; }
+      if (pi.status !== 'canceled') { try { await cancel(x.stripe_payment_intent, { idempotencyKey: `party-cancel-${x.id}` }); } catch { continue; } }
     }
     await withTransaction(async (c) => {
       const { rows: [again] } = await c.query(`select * from booking_party_changes where id = $1 and state = 'pending' for update`, [x.id]);

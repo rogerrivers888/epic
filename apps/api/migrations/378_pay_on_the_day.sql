@@ -38,6 +38,9 @@ create table if not exists organiser_fees (
   failure               text,
   -- A definite refusal moves the next try to a new idempotency key (a new card is a new request).
   attempt               integer not null default 0,
+  failed_at             timestamptz,
+  -- The card it was refused on: tried again only on a different one.
+  failed_card           text,
   mode                  text not null default 'test',
   created_at            timestamptz not null default now(),
   paid_at               timestamptz,

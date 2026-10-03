@@ -1323,3 +1323,23 @@ test('a refund that fits in a later payment for more places is taken from that p
     assert.deepEqual(mine.map((f) => [f.get('payment_intent'), f.get('amount')]), [[r.body.pay.paymentIntent, '1900']]);
   } finally { await srv.close(); }
 });
+
+test('more places: Stripe unreadable at expiry leaves the change pending; paid after it was let go is refunded; its chargeback holds the booking', async () => {
+  settings.forget();
+  const { srv, id } = await aPaidBooking({ adults: 1, max: 6, firstIn: 30 });
+  try {
+    const r = await srv.send('POST', `/api/booked/${id}/party`, { adults: 2 });
+    const later = new Date(Date.now() + 31 * 60_000);
+    await guest.expirePartyChanges({ now: later, read: async () => { throw new Error('down'); } });
+    assert.equal((await query(`select state from booking_party_changes where booking_id = $1`, [id])).rows[0].state, 'pending');
+    await guest.expirePartyChanges({ now: later, read: async () => ({ status: 'requires_payment_method' }), cancel: async () => ({}) });
+    assert.equal((await query(`select state from booking_party_changes where booking_id = $1`, [id])).rows[0].state, 'expired');
+    pays(r.body.pay.paymentIntent);
+    await guest.applyPaymentIntent(await (await fetch(`${process.env.STRIPE_API_BASE}/v1/payment_intents/${r.body.pay.paymentIntent}`, { headers: { authorization: 'Bearer x' } })).json());
+    assert.equal((await query(`select count(*)::int as n from hosting_payments where refund_of = $1 and cause = 'party_paid_after_cancel'`, [r.body.pay.paymentIntent])).rows[0].n, 1);
+    const { markDispute } = await import('../src/repositories/hostingLedger.js');
+    await query(`insert into hosting_payments (kind, booking_id, amount_pence, state, stripe_ref, mode) values ('charge', $1, 2000, 'succeeded', 'pi_extra_dispute', 'test')`, [id]);
+    await markDispute({ paymentIntent: 'pi_extra_dispute', open: true });
+    assert.equal((await query('select dispute_state from experience_bookings where id = $1', [id])).rows[0].dispute_state, 'open');
+  } finally { await srv.close(); }
+});

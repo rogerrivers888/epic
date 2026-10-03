@@ -107,16 +107,37 @@ async function chargeRow(row, { host, charge = stripe.organiserFeeCharge }) {
     await problems.resolve({ dedupeKey: `organiser_fee:${row.id}`, resolution: 'Paid', by: 'stripe' });
     return 'paid';
   }
+  // The bank hasn't answered yet: pending, and Stripe's event settles it (applyOrganiserFeeIntent) (Codex, 3 Oct 2026).
+  if (pi.status === 'processing') {
+    await query(`update organiser_fees set stripe_payment_intent = $2 where id = $1`, [row.id, pi.id]);
+    return null;
+  }
   return failRow(row, host, pi.last_payment_error?.code ?? pi.status, pi.id);
 }
 
 async function failRow(row, host, code, piId = null) {
   // A definite refusal: the next try (a new card) is a new request under a new key; and the checklist asks for a card again.
-  await query(`update organiser_fees set state = 'failed', failure = $2, stripe_payment_intent = coalesce($3, stripe_payment_intent), attempt = attempt + case when $2 = 'no_card' then 0 else 1 end where id = $1`, [row.id, String(code).slice(0, 80), piId]);
+  await query(`update organiser_fees set state = 'failed', failed_at = now(), failed_card = $4, failure = $2, stripe_payment_intent = coalesce($3, stripe_payment_intent), attempt = attempt + case when $2 = 'no_card' then 0 else 1 end where id = $1`, [row.id, String(code).slice(0, 80), piId, host?.fee_payment_method ?? null]);
   if (code !== 'no_card') await query('update hosts set fee_card_failed_at = now() where id = $1', [row.host_id]);
   await problems.record({ kind: 'payment_failed', dedupeKey: `organiser_fee:${row.id}`, amountPence: row.fee_pence, hostId: row.host_id, offerId: row.offer_id, householdId: host.household_id, stripeRef: piId, detail: { for: 'organiser_fee', kind: row.kind, code }, reopen: true });
   await notifications.notify({ householdId: host.household_id, kind: 'organiser_fee_failed', title: 'Epic’s fee for your event didn’t go through', body: code === 'no_card' ? 'Add a card for Epic’s fee.' : 'Your card was declined. Update it from the event.', link: `/host/offers/${row.offer_id}/publish?sheet=fee_card`, dedupeKey: `organiser_fee_failed:${row.id}` }).catch(() => null);
   return 'failed';
+}
+
+/** Stripe's word on a fee that was processing: paid, or refused (its event, read back). */
+export async function applyOrganiserFeeIntent(pi) {
+  const feeId = pi?.metadata?.epic_fee_id;
+  if (!feeId) return null;
+  const { rows: [row] } = await query(`select * from organiser_fees where id = $1::uuid and state = 'pending'`, [feeId]).catch(() => ({ rows: [] }));
+  if (!row) return null;
+  if (pi.status === 'succeeded') {
+    await query(`update organiser_fees set state = 'paid', stripe_payment_intent = $2, paid_at = now(), failure = null where id = $1 and state = 'pending'`, [row.id, pi.id]);
+    await problems.resolve({ dedupeKey: `organiser_fee:${row.id}`, resolution: 'Paid', by: 'stripe' });
+  } else if (pi.status === 'requires_payment_method' || pi.status === 'canceled') {
+    const { rows: [host] } = await query('select * from hosts where id = $1', [row.host_id]);
+    await failRow(row, host, pi.last_payment_error?.code ?? pi.status, pi.id);
+  }
+  return row.id;
 }
 
 /**
@@ -157,7 +178,9 @@ export async function retryOrganiserFees({ charge = stripe.organiserFeeCharge, s
   if (!status().ready) return 0;
   const { rows } = await query(
     `select f.* from organiser_fees f join hosts h on h.id = f.host_id
-      where f.state = 'pending' or (f.state = 'failed' and h.fee_card_saved_at > coalesce(f.paid_at, f.created_at)) limit 50`);
+      where (f.state = 'pending' and f.stripe_payment_intent is null)
+         -- Each card once: tried again only on a different card from the one it was refused on (Codex, 3 Oct 2026).
+         or (f.state = 'failed' and h.fee_payment_method is not null and h.fee_payment_method is distinct from f.failed_card) limit 50`);
   let n = 0;
   for (const row of rows) {
     const { rows: [host] } = await query('select * from hosts where id = $1', [row.host_id]);

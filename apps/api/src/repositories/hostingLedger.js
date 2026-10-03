@@ -288,7 +288,11 @@ export async function markPayoutOutcome({ stripePayout, accountId, paid, failure
 export async function markDispute({ paymentIntent, open, status = null }) {
   const state = open ? 'open' : status === 'won' ? 'won' : status === 'lost' ? 'lost' : null;
   if (!state) return null;
-  const { rows: [row] } = await query('update experience_bookings set dispute_state = $2 where stripe_payment_intent = $1 returning id', [paymentIntent, state]);
+  // The booking's own payment, or any charge on the ledger for it (a payment for more places) (Codex, 3 Oct 2026).
+  const { rows: [row] } = await query(
+    `update experience_bookings set dispute_state = $2
+      where stripe_payment_intent = $1 or id = (select booking_id from hosting_payments where stripe_ref = $1 and kind = 'charge' limit 1)
+      returning id`, [paymentIntent, state]);
   return row ?? null;
 }
 
