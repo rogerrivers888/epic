@@ -835,7 +835,7 @@ router.post('/host/lanes/verify', async (req, res, next) => {
     // to the account's Person (create account → passport and selfie → Stripe's form). A free-event host gets none (L6).
     let me2 = host;
     const offerId = str(req.body?.offerId, 40);
-    const offer = offerId && /^[0-9a-f-]{36}$/i.test(offerId) ? await repo.offerById(offerId) : null;
+    const offer = offerId && UUID_RE.test(offerId) ? await repo.offerById(offerId) : null;
     if (offer && offer.host_id === host.id && paidThroughEpic(offer) && stripe.stripeStatus().ready) {
       await lockClient.query('select pg_advisory_lock(hashtext($1))', [`host-payouts:${host.id}`]);
       try { me2 = await ensureStripeAccount(await repo.hostById(host.id), { account, household }); }

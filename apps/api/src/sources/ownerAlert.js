@@ -22,11 +22,12 @@ export async function ownerEmail() {
 }
 
 /**
- * Send one alert, once per `key`. Checked and written down under a lock on the
- * key, in one transaction with the send: two deliveries of the same event at
- * once send one e-mail, and a send that fails leaves nothing recorded, so the
- * next delivery tries again (Codex, 3 Oct 2026). `subjectKind`/`subjectId` say
- * what it is about, for the change log.
+ * Send one alert, once per `key`. The key is claimed first, in a short
+ * transaction under a lock on it, so two deliveries of the same event at once
+ * send one e-mail; the mail goes after that commits, so no database
+ * connection is held while it is sent; a send that fails gives the claim back
+ * and throws, so the caller's event is retried (Codex, 3 Oct 2026).
+ * `subjectKind`/`subjectId` say what it is about, for the change log.
  */
 export async function alertOwner({ key, subject, text, subjectKind = 'host', subjectId }, { send = sendMail, configured = mailConfigured } = {}) {
   const to = await ownerEmail();
@@ -34,15 +35,20 @@ export async function alertOwner({ key, subject, text, subjectKind = 'host', sub
     console.error(`epic-api: owner alert not sent (${!to ? 'no owner account' : 'mail not configured'}) — ${subject}`);
     return { sent: false, reason: !to ? 'no_owner' : 'no_mail' };
   }
-  return withTransaction(async (c) => {
+  const claimed = await withTransaction(async (c) => {
     await c.query('select pg_advisory_xact_lock(hashtext($1))', [`owner-alert:${key}`]);
     const { rows: [seen] } = await c.query(`select 1 from hosting_changes where field = 'owner_alert' and after->>'key' = $1 limit 1`, [key]);
-    if (seen) return { sent: false, reason: 'already_sent' };
+    if (seen) return false;
     await logChange({ subjectKind, subjectId: String(subjectId), field: 'owner_alert', after: { key, subject }, byLabel: 'epic' }, c);
-    // sendMail answers { sent: false } rather than throwing when the mail service turns it down: that is a failure too,
-    // so the record is rolled back and the caller's event is retried (Codex, 3 Oct 2026).
-    const r = await send({ to, subject, text, purpose: 'owner_alert' });
-    if (r && r.sent === false) throw Object.assign(new Error(`owner alert not delivered: ${r.reason ?? r.error ?? 'refused'}`), { code: 'owner_alert_not_sent' });
-    return { sent: true };
+    return true;
   });
+  if (!claimed) return { sent: false, reason: 'already_sent' };
+  let r;
+  try { r = await send({ to, subject, text, purpose: 'owner_alert' }); } catch (err) { r = { sent: false, reason: err.message }; }
+  // sendMail answers { sent: false } rather than throwing when the mail service turns it down: a failure too.
+  if (r && r.sent === false) {
+    await query(`delete from hosting_changes where field = 'owner_alert' and after->>'key' = $1`, [key]);
+    throw Object.assign(new Error(`owner alert not delivered: ${r.reason ?? r.message ?? 'refused'}`), { code: 'owner_alert_not_sent' });
+  }
+  return { sent: true };
 }
