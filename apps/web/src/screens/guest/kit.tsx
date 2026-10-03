@@ -348,7 +348,8 @@ export function BookingRows({ items }: { items: BookingCard[] }) {
             <Text style={tx(12.5, '400', INK_MUTED)} numberOfLines={1}>{c.line}</Text>
             <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
               <Text style={[{ paddingVertical: 3, paddingHorizontal: 7, backgroundColor: c.chipBg }, tx(11.5, '700'), nowrap]}>{c.chip}</Text>
-              {c.extra ? <Text style={[tx(12, '700', DEEP_GREEN), nowrap]}>{c.extra}</Text> : null}
+              {/* Names can run long: one line, cut with an ellipsis, never past the row (390px). */}
+              {c.extra ? <Text style={[tx(12, '700', DEEP_GREEN), nowrap, { flexShrink: 1, minWidth: 0 }]} numberOfLines={1}>{c.extra}</Text> : null}
             </View>
           </View>
           <Icon name="more" size={16} color={INK_MUTED} strokeWidth={2.4} />

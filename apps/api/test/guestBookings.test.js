@@ -1375,3 +1375,159 @@ test('more places: Stripe unreadable at expiry leaves the change pending; paid a
     assert.equal((await query('select dispute_state from experience_bookings where id = $1', [id])).rows[0].dispute_state, 'open');
   } finally { await srv.close(); }
 });
+
+// --- guest side batch B ------------------------------------------------------
+
+test('G4/G30: a reopened event page knows its own place on the waiting list', async () => {
+  settings.forget();
+  const { o } = await anEvent({ max: 1, waitlist: true });
+  const [a, b, c] = [await aPerson(), await aPerson(), await aPerson()];
+  const { openSession } = await import('../src/auth.js');
+  const { token } = await openSession('phone', c.account.id, 'device', 'link');
+  const [sa, sb, sc] = [await server(a.account), await server(b.account), await server(c.account)];
+  try {
+    await sa.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    await sb.send('POST', `/api/experiences/${o.id}/waitlist`, { party: 1 });
+    const before = await sc.get(`/api/experiences/${o.id}/booking/options`, { authorization: `Bearer ${token}` });
+    assert.deepEqual(before.body.waitlist.mine, [], 'not on it yet: Join the waiting list');
+    assert.equal((await sc.send('POST', `/api/experiences/${o.id}/waitlist`, { party: 1 })).body.position, 2);
+    const after = await sc.get(`/api/experiences/${o.id}/booking/options`, { authorization: `Bearer ${token}` });
+    assert.deepEqual(after.body.waitlist.mine, [{ sessionId: null, position: 2, state: 'waiting' }], '"You’re #2 on the list", read back');
+    // Signed out, the page can't know whose place it is.
+    assert.equal((await sc.get(`/api/experiences/${o.id}/booking/options`)).body.waitlist.mine.length, 0);
+    // B leaves: C moves up.
+    await sb.send('DELETE', `/api/experiences/${o.id}/waitlist`, {});
+    assert.equal((await sc.get(`/api/experiences/${o.id}/booking/options`, { authorization: `Bearer ${token}` })).body.waitlist.mine[0].position, 1);
+  } finally { await sa.close(); await sb.close(); await sc.close(); }
+});
+
+test('G14 and the booking page: the party by name, grown-ups too', async () => {
+  const { o } = await anEvent({ ageMin: 3, ageMax: 99 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, {
+      when: { kind: 'whole' },
+      party: { adults: 2, adultNames: ['Priya', '  '], children: [{ name: 'Ava', age: 7 }, { name: 'Ravi', age: 4 }] },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const card = (await srv.get('/api/booked')).body.upcoming.find((x) => x.id === r.body.booking.id);
+    assert.deepEqual(card.who, ['Priya', 'Ava', 'Ravi'], 'a blank name is no name');
+    const page = (await srv.get(`/api/booked/${r.body.booking.id}`)).body.booking;
+    assert.deepEqual(page.who.adults, [{ name: 'Priya' }, { name: null }]);
+    assert.deepEqual(page.who.children.map((k) => k.name), ['Ava', 'Ravi']);
+    assert.equal(page.similar, null, 'only a booking that didn’t happen points elsewhere');
+    // Never more names than grown-ups.
+    const r2 = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1, adultNames: ['Dev', 'Extra'] } });
+    assert.deepEqual((await srv.get(`/api/booked/${r2.body.booking.id}`)).body.booking.who.adults, [{ name: 'Dev' }]);
+    assert.deepEqual(guest.partyNames(null), []);
+  } finally { await srv.close(); }
+});
+
+test('G17 and G28: a booking called off, or an Ask to book declined, shows similar events nearby from other hosts', async () => {
+  settings.forget();
+  const place = async (ev, lat, lng, category = 'pottery') => query(`update host_offers set what_category = $2, what_label = 'Pottery class', venue_lat = $3, venue_lng = $4 where id = $1`, [ev.o.id, category, lat, lng]);
+  const off = await anEvent({ firstIn: 3 });
+  const ask = await anEvent({ lane: 'onrequest' });
+  const near = await anEvent({ firstIn: 4 });
+  const far = await anEvent({ firstIn: 4 });
+  const unlike = await anEvent({ firstIn: 4 });
+  await place(off, 51.4, -0.62); await place(ask, 51.4, -0.62); await place(near, 51.41, -0.6);
+  await place(far, 53.48, -2.24); await place(unlike, 51.41, -0.6, 'yoga');
+  await query(`update host_offers set what_label = 'Yoga' where id = $1`, [unlike.o.id]);
+  const a = await aPerson();
+  const srv = await server(a.account);
+  const hostSrv = await server(ask.host.account);
+  try {
+    const r = await srv.send('POST', `/api/experiences/${off.o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 } });
+    await query(`update experience_bookings set state = 'cancelled', cancel_cause = 'called_off', cancelled_by = 'epic' where id = $1`, [r.body.booking.id]);
+    const page = (await srv.get(`/api/booked/${r.body.booking.id}`)).body.booking;
+    assert.equal(page.chip, 'called_off');
+    const ids = page.similar.map((x) => x.offerId);
+    assert.ok(ids.includes(near.o.id), 'like it, and near');
+    assert.ok(!ids.includes(far.o.id), 'Manchester is not nearby');
+    assert.ok(!ids.includes(unlike.o.id), 'yoga is not like pottery');
+    assert.ok(!ids.includes(off.o.id), 'never itself');
+
+    const day = (await srv.get(`/api/experiences/${ask.o.id}/booking/options`)).body.slots[0];
+    const q = await srv.send('POST', `/api/experiences/${ask.o.id}/booking`, { when: { kind: 'request', date: day.date, time: day.times[0], lengthMin: 60 }, party: { adults: 1 } });
+    assert.equal((await srv.get(`/api/booked/${q.body.booking.id}`)).body.booking.similar, null, 'still asked: nothing else yet');
+    assert.equal((await hostSrv.send('POST', `/api/host/lanes/requests/${q.body.booking.id}/decline`, {})).status, 200);
+    const declined = (await srv.get(`/api/booked/${q.body.booking.id}`)).body.booking;
+    assert.ok(declined.similar.some((x) => x.offerId === near.o.id), 'Similar hosts nearby');
+    assert.ok(declined.similar.every((x) => x.offerId !== ask.o.id));
+    // With no point to measure from, nothing is called near.
+    await query(`update host_offers set venue_lat = null, venue_lng = null where id = $1`, [ask.o.id]);
+    assert.deepEqual((await srv.get(`/api/booked/${q.body.booking.id}`)).body.booking.similar, []);
+  } finally { await srv.close(); await hostSrv.close(); }
+});
+
+test('What you told the host: every question the host asked, from the host’s own lists, until 24 hours before', async () => {
+  const { o } = await anEvent({ firstIn: 5 });
+  await query(`update host_offers set guest_questions = $2::jsonb where id = $1`, [o.id, JSON.stringify({
+    diet: { on: true, ticks: ['vegan', 'halal'] }, plusOne: { on: true },
+    bring: { on: true, items: [{ id: 'i1', name: 'Salad' }, { id: 'i2', name: 'Bread' }] },
+    stay: { on: true, places: [{ id: 'p1', name: 'The barn' }] },
+  })]);
+  const [a, b] = [await aPerson(), await aPerson()];
+  const [sa, sb] = [await server(a.account), await server(b.account)];
+  try {
+    await sb.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, answers: { bring: 'Bread' } });
+    const r = await sa.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 1 }, answers: { dietary: ['Vegan'] } });
+    const id = r.body.booking.id;
+    const page = (await sa.get(`/api/booked/${id}`)).body.booking;
+    assert.equal(page.asked.diet.on, true, 'the host’s questions, so the edit asks the same');
+    assert.deepEqual(page.taken, ['Bread'], 'what somebody else is bringing');
+    const edit = (answers) => sa.send('PATCH', `/api/booked/${id}/answers`, { answers });
+    const ok = await edit({ dietary: ['halal', 'Vegan'], plusOne: true, bring: 'Salad', stay: 'The barn', note: ' Arriving late ' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.deepEqual(ok.body.answers, { dietary: ['Halal', 'Vegan'], plusOne: true, bring: 'Salad', stay: 'The barn', note: 'Arriving late' });
+    assert.equal((await edit({ dietary: ['Vegetarian'] })).status, 400, 'not on the host’s list');
+    assert.equal((await edit({ bring: 'Bread' })).body.error, 'taken', 'somebody else is bringing that');
+    assert.equal((await edit({ bring: 'Cake' })).status, 400);
+    assert.equal((await edit({ stay: 'A tent' })).status, 400);
+    assert.deepEqual((await edit({ plusOne: false, note: '' })).body.answers, {}, 'taken back: nothing told');
+    assert.deepEqual((await sa.get(`/api/booked/${id}`)).body.booking.answers, {});
+    // Unasked: no plus-one.
+    await query(`update host_offers set guest_questions = '{}'::jsonb where id = $1`, [o.id]);
+    assert.equal((await edit({ plusOne: true })).status, 400);
+    assert.equal((await edit({ dietary: 'Vegetarian' })).body.answers.dietary, 'Vegetarian', 'no list set: the usual six');
+    // Inside 24 hours: refused by the server, whatever the screen shows.
+    const soon = new Date(Date.now() + 20 * 3_600_000);
+    await query(`update offer_sessions set on_date = $2, starts_at = $3, ends_at = null where offer_id = $1`, [o.id, localDay(soon, 'Europe/London'), soon.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })]);
+    assert.equal((await edit({ note: 'late' })).status, 409);
+    assert.equal((await sa.get(`/api/booked/${id}`)).body.booking.answersEditable, false);
+  } finally { await sa.close(); await sb.close(); }
+});
+
+test('What you told the host on an Ask to book not answered yet: until 24 hours before the slot asked for', async () => {
+  const { o } = await anEvent({ lane: 'onrequest' });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const slots = (await srv.get(`/api/experiences/${o.id}/booking/options`)).body.slots;
+    const day = slots[slots.length - 1];
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'request', date: day.date, time: day.times[0], lengthMin: 60 }, party: { adults: 1 } });
+    assert.equal((await srv.get(`/api/booked/${r.body.booking.id}`)).body.booking.answersEditable, true);
+    assert.equal((await srv.send('PATCH', `/api/booked/${r.body.booking.id}/answers`, { answers: { note: 'Hello' } })).status, 200);
+  } finally { await srv.close(); }
+});
+
+test('G22: a booking’s Receipt is Settings › Payments narrowed to that booking, asked of the database', async () => {
+  settings.forget();
+  const { o } = await anEvent({ price: 2500, priceMode: 'same_each' });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const one = await paidBooking(srv, o, { kind: 'whole' });
+    const two = await paidBooking(srv, o, { kind: 'whole' });
+    assert.equal((await srv.get('/api/payments')).body.payments.length, 2);
+    const mine = await srv.get(`/api/payments?booking=${one}`);
+    assert.deepEqual(mine.body.payments.map((p) => p.bookingId), [one]);
+    assert.notEqual(one, two);
+    assert.equal((await srv.get('/api/payments?booking=not-a-uuid')).body.payments.length, 2, 'a malformed id narrows nothing');
+    const other = await aPerson();
+    const os = await server(other.account);
+    try { assert.equal((await os.get(`/api/payments?booking=${one}`)).body.payments.length, 0, 'never somebody else’s'); } finally { await os.close(); }
+  } finally { await srv.close(); }
+});

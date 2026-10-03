@@ -1042,7 +1042,12 @@ export const paths = {
   // `l` is the host's own link token: a booking that arrives with it is the
   // host's own (the 5% host-link fee), so the host's share carries it.
   experience: (id: string, opts?: { l?: string | null }) => buildHref(['experiences', id], { l: opts?.l ?? null }),
-  experienceBook: (id: string) => buildHref(['experiences', id, 'book']),
+  /**
+   * The booking screen. `date` and `time` preselect an On request slot ("Other times with Kate", G28); `session`
+   * is a weekly session held from the waiting list (G18). Only what is set is written down.
+   */
+  experienceBook: (id: string, q: { date?: string | null; time?: string | null; session?: string | null } = {}) =>
+    buildHref(['experiences', id, 'book'], { date: q.date ?? null, time: q.time ?? null, session: q.session ?? null }),
   experienceWhere: (id: string) => buildHref(['experiences', id, 'where']),
   booking: (id: string) => buildHref(['bookings', id]),
   messages: () => '/messages',
@@ -1104,6 +1109,8 @@ export const paths = {
   },
   setup: (step?: number) => (step && step > 1 ? `/setup?step=${step}` : '/setup'),
   settings: (section?: SettingsSection) => (section && section !== 'preferences' ? buildHref(['settings', section]) : '/settings'),
+  /** A booking's receipt: Settings › Payments narrowed to that one booking (G22, from the booking page's Receipt). */
+  receipt: (bookingId: string) => buildHref(['settings', 'payments'], { booking: bookingId }),
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),
   admin: (screen: AdminScreen) => buildHref(['admin', screen]),
   /** Actions, narrowed to one area; All is the default and is not written down. */

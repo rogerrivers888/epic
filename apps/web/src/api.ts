@@ -2840,7 +2840,8 @@ export const api = {
   guestRate: (id: string, body: { stars: number; hostStars?: number | null; text?: string | null; byProxy?: boolean }) => post<{ id: string }>(`/api/booked/${encodeURIComponent(id)}/rate`, body),
   guestTipPaid: (id: string) => post<{ state: string }>(`/api/booked/${encodeURIComponent(id)}/tip/payment`, {}),
   guestTip: (id: string, amountPence: number) => post<{ tip: { id: string; amountPence: number; feePence: number; totalPence: number }; pay: { clientSecret: string | null; paymentIntent: string } }>(`/api/booked/${encodeURIComponent(id)}/tip`, { amountPence }),
-  guestPayments: () => request<{ payments: GuestPayment[]; capped: boolean }>('/api/payments'),
+  /** Every payment, or (`booking`) that one booking's, for its Receipt. */
+  guestPayments: (booking?: string | null) => request<{ payments: GuestPayment[]; capped: boolean }>(booking ? `/api/payments?booking=${encodeURIComponent(booking)}` : '/api/payments'),
   guestMessages: () => request<{ threads: { offerId: string; bookingId: string | null; topicId: string | null; title: string | null; host: string; photo: string | null; last: string; at: string; unread: number }[]; unread: number; capped: boolean }>('/api/messages'),
   eventsNear: (p: { lat: number; lng: number; minutes: number; ref?: string; q?: string }) => request<{ events: EventNear[]; estimated: boolean; minutes: number; capped: boolean }>(`/api/events/near${qs(p)}`),
   paymentsConfig: () => request<{ ready: boolean; mode: 'test' | 'live' | null; publishableKey: string | null; note: string | null }>('/api/payments/config'),
@@ -6274,12 +6275,15 @@ export type GuestOptions = {
     groups: { dropIn: { pct: number; min: number } | null; bookAhead: { pct: number; min: number } | null }; throughEpic: boolean };
   who: { ageMin: number | null; ageMax: number | null; partyMax: number | null; dropOff: boolean; adultsOnly: boolean };
   questions: Record<string, any>; refundWords: string | null;
-  waitlist: { on: boolean; offerHours: number | null; offeredUntil?: string | null; offeredParty?: number | null; offeredSession?: string | null }; askWindowHours: number | null;
+  waitlist: { on: boolean; offerHours: number | null; offeredUntil?: string | null; offeredParty?: number | null; offeredSession?: string | null;
+    /** This household's own places on the list, each with where it stands (G4, G30: "You're #3 on the list"). */
+    mine?: { sessionId: string | null; position: number; state: 'waiting' | 'offered' }[] }; askWindowHours: number | null;
 };
 export type GuestChild = { name?: string; age?: number | null; dob?: string | null; emergencyContact?: string | null; memberId?: string | null };
 export type GuestBookBody = {
   when: { kind: 'whole' | 'drop_in' | 'book_ahead' | 'request'; sessionIds?: string[]; date?: string; time?: string; lengthMin?: number };
-  party: { adults: number; children: GuestChild[]; adultConfirmed?: boolean };
+  /** adultNames: the grown-ups by name, in order; a null is one not named (the web guest's "You"). */
+  party: { adults: number; adultNames?: (string | null)[]; children: GuestChild[]; adultConfirmed?: boolean };
   answers?: Record<string, unknown>; linkToken?: string | null; inviteToken?: string | null;
 };
 export type GuestQuote = { lines: { label: string; each: number; count: number; pence: number }[]; grossPence: number; discountPence: number; valuePence: number; numbers: { nowEach: number; decidesOn: string | null } | null; hold: boolean };
@@ -6288,6 +6292,8 @@ export type GuestCard = {
   id: string | null; waitlistId?: string; offered?: { expiresAt: string } | null; offerId: string; title: string | null; lane: GuestLane; photo: string | null; date: string | null; time: string | null;
   session: { n: number; of: number } | null; dates?: string[]; times?: Record<string, string | null>; chip: string; chipWords: string; numbers: { booked: number; min: number } | null; rateIt: boolean; upcoming: boolean;
   holdReleased?: boolean; refunded?: boolean;
+  /** Who it's for, by name, grown-ups first (G14). */
+  who?: string[];
 };
 export type GuestBookedList = {
   upcoming: GuestCard[]; past: GuestCard[];
@@ -6299,8 +6305,12 @@ export type GuestBooking = {
   sessions: { id: string; n: number | null; topic?: string | null; date: string; time: string | null; endsAt: string | null; booked: boolean; state: string; finished: boolean; changedFrom: { date: string; time: string | null } | null }[];
   request: { state: string; date: string | null; time: string | null; lengthMin: number | null; respondBy: string | null } | null;
   where: { label: string | null; venue: string | null; lat: number | null; lng: number | null };
-  who: { heads: number; children: { name: string | null; age: number | null; dob: string | null; needs: string[]; emergencyContact: string | null }[] };
+  who: { heads: number; adults?: { name: string | null }[]; children: { name: string | null; age: number | null; dob: string | null; needs: string[]; emergencyContact: string | null }[] };
   answers: Record<string, any>; answersEditable: boolean;
+  /** The host's questions as they stand, and what other guests are already bringing (shown as taken). */
+  asked?: Record<string, any>; taken?: string[];
+  /** Only on a booking that didn't happen (G17 called off, G28 declined or no reply): live events like it nearby. */
+  similar?: PublicCard[] | null;
   goingAhead: { min: number; booked: number; decidesOn: string | null; outcome: string | null } | null;
   numbers: { paidEach: number; nowEach: number; dueBackPence: number; settled: boolean; heads: number; minCount: number; atMost: { count: number; each: number; dueBackPence: number } | null } | null;
   dateChange: { sessions: { id: string; from: { date: string; time: string | null }; to: { date: string; time: string | null } }[] } | null;
@@ -6327,7 +6337,7 @@ export type EventNear = {
 };
 
 /** A card for another event on a public page: more from this host, or more like this. */
-export type PublicCard = { code: string; path: string; title: string | null; lane: GuestLane; kind: string | null; photo: string | null; area: string | null; date: string | null; time: string | null; price: EventNear['price'] };
+export type PublicCard = { code: string; path: string; offerId?: string; title: string | null; lane: GuestLane; kind: string | null; photo: string | null; area: string | null; date: string | null; time: string | null; price: EventNear['price'] };
 export type PublicReviews = { total: number; rating: number | null; items: { stars: number; text: string | null; who: string | null; on: string | null; reply: string | null }[] };
 /** A public event page (Epic Events on the web, 3 Oct 2026): the host as "Hannah R.", the town and never the address. */
 export type PublicEvent = {

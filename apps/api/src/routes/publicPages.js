@@ -113,7 +113,7 @@ async function sessionsOf(ids) {
 /** A card for another event: more from this host, or more like this. */
 function cardOf(o, sessions, today) {
   const next = sessions.find((s) => s.state === 'scheduled' && ymd(s.on_date) >= today) ?? null;
-  return { code: o.public_code, path: eventPath(o), title: o.title, lane: o.lane, kind: KIND_WORDS[o.lane] ?? null, photo: media(o.photo_ids?.[0]), area: o.venue_area ?? null, date: next ? ymd(next.on_date) : null, time: next ? hm(next.starts_at) : null, price: priceOf(o) };
+  return { code: o.public_code, path: eventPath(o), offerId: o.id, title: o.title, lane: o.lane, kind: KIND_WORDS[o.lane] ?? null, photo: media(o.photo_ids?.[0]), area: o.venue_area ?? null, date: next ? ymd(next.on_date) : null, time: next ? hm(next.starts_at) : null, price: priceOf(o) };
 }
 
 /** Live, listed events, with their sessions — for "More from" and "More like this". */
@@ -130,6 +130,28 @@ async function liveCards(where, params, today, limit = 4) {
     .filter((o) => eventStatus(o, host, by.get(o.id) ?? [], today).status === 'live')
     .slice(0, limit)
     .map((o) => cardOf(o, by.get(o.id) ?? [], today));
+}
+
+/**
+ * Live public events like this one from other hosts — the same subcategory or category. "More like this" on the
+ * public page; on a booking that didn't happen, "Similar, nearby" (guest handoff G17) and "Similar hosts nearby"
+ * (G28), where `nearKm` keeps them within reach of where this one was (a straight line, as Events near you
+ * estimates it). With no point to measure from, nothing is called near: an empty list, never a guess. An event
+ * with neither a subcategory nor a category is like nothing.
+ */
+export async function similarEvents(o, today, { nearKm = null, limit = 4 } = {}) {
+  if (!o.what_label && !o.what_category) return [];
+  const params = [o.id, o.host_id, o.what_label ?? '', o.what_category ?? ''];
+  let where = `o.id <> $1 and o.host_id <> $2 and (($3 <> '' and lower(coalesce(o.what_label, '')) = lower($3)) or ($4 <> '' and o.what_category = $4))`;
+  if (nearKm != null) {
+    const { rows: [at] } = await query('select coalesce($2::float8, h.lat) as lat, coalesce($3::float8, h.lng) as lng from hosts h where h.id = $1', [o.host_id, o.venue_lat ?? null, o.venue_lng ?? null]);
+    if (at?.lat == null || at?.lng == null) return [];
+    params.push(at.lat, at.lng, nearKm);
+    const lat = 'coalesce(o.venue_lat, h.lat)'; const lng = 'coalesce(o.venue_lng, h.lng)';
+    where += ` and ${lat} is not null and ${lng} is not null
+      and (6371 * acos(least(1, cos(radians($5)) * cos(radians(${lat})) * cos(radians(${lng}) - radians($6)) + sin(radians($5)) * sin(radians(${lat}))))) <= $7`;
+  }
+  return liveCards(where, params, today, limit);
 }
 
 async function reviewsOf(hostId) {
@@ -161,7 +183,7 @@ router.get('/events/:code', async (req, res, next) => {
     const [reviews, moreFromHost, similar] = await Promise.all([
       reviewsOf(h.id),
       liveCards('o.host_id = $1 and o.id <> $2', [h.id, o.id], today),
-      liveCards(`o.id <> $1 and o.host_id <> $2 and (lower(coalesce(o.what_label, '')) = lower($3) or o.what_category = $4)`, [o.id, h.id, o.what_label ?? '', o.what_category ?? ''], today),
+      similarEvents(o, today),
     ]);
     const cfg = hostingConfig();
     res.json({

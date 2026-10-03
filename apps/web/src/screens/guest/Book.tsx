@@ -37,6 +37,7 @@ import { whenWords } from './EventPage';
 import { FreeAccount } from './FreeAccount';
 import { storage } from '../../storage';
 import { ageAnswer, capToast, payProblemTitle, roomForOneMore, type AgeAnswer } from './whoGoing';
+import { presetSlot } from './bookingWords';
 
 type Who = { key: string; name: string; adult: boolean; age: number | null; dob: string | null; memberId: string | null; line: string };
 
@@ -201,6 +202,20 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
     if (you && !opt.who.dropOff && !(opt.who.ageMax != null && opt.who.ageMax < 18)) setTicked(new Set([you.key]));
   }, [people, opt, peopleKnown]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Other times with Kate" (G28): the day and time it was opened with are picked, while the host is still free then —
+  // once, and never over a form brought back from making the free account.
+  const wantDate = query.get('date');
+  const wantTime = query.get('time');
+  const preset = useRef(false);
+  useEffect(() => {
+    if (preset.current || !opt || opt.lane !== 'onrequest' || !wantDate) return;
+    preset.current = true;
+    if (day) return;
+    const p = presetSlot(opt.slots, wantDate, wantTime);
+    if (!p) return;
+    setMonth(p.month); setDay(p.day); setTime(p.time);
+  }, [opt, wantDate, wantTime]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Start on a way of booking the host actually offers (a book-ahead-only class has no drop in; Codex, 3 Oct 2026).
   useEffect(() => { if (opt && opt.lane === 'weekly' && !opt.kinds.includes(mode)) setMode(opt.kinds.includes('drop_in') ? 'drop_in' : 'book_ahead'); }, [opt]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -284,7 +299,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   const label = !chosen.length ? 'Choose who’s going' : !whenOk ? 'Pick a day and a time' : free || direct ? (ask ? 'Ask to book' : 'Book') : ask ? `Ask to book · ${gbp(total)} held` : `Pay ${gbp(total)}`;
 
   // This page, as it is set — the invitation, the link, a held waiting-list place — to come back to.
-  const here = withQuery(paths.experienceBook(offer.id), { l: linkToken ?? null, i: inviteToken ?? null, session: heldSession ?? null });
+  const here = withQuery(paths.experienceBook(offer.id, { session: heldSession, date: wantDate, time: wantTime }), { l: linkToken ?? null, i: inviteToken ?? null });
   const keepDraft = (): string => {
     const youKey = people.find((p) => p.line === 'You')?.key;
     const nonce = draftNonce();
@@ -302,6 +317,8 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
         : { kind: 'whole' },
     party: {
       adults: adults.length,
+      // The grown-ups by name, for Who's going and Plans; "You" on the web with no household is no name.
+      adultNames: adults.map((a) => (a.memberId || a.key.startsWith('x') ? a.name : null)),
       children: kids.map((k) => ({ name: k.name, age: k.age ?? undefined, dob: k.age == null ? k.dob : undefined, emergencyContact: who.dropOff ? (contacts[k.key] ?? '').trim() : undefined, memberId: k.memberId })),
       adultConfirmed: who.adultsOnly ? over18 : undefined,
     },

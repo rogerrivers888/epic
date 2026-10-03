@@ -1060,6 +1060,18 @@ test('the guest pages have addresses: every event near you, messages, payments (
   assert.equal(ownsHeader(parseRoute('/messages')), true);
 });
 
+test('a booking’s receipt, and Book with a time already picked (guest handoff G22, G28)', () => {
+  // Receipt: Settings › Payments narrowed to the one booking; the page is still Payments.
+  assert.equal(paths.receipt('b1'), '/settings/payments?booking=b1');
+  assert.equal(splitHref(paths.receipt('b1')).query.get('booking'), 'b1');
+  assert.deepEqual(parseRoute(splitHref(paths.receipt('b1')).path), { name: 'settings', section: 'payments' });
+  // "Other times with Kate": the day and the time ride in the query; nothing set, nothing written.
+  assert.equal(paths.experienceBook('e1'), '/experiences/e1/book');
+  assert.equal(paths.experienceBook('e1', { date: '2026-10-10', time: '13:00' }), '/experiences/e1/book?date=2026-10-10&time=13%3A00');
+  assert.equal(paths.experienceBook('e1', { session: 's1' }), '/experiences/e1/book?session=s1');
+  assert.equal(parseRoute(splitHref(paths.experienceBook('e1', { date: '2026-10-10', time: '13:00' })).path).name, parseRoute('/experiences/e1/book').name);
+});
+
 test('the back-office redesign: Actions, Billing and Messages and emails have addresses, and the screens they absorbed redirect (design handover, 3 Oct 2026)', () => {
   assert.deepEqual(roundTrip('/admin/actions'), { name: 'admin', screen: 'actions' });
   assert.deepEqual(roundTrip('/admin/billing'), { name: 'admin', screen: 'billing' });

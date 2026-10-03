@@ -22,6 +22,7 @@ import { useRouter } from '../../router';
 import { signedIn } from '../../session';
 import { mediaUrl } from '../../components/hosting';
 import { FreeAccount } from './FreeAccount';
+import { waitPosition } from './bookingWords';
 import {
   AMBER, AMBER_DARK, Buttons, Facts, Field, Foot, GoingAhead, GuestPage, GuestSheet, HostRow, INK_MUTED, Kick, LANE_TAG, LIME, Notice, Para, PhotoHead, Rows,
   Tags, Title, Waiting, dayWords, firstName, gbp, useToast,
@@ -102,6 +103,12 @@ function freeWords(opt: GuestOptions | null): string | null {
   return `${parts.join(' · ')}${order.length > 2 ? ' and more' : ''}`;
 }
 
+/** The list a Join puts you on: a weekly event's is per session — the first one that is full (Codex, 3 Oct 2026); any other event's is its own. */
+function joinSessionOf(opt: GuestOptions | null): string | null {
+  if (opt?.lane !== 'weekly') return null;
+  return opt.sessions.find((x) => x.placesLeft === 0)?.id ?? opt.sessions[0]?.id ?? null;
+}
+
 export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: { offer: Experience; payments: PaymentsConfig } | null }) {
   const { navigate, back, path, query, setQuery } = useRouter();
   const [data, setData] = useState<{ offer: Experience; payments: PaymentsConfig } | null>(initial?.offer.id === id ? initial : null);
@@ -131,7 +138,8 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
     thenDone.current = true;
     if (signedIn()) {
       if (then === 'ask') setSheet('ask');
-      else if (then === 'waitlist' && opt.action === 'waitlist') setSheet('waitlist');
+      // Already on the list (joined on another device, or before): the footer says where, nothing to confirm (G30).
+      else if (then === 'waitlist' && opt.action === 'waitlist' && waitPosition(opt.waitlist.mine, joinSessionOf(opt)) == null) setSheet('waitlist');
     }
     setQuery({ then: null }, { replace: true });
   }, [then, opt, setQuery]);
@@ -168,12 +176,13 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
     } catch (e: any) { toast.show(e?.message ?? 'That didn’t send.'); }
   };
 
+  // Where this household already stands on the list it would join (G4): a reopened page says so, rather than Join.
+  const position = joined ?? waitPosition(opt?.waitlist.mine, joinSessionOf(opt));
   const join = async () => {
-    if (joined != null) return;
+    if (position != null) return;
     if (!signedIn()) { setSheet('account'); return; }
-    // A weekly event's list is per session: the first one that is full (Codex, 3 Oct 2026).
-    const sessionId = o.lane === 'weekly' ? (opt?.sessions.find((x) => x.placesLeft === 0)?.id ?? opt?.sessions[0]?.id ?? null) : null;
-    try { const r = await api.guestWaitlist(o.id, { sessionId, linkToken: linkToken ?? null, inviteToken: inviteToken ?? null }); setJoined(r.position); toast.show(`You’re #${r.position} on the waiting list`); }
+    const sessionId = joinSessionOf(opt);
+    try { const r = await api.guestWaitlist(o.id, { sessionId, linkToken: linkToken ?? null, inviteToken: inviteToken ?? null }); setJoined(r.position); toast.show(`You’re #${r.position} on the list`); }
     catch (e: any) { toast.show(e?.message ?? 'That didn’t go through.'); }
   };
 
@@ -258,7 +267,7 @@ export function EventPage({ id, webPage, linkToken, inviteToken, initial }: { id
   const heldWords = held ? `Your place is held until ${held.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${held.toDateString() === new Date().toDateString() ? '' : ` ${dayWords(held.toISOString().slice(0, 10))}`}` : null;
   const foot = action === 'book' ? <Foot price={price.big} sub={heldWords ?? price.small} label="Book" onPress={() => navigate(bookHref)} />
     : action === 'ask' ? <Foot price={price.big} sub={price.small} label="Ask to book" onPress={() => navigate(bookHref)} />
-      : action === 'waitlist' ? <Foot price="Full" sub={most ? `${most} of ${most} booked` : null} label={joined != null ? `You’re #${joined} on the list` : 'Join the waiting list'} tone={joined != null ? 'grey' : 'ink'} onPress={join} />
+      : action === 'waitlist' ? <Foot price="Full" sub={most ? `${most} of ${most} booked` : null} label={position != null ? `You’re #${position} on the list` : 'Join the waiting list'} tone={position != null ? 'grey' : 'ink'} onPress={join} />
         : action === 'full' ? <Foot price="Full" sub={most ? `${most} of ${most} booked` : null} label="Full" disabled onPress={() => {}} />
           : <Foot price={price.big} sub={price.small} label={action === 'finished' ? 'Finished' : 'Not taking bookings'} disabled onPress={() => {}} />;
   void full;

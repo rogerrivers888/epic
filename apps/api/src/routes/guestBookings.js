@@ -45,6 +45,7 @@ import { localInstant, localDay, plusDays, slotsFor, bookableDay, dow, perPerson
 import { mediaRef } from './hosting.js';
 import { isGuestAccount } from '../guestAccess.js';
 import { opensPrivately } from '../domain/hosting.js';
+import { similarEvents } from './publicPages.js';
 
 export const router = Router();
 export const publicRouter = Router();
@@ -197,6 +198,16 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
         order by offer_expires_at, session_id`,
       [o.id, asker],
     ) : { rows: [] };
+    // This household's own places on the waiting list, each with where it stands (G4, G30): a reopened page says
+    // "You're #3 on the list" rather than offering Join again. Counted as the join counts it.
+    const { rows: mineWaiting } = asker ? await query(
+      `select w.session_id, w.state,
+              (select count(*) from offer_waitlist w2 where w2.offer_id = w.offer_id and w2.session_id is not distinct from w.session_id
+                  and w2.state in ('waiting', 'offered') and w2.created_at <= w.created_at)::int as position
+         from offer_waitlist w where w.offer_id = $1 and w.household_id = $2 and w.state in ('waiting', 'offered')
+        order by w.created_at`,
+      [o.id, asker],
+    ) : { rows: [] };
     const sessions = e.sessions.map((x) => ({ ...x, reserved: Math.max(0, x.reserved - mineOffered.filter((w) => w.session_id == null || w.session_id === x.id).reduce((n, w) => n + w.party, 0)) }));
     const next = ahead(sessions, o, now);
     // Weekly sessions are booked one by one: it is full only when every session is (Codex, 2 Oct 2026).
@@ -237,7 +248,8 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
       who: { ageMin: o.age_min, ageMax: o.age_max, partyMax: o.party_max, dropOff: o.parents === 'drop_off', adultsOnly: o.age_min != null && o.age_min >= cfg.adultAge },
       questions: o.guest_questions ?? {},
       refundWords: o.refund_policy && paidThroughEpic(o) ? refundWords(o.refund_policy, cfg) : null,
-      waitlist: { on: o.waitlist_on === true, offerHours: typeof s.waitlist_offer === 'number' ? s.waitlist_offer : null, offeredUntil: mineOffered[0]?.offer_expires_at ?? null, offeredParty: mineOffered[0]?.party ?? null, offeredSession: mineOffered[0]?.session_id ?? null },
+      waitlist: { on: o.waitlist_on === true, offerHours: typeof s.waitlist_offer === 'number' ? s.waitlist_offer : null, offeredUntil: mineOffered[0]?.offer_expires_at ?? null, offeredParty: mineOffered[0]?.party ?? null, offeredSession: mineOffered[0]?.session_id ?? null,
+        mine: mineWaiting.map((w) => ({ sessionId: w.session_id ?? null, position: w.position, state: w.state })) },
       askWindowHours: o.lane === 'onrequest' ? (typeof s.ask_to_book_window === 'number' ? s.ask_to_book_window : null) : null,
     });
   } catch (err) { next(err); }
@@ -277,8 +289,13 @@ const realPastDate = (v) => {
 
 function parseParty(body) {
   const kids = Array.isArray(body?.children) ? body.children.slice(0, 20) : [];
+  const adults = Math.max(0, Math.min(50, Math.floor(Number(body?.adults) || 0)));
   return {
-    adults: Math.max(0, Math.min(50, Math.floor(Number(body?.adults) || 0))),
+    adults,
+    // The grown-ups by name where the household gave one (the booking page's Who's going, Plans' who it's for);
+    // never more names than adults, and a blank is no name.
+    adultNames: (Array.isArray(body?.adultNames) ? body.adultNames.slice(0, adults) : [])
+      .map((x) => (typeof x === 'string' ? x.trim().slice(0, 60) || null : null)),
     children: kids.map((k) => ({
       name: k?.name == null ? null : String(k.name).trim().slice(0, 60) || null,
       age: k?.age == null || k.age === '' ? null : Number(k.age),
@@ -396,7 +413,7 @@ async function book({ offerId, body, household, account, invite = null }) {
             source, via_host_link, price_lines, gross_pence, discount_pence, value_pence, fee_rate_pct, fee_reason, fee_pence, host_pence, charge_model, cancellation_fee_pct)
          values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,'none',$14,$15::jsonb,$16::jsonb,$17,$18,$19,$20::jsonb,$21,$22,$23,$24,$25,$26,$27,$28,$29)
          returning *`,
-        [o.id, host.id, household.id, check.heads, JSON.stringify([...Array(check.adults)].map(() => ({ child: false })).concat(party.children.map((k) => ({ name: k.name, child: true })))),
+        [o.id, host.id, household.id, check.heads, JSON.stringify([...Array(check.adults)].map((_, i) => (party.adultNames[i] ? { name: party.adultNames[i], child: false } : { child: false })).concat(party.children.map((k) => ({ name: k.name, child: true })))),
           paid || asked ? 'pending' : 'confirmed', price.valuePence, when.kind, asked ? 'asked' : null, asked ? new Date(Date.now() + askHours * 3_600_000) : null,
           when.slot?.date ?? null, when.slot?.time ?? null, when.slot?.length ?? null,
           policy, JSON.stringify(policy ? s.refund_terms?.[policy] ?? null : null), JSON.stringify(cleanAnswers(body.answers, o.guest_questions)), party.adultConfirmed,
@@ -1211,6 +1228,13 @@ async function bookingsOfHousehold(householdId) {
   return rows.map((b) => ({ ...b, sessionsList: bs.filter((x) => x.booking_id === b.id) }));
 }
 
+/** The names on a booking's party, grown-ups first as the household reads (G14 "who it's for"); the unnamed are left out. */
+export function partyNames(party) {
+  const list = Array.isArray(party) ? party : [];
+  const named = (child) => list.filter((p) => p && Boolean(p.child) === child && typeof p.name === 'string' && p.name.trim()).map((p) => p.name.trim());
+  return [...named(false), ...named(true)];
+}
+
 function card(b, now) {
   const o = { time_zone: b.time_zone };
   const live = b.sessionsList.filter((x) => x.held === 'booked' && x.state === 'scheduled');
@@ -1240,6 +1264,8 @@ function card(b, now) {
     holdReleased: notThisTime,
     // Only once Stripe has done it: a queued or stuck refund isn't one yet (Codex, 3 Oct 2026).
     refunded: Boolean(b.refund_done),
+    // Who it's for, by name (G14's deep-green "Ava and Ravi").
+    who: partyNames(b.party),
   };
 }
 
@@ -1418,6 +1444,67 @@ router.get('/booked', async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/** Within an hour's reach, by the straight-line estimate Events near you uses (about 0.75 km a minute). */
+const NEAR_KM = 45;
+
+/** What other live bookings on this event said they're bringing (G13's "taken"), this booking's own aside. */
+async function bringTaken(offerId, bookingId, client = null) {
+  const { rows } = await (client ?? { query }).query(
+    `select distinct answers->>'bring' as item from experience_bookings
+      where offer_id = $1 and id <> $2 and state in ('pending', 'confirmed', 'attended') and answers ? 'bring'`,
+    [offerId, bookingId],
+  );
+  return rows.map((r) => r.item).filter(Boolean);
+}
+
+/**
+ * When a booking first starts, for "You can change this until 24 hours before": its first session that is still
+ * on; for an Ask to book not answered yet, the slot it asked for.
+ */
+function firstStartOf(b, o, heldSessions) {
+  const first = heldSessions.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
+  if (first) return first;
+  if (b.request_state === 'asked' && b.requested_date && b.requested_time) return localInstant(ymd(b.requested_date), hm(b.requested_time), tzOf(o));
+  return null;
+}
+
+const DIET_WORDS = { vegetarian: 'Vegetarian', vegan: 'Vegan', gluten_free: 'Gluten free', nut_allergy: 'Nut allergy', dairy_free: 'Dairy free', halal: 'Halal' };
+
+/**
+ * "What you told the host", changed (README › Every booking page): the same questions the booking asked, and only
+ * answers the host's own lists allow — dietary from the host's ticks (the usual six when the host set none), a
+ * thing to bring from the host's list that nobody else has taken, a place to stay from the host's places, a
+ * plus-one only when the host asked. A note is the guest's own words. Anything else is refused, not dropped.
+ */
+export function editedAnswers(raw, asked = {}, taken = []) {
+  const out = cleanAnswers(raw, asked);
+  const q = asked ?? {};
+  const bad = (message) => refuse(400, 'bad_answer', message);
+  if (out.dietary != null) {
+    const keys = q.diet?.ticks?.length ? q.diet.ticks : Object.keys(DIET_WORDS);
+    const allowed = new Map(keys.flatMap((k) => [[k.toLowerCase(), DIET_WORDS[k] ?? k], [(DIET_WORDS[k] ?? k).toLowerCase(), DIET_WORDS[k] ?? k]]));
+    const pick = (v) => { const w = allowed.get(String(v).trim().toLowerCase()); if (!w) throw bad('Pick from the host’s list.'); return w; };
+    out.dietary = Array.isArray(out.dietary) ? [...new Set(out.dietary.map(pick))] : typeof out.dietary === 'string' ? pick(out.dietary) : undefined;
+    if (out.dietary === undefined) delete out.dietary;
+  }
+  if (out.bring != null && out.bring !== '') {
+    const items = q.bring?.on ? (q.bring.items ?? []).map((i) => i?.name).filter(Boolean) : [];
+    if (!items.includes(out.bring)) throw bad('Pick something from the host’s list.');
+    if (taken.includes(out.bring)) throw refuse(409, 'taken', 'Someone else is bringing that.');
+  } else delete out.bring;
+  if (out.stay != null && out.stay !== '') {
+    const places = q.stay?.on ? (q.stay.places ?? []).map((p) => p?.name).filter(Boolean) : [];
+    if (!places.includes(out.stay)) throw bad('Pick one of the host’s places to stay.');
+  } else delete out.stay;
+  if (out.plusOne != null) {
+    if (typeof out.plusOne !== 'boolean') throw bad('Bringing someone is yes or no.');
+    if (out.plusOne && !q.plusOne?.on) throw bad('The host didn’t ask about bringing someone.');
+    if (!out.plusOne) delete out.plusOne;
+  }
+  if (typeof out.note === 'string' && !out.note) delete out.note;
+  return out;
+}
+
 async function ownBooking(id, householdId) {
   if (!UUID.test(String(id))) throw refuse(404, 'not_found', 'That booking isn’t yours.');
   const { rows: [b] } = await query('select * from experience_bookings where id = $1 and household_id = $2', [id, householdId]);
@@ -1437,7 +1524,6 @@ router.get('/booked/:id', async (req, res, next) => {
     const { rows: kids } = await query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1 order by created_at', [b.id]);
     const { rows: refunds } = await query(`select amount_pence, fee_kept_pence, triggered_by, cause, state, created_at, updated_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
     const live = b.sessionsList.filter((x) => x.held === 'booked' && x.state === 'scheduled');
-    const firstAhead = live.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     const lastEnd = b.sessionsList.length ? new Date(Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime()))) : null;
     const settlement = o.price_mode === 'by_numbers' && o.total_pence && o.min_count
       ? (() => {
@@ -1453,6 +1539,12 @@ router.get('/booked/:id', async (req, res, next) => {
     const decides = b.sessionsList.find((x) => x.decides_at);
     const changed = b.sessionsList.filter((x) => x.changed_from && new Date(x.changed_from.at) > new Date(b.created_at));
     const c = card(b, now);
+    // A booking that didn't happen points somewhere else (G17 called off: "Similar, nearby"; G28 declined or no reply:
+    // "Similar hosts nearby"): live public events like it from other hosts, within an hour's reach. Only then.
+    const didntHappen = c.chip === 'called_off' || b.request_state === 'declined' || b.request_state === 'lapsed';
+    const similar = didntHappen ? await similarEvents(o, localDay(now, tzOf(o)), { nearKm: NEAR_KM }).catch(() => []) : null;
+    // What the host asked, and what other guests already said they're bringing, for "What you told the host".
+    const taken = await bringTaken(o.id, b.id);
     res.json({
       booking: {
         id: b.id, state: b.state, chip: c.chip, chipWords: c.chipWords, kind: b.booking_kind, heads: b.heads,
@@ -1461,8 +1553,13 @@ router.get('/booked/:id', async (req, res, next) => {
         request: b.request_state ? { state: b.request_state, date: ymd(b.requested_date), time: hm(b.requested_time), lengthMin: b.requested_length_min, respondBy: b.respond_by } : null,
         // The exact address once booked (or when the host never hid it); the area until then, and whenever no address was written down.
         where: { label: (o.address_hidden === false || ['confirmed', 'attended'].includes(b.state) ? o.venue_label : null) ?? o.venue_area ?? null, venue: o.venue, lat: ['confirmed', 'attended'].includes(b.state) ? o.venue_lat : null, lng: ['confirmed', 'attended'].includes(b.state) ? o.venue_lng : null },
-        who: { heads: b.heads, children: kids.map((k) => ({ name: k.name, age: k.age, dob: ymd(k.date_of_birth), needs: k.needs ?? [], emergencyContact: k.emergency_contact })) },
-        answers: b.answers ?? {}, answersEditable: answersEditable(firstAhead, now) && b.state !== 'cancelled',
+        // The grown-ups by name where the booking has them (older bookings carry only a count: `heads` covers them).
+        who: { heads: b.heads, adults: (Array.isArray(b.party) ? b.party : []).filter((p) => p && !p.child).map((p) => ({ name: typeof p.name === 'string' && p.name.trim() ? p.name.trim() : null })), children: kids.map((k) => ({ name: k.name, age: k.age, dob: ymd(k.date_of_birth), needs: k.needs ?? [], emergencyContact: k.emergency_contact })) },
+        answers: b.answers ?? {}, answersEditable: answersEditable(firstStartOf(b, o, live), now) && b.state !== 'cancelled',
+        // The host's questions as they stand, and the things somebody else is already bringing, so the edit asks
+        // exactly what the booking did (Bring something shows those as taken).
+        asked: o.guest_questions ?? {}, taken,
+        similar,
         goingAhead: o.min_count ? { min: o.min_count, booked: b.cancel_cause === 'called_off' ? (b.sessionsList[0]?.booked_at_decision ?? 0) : live[0]?.booked ?? 0, decidesOn: decides ? localDay(new Date(decides.decides_at), tzOf(o)) : null, outcome: decides?.decided_outcome ?? null } : null,
         numbers: settlement,
         dateChange: changed.some((x) => !b.change_seen_at || new Date(x.changed_from.at) > new Date(b.change_seen_at)) ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
@@ -1594,10 +1691,15 @@ router.patch('/booked/:id/answers', async (req, res, next) => {
     const o = await repo.offerById(b.offer_id);
     const { rows: held } = await query(`select s.* from booking_sessions bs join offer_sessions s on s.id = bs.session_id where bs.booking_id = $1 and bs.state = 'booked' and s.state = 'scheduled'`, [b.id]);
     // Until 24 hours before the booking's first session, whether or not later ones are still to come (Codex, 2 Oct 2026).
-    const first = held.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
-    if (!answersEditable(first) || b.state === 'cancelled') throw refuse(409, 'too_late', 'Answers can be changed until 24 hours before.');
-    const answers = cleanAnswers(req.body?.answers, o.guest_questions);
-    await query('update experience_bookings set answers = $2::jsonb, answers_changed_at = now() where id = $1', [b.id, JSON.stringify(answers)]);
+    // (An Ask to book not answered yet has no session: the slot it asked for.)
+    if (!answersEditable(firstStartOf(b, o, held)) || b.state === 'cancelled') throw refuse(409, 'too_late', 'Answers can be changed until 24 hours before.');
+    // Checked and written under the event's lock, so two guests can't both claim the last thing to bring.
+    const answers = await withTransaction(async (c) => {
+      await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-publish:${o.id}`]);
+      const out = editedAnswers(req.body?.answers, o.guest_questions, await bringTaken(o.id, b.id, c));
+      await c.query('update experience_bookings set answers = $2::jsonb, answers_changed_at = now() where id = $1', [b.id, JSON.stringify(out)]);
+      return out;
+    });
     res.json({ answers });
   } catch (err) { next(err); }
 });
@@ -1744,15 +1846,19 @@ router.post('/booked/:id/tip', async (req, res, next) => {
 // Settings › Payments
 // ---------------------------------------------------------------------------
 
-router.get('/payments', async (_req, res, next) => {
+router.get('/payments', async (req, res, next) => {
   try {
     const { household } = await me();
+    // `?booking=` narrows it to one booking, for its Receipt: asked of the database, so a booking older than the
+    // latest 300 is still found rather than missing from a capped page.
+    const booking = typeof req.query.booking === 'string' && UUID.test(req.query.booking) ? req.query.booking : null;
     const { rows } = await query(
       `select p.id, p.kind, p.amount_pence, p.state, p.cause, p.created_at, o.title, p.booking_id
          from hosting_payments p left join host_offers o on o.id = p.offer_id
         where p.household_id = $1 and p.kind in ('charge', 'hold', 'refund', 'release', 'tip', 'tip_refund', 'private_fee', 'pro')
+          and ($2::uuid is null or p.booking_id = $2)
         order by p.created_at desc limit 300`,
-      [household.id],
+      [household.id, booking],
     );
     res.json({ payments: rows.map((r) => ({ id: r.id, kind: r.kind, pence: r.amount_pence, state: r.state, cause: r.cause, at: r.created_at, title: r.title, bookingId: r.booking_id })), capped: rows.length === 300 });
   } catch (err) { next(err); }

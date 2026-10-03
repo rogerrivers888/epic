@@ -1,6 +1,7 @@
 /**
  * Settings › Payments (guest handoff G22): every payment, refund and tip, newest
- * first, each with its status line; each opens a receipt to download. The receipt
+ * first, each with its status line; each opens a receipt to download — or, from a
+ * booking's Receipt (`?booking=`), that booking's payments alone. The receipt
  * is made on the phone from the payment Epic holds — nothing is fetched from Stripe.
  */
 
@@ -8,6 +9,9 @@ import React, { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { api, type GuestPayment } from '../../api';
 import { CompactBand } from '../../components/Band';
+import { paths } from '../../routes';
+import { useRouter } from '../../router';
+import { paymentsFor } from './bookingWords';
 import { DEEP_GREEN, GuestPage, INK, Para, INK_MUTED, Rows, Waiting, gbp, shortDay, useToast } from './kit';
 
 const day = shortDay;
@@ -42,16 +46,25 @@ function receipt(p: GuestPayment): boolean {
 
 export function GuestPayments({ onBack }: { onBack: () => void }) {
   const toast = useToast();
+  // A booking's Receipt opens this narrowed to that booking (`?booking=`); All payments widens it again.
+  const { query, setQuery, back } = useRouter();
+  const booking = query.get('booking');
   const [rows, setRows] = useState<GuestPayment[] | null>(null);
   const [capped, setCapped] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { api.guestPayments().then((r) => { setRows(r.payments); setCapped(r.capped); }).catch((e) => setError(e?.message ?? 'Payments didn’t load.')); }, []);
+  useEffect(() => {
+    setRows(null); setError(null);
+    api.guestPayments(booking).then((r) => { setRows(r.payments); setCapped(r.capped); }).catch((e) => setError(e?.message ?? 'Payments didn’t load.'));
+  }, [booking]);
+
   if (!rows) return <Waiting error={error} />;
+  const shown = paymentsFor(rows, booking);
   return (
-    <GuestPage head={<CompactBand title="Payments" context="Settings" onBack={onBack} />} overlay={toast.node}>
-      {rows.length ? (
-        <Rows items={rows.map((p) => { const l = line(p); return { key: p.id, title: l.title, sub: l.sub, value: l.value, valueColor: l.color, onPress: () => { if (receipt(p)) toast.show('Receipt downloaded'); } }; })} />
-      ) : <Para color={INK_MUTED}>Nothing paid yet.</Para>}
+    <GuestPage head={<CompactBand title={booking ? 'Receipt' : 'Payments'} context={booking ? shown[0]?.title ?? 'Payments' : 'Settings'} onBack={booking ? () => back(paths.booking(booking)) : onBack} />} overlay={toast.node}>
+      {shown.length ? (
+        <Rows items={shown.map((p) => { const l = line(p); return { key: p.id, title: l.title, sub: l.sub, value: l.value, valueColor: l.color, onPress: () => { if (receipt(p)) toast.show('Receipt downloaded'); } }; })} />
+      ) : <Para color={INK_MUTED}>{booking ? 'Nothing paid on this booking.' : 'Nothing paid yet.'}</Para>}
+      {booking ? <Rows items={[{ title: 'All payments', onPress: () => setQuery({ booking: null }, { replace: true }) }]} /> : null}
       {capped ? <Para color={INK_MUTED}>The latest 300.</Para> : null}
     </GuestPage>
   );

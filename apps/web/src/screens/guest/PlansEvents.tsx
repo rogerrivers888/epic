@@ -2,7 +2,7 @@
  * Plans › Events (guest handoff G14) — under the signed-off Plans home (4c), the
  * third tab of the ink bar: Upcoming, Invites, Past. Each row is the booking as
  * a card: 60px photo, title, date line, status chip and a deep-green extra (who
- * it's for, "3 of 4", "11 h left", "Reply", "Refunded", "Hold released"). Past
+ * it's for — "Ava and Ravi" — "3 of 4", "11 h left", "Reply", "Refunded", "Hold released"). Past
  * rows still waiting for a rating say Rate it.
  *
  * And Messages (G31): one thread per booking and per question, newest first,
@@ -17,21 +17,19 @@ import { mediaUrl } from '../../components/hosting';
 import { paths, withQuery } from '../../routes';
 import { useRouter } from '../../router';
 import { storage } from '../../storage';
+import { cardExtra } from './bookingWords';
 import { BookingRows, CHIP_BG, Promo, GuestPage, INACTIVE, INK_MUTED, Kick, LIME, Para, Rows, Waiting, dayWords, shortDay, tx, type BookingCard } from './kit';
 
 // Under the epic.screen family the cookie notice already names.
 const PROMO_KEY = 'epic.screen.guestPromo';
-const hoursLeft = (iso: string) => Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 3_600_000));
 
 function cardOf(c: GuestCard, navigate: (h: string) => void): BookingCard {
   const date = c.date ? `${dayWords(c.date)}${c.time ? ` · ${c.time}` : ''}` : '';
   const line = c.session ? `Session ${c.session.n} of ${c.session.of}${c.date ? ` · ${dayWords(c.date)}` : ''}` : date;
   const chip = c.rateIt ? 'Rate it' : c.chipWords;
   const chipBg = c.rateIt ? LIME : c.offered ? LIME : CHIP_BG[c.chip] ?? INACTIVE;
-  const extra = c.offered ? `${hoursLeft(c.offered.expiresAt)} h left`
-    : c.numbers ? `${c.numbers.booked} of ${c.numbers.min}`
-      : c.holdReleased ? 'Hold released'
-        : c.chip === 'called_off' && c.refunded ? 'Refunded' : null;
+  // "11 h left", "3 of 4", "Hold released", "Refunded" — otherwise who it's for, "Ava and Ravi".
+  const extra = cardExtra(c);
   return {
     key: c.id ?? c.waitlistId ?? c.offerId, photo: mediaUrl(c.photo), title: c.title ?? 'An event', line: line || ' ', chip, chipBg, extra,
     dim: c.chip === 'called_off' || c.chip === 'cancelled',

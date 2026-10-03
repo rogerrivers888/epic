@@ -14,7 +14,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Platform, Share } from 'react-native';
-import { api, ApiError, type GuestBooking as Booking, type GuestOptions } from '../../api';
+import { api, ApiError, type GuestBooking as Booking, type GuestOptions, type PublicCard } from '../../api';
 import { CompactBand } from '../../components/Band';
 import { mediaUrl } from '../../components/hosting';
 import { paths, withQuery, type Route } from '../../routes';
@@ -22,11 +22,13 @@ import { useRouter } from '../../router';
 import { BookingScreen } from '../BookingScreen';
 import { Booked, addToCalendar } from './Booked';
 import {
-  AMBER, Buttons, Chips, DEEP_GREEN, Field, Foot, GoingAhead, GUEST_RED, GuestPage, GuestSheet, INACTIVE, INK, INK_MUTED, Kick, LIME, LIME_TINT, Notice, Para,
+  AMBER, Buttons, Cards, Chips, DEEP_GREEN, Field, Foot, GoingAhead, GUEST_RED, GuestPage, GuestSheet, INACTIVE, INK, INK_MUTED, Kick, LIME, LIME_TINT, Notice, Para,
   PriceLines, Rows, Seg, Stars, Waiting, dayWords, firstName, gbp, shortDay, useToast,
 } from './kit';
 import { CardBox, confirmWithCard, finishWithBank, loadStripe, type PayOutcome } from './pay';
 import { lastRefundAt } from './whoGoing';
+import { answersOf, dietChoices, formOf, whoGoingWords, type AnswerForm } from './bookingWords';
+import { eventPrice } from '../../components/InspireBody';
 
 const POLICY: Record<string, string> = { flexible: 'Flexible', moderate: 'Moderate', strict: 'Strict' };
 const at = (d: string, t: string | null) => `${dayWords(d)}${t ? ` · ${t}` : ''}`;
@@ -81,6 +83,15 @@ function PayDue({ id, pence, onPaid }: { id: string; pence: number; onPaid: () =
   );
 }
 
+/** Events like this one nearby (G17, G28), as the small sideways cards; each opens its event page in the app. */
+function similarCards(list: PublicCard[], navigate: (href: string) => void) {
+  return list.filter((c) => c.offerId).map((c) => ({
+    key: c.code, photo: mediaUrl(c.photo), title: c.title ?? 'An event', lane: c.kind ?? '',
+    price: eventPrice({ price: c.price, who: { ageMin: null, ageMax: null, dropOff: false } } as never),
+    line: [c.date ? dayWords(c.date) : null, c.area].filter(Boolean).join(' · '), onPress: () => navigate(paths.experience(c.offerId!)),
+  }));
+}
+
 export function BookingPage({ id }: { id: string }) {
   const { navigate, back } = useRouter();
   const toast = useToast();
@@ -126,7 +137,8 @@ export function BookingPage({ id }: { id: string }) {
       <Para key="no-l" color={INK_MUTED}>{`Your card hold of ${gbp(b.money.heldPence ?? b.money.valuePence ?? 0)} has been released. You weren’t charged.`}</Para>,
     );
     const others = (opt?.slots ?? []).flatMap((s) => s.times.map((t) => ({ date: s.date, time: t }))).slice(0, 6);
-    if (others.length) blocks.push(<Kick key="other-k">{`Other times with ${host}`}</Kick>, <Chips key="other" items={others.map((o) => ({ key: `${o.date}${o.time}`, label: at(o.date, o.time), on: false, onPress: () => navigate(paths.experienceBook(b.event.id)) }))} />);
+    if (others.length) blocks.push(<Kick key="other-k">{`Other times with ${host}`}</Kick>, <Chips key="other" items={others.map((o) => ({ key: `${o.date}${o.time}`, label: at(o.date, o.time), on: false, onPress: () => navigate(paths.experienceBook(b.event.id, { date: o.date, time: o.time })) }))} />);
+    if (b.similar?.length) blocks.push(<Kick key="sim-k" top={4}>Similar hosts nearby</Kick>, <Cards key="sim" items={similarCards(b.similar, navigate)} />);
   } else if (calledOff) {
     const gone = b.money.refunds.filter((r) => r.state === 'succeeded');
     const back = gone.reduce((n, r) => n + r.pence, 0);
@@ -134,6 +146,7 @@ export function BookingPage({ id }: { id: string }) {
     const backOn = lastRefundAt(gone.map((r) => ({ at: r.doneAt ?? null })));
     const ga = b.goingAhead;
     blocks.push(<Notice key="off">{`Called off.${ga ? ` It needed ${ga.min}${ga.decidesOn ? ` by ${dayWords(ga.decidesOn)}` : ''} and had ${ga.booked}.` : ''}${back ? ` ${gbp(back)} went back to your card${backOn ? ` on ${shortDay(backOn)}` : ''}.` : ''}`}</Notice>);
+    if (b.similar?.length) blocks.push(<Kick key="sim-k" top={4}>Similar, nearby</Kick>, <Cards key="sim" items={similarCards(b.similar, navigate)} />);
   } else if (b.request?.state === 'asked') {
     blocks.push(<Notice key="ask" bg={AMBER} weight="700">{`Requested · ${host} has until ${b.request.respondBy ? new Date(b.request.respondBy).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'tomorrow'} to say yes. Your card is held, not charged.`}</Notice>);
   } else if (!cancelled && lane === 'course' && next) {
@@ -176,13 +189,14 @@ export function BookingPage({ id }: { id: string }) {
   // ---- what every booking page carries (not on a called-off or declined one: there is nothing left to go to)
   if (!calledOff && !declined && !cancelled) {
     const maps = b.where.lat != null && b.where.lng != null ? `https://maps.google.com/?q=${b.where.lat},${b.where.lng}` : b.where.label ? `https://maps.google.com/?q=${encodeURIComponent(b.where.label)}` : null;
-    const people = [...b.who.children.map((k) => `${k.name ?? 'A child'}${k.age != null ? ` · age ${k.age}` : ''}`)];
-    const answered = [...(Array.isArray(b.answers.dietary) ? b.answers.dietary : []), b.answers.bring ? `Bringing ${b.answers.bring}` : null, b.answers.plusOne ? 'Bringing someone' : null, b.answers.stay ? `Staying · ${b.answers.stay}` : null, b.answers.note ?? null].filter(Boolean) as string[];
+    const going = whoGoingWords(b.who);
+    const told = formOf(b.answers);
+    const answered = [...told.diet, told.bring ? `Bringing ${told.bring}` : null, told.plusOne ? 'Bringing someone' : null, told.stay ? `Staying · ${told.stay}` : null, told.note || null].filter(Boolean) as string[];
     blocks.push(
       <Kick key="where-k" top={4}>Where</Kick>,
       <Rows key="where" items={[{ title: b.where.label ?? 'Where it happens is shared once you’re booked', sub: maps ? 'Directions' : null, onPress: maps ? () => { void Linking.openURL(maps); } : undefined }]} />,
       <Kick key="who-k" top={4}>Who’s going</Kick>,
-      <Rows key="who" items={[{ title: people.length ? people.join(', ') : `${b.heads} ${b.heads === 1 ? 'person' : 'people'}`, sub: people.length ? `${b.heads} ${b.heads === 1 ? 'person' : 'people'}` : null }]} />,
+      <Rows key="who" items={[{ title: going.title, sub: going.sub || null }]} />,
       <Kick key="told-k" top={4}>{`What you told ${host}`}</Kick>,
       <Rows key="told" items={[{ title: answered.length ? answered.join(' · ') : 'Nothing yet', sub: b.answersEditable ? 'You can change this until 24 hours before' : null, onPress: b.answersEditable ? () => setEditing(true) : undefined }]} />,
       <Rows key="acts" items={[
@@ -193,7 +207,7 @@ export function BookingPage({ id }: { id: string }) {
           const url = Platform.OS === 'web' && typeof location !== 'undefined' ? `${location.origin}${paths.experience(b.event.id)}` : paths.experience(b.event.id);
           try { if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) { await navigator.clipboard.writeText(url); toast.show('Link copied'); } else await Share.share({ message: url }); } catch { /* closed */ }
         } }]),
-        { title: 'Receipt', onPress: () => navigate(paths.settings('payments')) },
+        { title: 'Receipt', onPress: () => navigate(paths.receipt(b.id)) },
       ]} />,
       <Kick key="manage-k" top={4}>Manage</Kick>,
       <Rows key="manage" items={[
@@ -243,23 +257,46 @@ export function BookingPage({ id }: { id: string }) {
       {blocks}
     </GuestPage>
   );
-  void INACTIVE; void LIME_TINT; void mediaUrl; void withQuery;
+  void INACTIVE; void LIME_TINT; void withQuery;
 }
 
-/** What you told the host: dietary and a note, until 24 hours before. */
+/**
+ * What you told the host, changed until 24 hours before (README › Every booking page): every question the host
+ * asked — dietary from the host's own list, bringing someone, something to bring (what others bring shows as
+ * taken), a place to stay — and a note. The server checks each answer against the host's lists and the time.
+ */
 function EditAnswers({ booking, onClose, onSaved }: { booking: Booking; onClose: () => void; onSaved: () => void }) {
-  const [diet, setDiet] = useState<Set<string>>(new Set(Array.isArray(booking.answers.dietary) ? booking.answers.dietary : []));
-  const [note, setNote] = useState<string>(typeof booking.answers.note === 'string' ? booking.answers.note : '');
-  const DIET = ['Vegetarian', 'Vegan', 'Gluten free', 'Nut allergy', 'Dairy free', 'Halal'];
+  const q = booking.asked ?? {};
+  const [form, setForm] = useState<AnswerForm>(() => formOf(booking.answers));
+  const set = (patch: Partial<AnswerForm>) => setForm((f) => ({ ...f, ...patch }));
+  const taken = new Set(booking.taken ?? []);
+  const dietOn = q.diet ? Boolean(q.diet.on) : true;
+  // The host's list, plus anything told before the host changed it — shown so it can be taken back.
+  const [dietList] = useState(() => [...new Set([...dietChoices(q), ...formOf(booking.answers).diet])]);
   const [failed, setFailed] = useState<string | null>(null);
   return (
     <GuestSheet title={`What you told ${firstName(booking.event.host.name)}`} onClose={onClose}>
-      <Chips items={DIET.map((d) => ({ label: d, on: diet.has(d), onPress: () => setDiet((s) => { const n = new Set(s); if (n.has(d)) n.delete(d); else n.add(d); return n; }) }))} />
-      <Field value={note} onChange={setNote} placeholder="Anything else" height={72} maxLength={500} />
+      {dietOn ? <Chips items={dietList.map((d) => ({ key: d, label: d, on: form.diet.includes(d), onPress: () => set({ diet: form.diet.includes(d) ? form.diet.filter((x) => x !== d) : [...form.diet, d] }) }))} /> : null}
+      {q.plusOne?.on ? <Chips items={[{ label: 'Bringing someone', on: form.plusOne, onPress: () => set({ plusOne: !form.plusOne }) }]} /> : null}
+      {q.bring?.on && q.bring.items?.length ? (
+        <>
+          <Para>Bring something</Para>
+          <Chips items={q.bring.items.map((it: { id: string; name: string }) => (taken.has(it.name) && form.bring !== it.name
+            ? { key: it.id, label: `${it.name} · taken`, on: false, disabled: true, onPress: () => {} }
+            : { key: it.id, label: it.name, on: form.bring === it.name, onPress: () => set({ bring: form.bring === it.name ? null : it.name }) }))} />
+        </>
+      ) : null}
+      {q.stay?.on && q.stay.places?.length ? (
+        <>
+          <Para>Stay over</Para>
+          <Chips items={q.stay.places.map((pl: { id: string; name: string }) => ({ key: pl.id, label: pl.name, on: form.stay === pl.name, onPress: () => set({ stay: form.stay === pl.name ? null : pl.name }) }))} />
+        </>
+      ) : null}
+      <Field value={form.note} onChange={(v) => set({ note: v })} placeholder="Anything else" height={72} maxLength={500} />
       {failed ? <Para>{failed}</Para> : null}
       <Buttons items={[{ label: 'Save', tone: 'ink', onPress: async () => {
         // Saved only when it was: a failure stays here and says so (Codex, 3 Oct 2026).
-        try { await api.guestAnswers(booking.id, { ...booking.answers, dietary: [...diet], note: note.trim() || undefined }); onSaved(); }
+        try { await api.guestAnswers(booking.id, answersOf(form, q, booking.answers)); onSaved(); }
         catch (e: any) { setFailed(e instanceof ApiError ? e.message : 'That didn’t save. Try again.'); }
       } }]} />
     </GuestSheet>
