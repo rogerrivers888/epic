@@ -64,7 +64,7 @@ adminRouter.put('/settings/:key', requireOwnerSignedIn('change a hosting setting
     const out = await settings.change(req.params.key, { value: body.value, isOn: body.isOn }, { by: currentAccount()?.id ?? null, why: body.why, approvalId });
     if (out.error) return res.status(out.status).json({ error: out.error });
     const rows = await settings.list();
-    res.json({ setting: settingPayload(rows.find((r) => r.key === req.params.key) ?? out.row) });
+    res.json({ setting: settingPayload(rows.find((r) => r.key === req.params.key) ?? out.row), changeId: out.changeId ?? null });
   } catch (err) { next(err); }
 });
 
@@ -114,7 +114,24 @@ router.post('/notifications/read', async (req, res, next) => {
 export function startHostingMoneyLoop() {
   const run = () => runOutsideRequest(() => moneyTick()).catch((err) => console.error('hosting money tick failed', err.message));
   setTimeout(run, 45_000).unref?.();
+  startEmailLoop();
   return setInterval(run, 10 * 60_000).unref?.();
+}
+
+/**
+ * Queued notification e-mail on its own loop (hosting update §7, the e-mail queue cut-over: "Roger agreed it gets its
+ * own loop"), every two minutes — out of the money loop, so neither waits on the other. drainEmail claims each row
+ * before sending, so this loop and any other caller never send one twice. When the back-office chat's templates
+ * (`deliver`) land, senders move onto them in one commit; this loop stays the only drain of the old queue.
+ */
+let emailLoop = null;
+export function startEmailLoop() {
+  if (emailLoop) return emailLoop;
+  const run = () => runOutsideRequest(() => notifications.drainEmail()).catch((err) => console.error('notification e-mail drain failed', err.message));
+  setTimeout(run, 30_000).unref?.();
+  emailLoop = setInterval(run, 2 * 60_000);
+  emailLoop.unref?.();
+  return emailLoop;
 }
 
 export default router;

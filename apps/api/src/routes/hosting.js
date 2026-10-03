@@ -118,14 +118,6 @@ export function ownHost(h) {
 }
 
 /**
- * A bank a host is paid into (SX16). Epic never holds the money, so only a
- * display label, the last four digits and the holder's name are ever shown.
- */
-export const payoutAccountPayload = (a) => ({
-  id: a.id, label: a.label, last4: a.last4, holderName: a.holder_name ?? null, addedOn: ymd(a.added_on), isActive: Boolean(a.is_active),
-});
-
-/**
  * An offer as a guest sees it. `revealed` is whether this reader has a
  * booking on it, which is what decides whether the exact address is shown.
  */
@@ -330,9 +322,9 @@ router.get('/host', async (req, res, next) => {
     // The same credentials the submit endpoint checks, so the dashboard cannot
     // say "everything is in place" about an offer Publish will refuse (Codex,
     // 13 Sep 2026). And the tags, so the offer rows draw their chips.
-    const [credentials, withTags, payoutAccounts] = await Promise.all([evidenceFor(host), attachSkills(offers), repo.payoutAccountsOf(host.id)]);
+    const [credentials, withTags] = await Promise.all([evidenceFor(host), attachSkills(offers)]);
     res.json({
-      host: { ...ownHost(host), rating: rating.rating, reviewCount: rating.count, guests: rating.guests, isNew: rating.count === 0, evidence: evidence.map(evidencePayload), payoutAccounts: payoutAccounts.map(payoutAccountPayload) },
+      host: { ...ownHost(host), rating: rating.rating, reviewCount: rating.count, guests: rating.guests, isNew: rating.count === 0, evidence: evidence.map(evidencePayload) },
       // What guests wrote when they booked: each one is a second offer waiting to be written (S4).
       asks: live.map((b) => b.note_to_host).filter(Boolean).slice(-6),
       offers: withTags.map((o) => ownOffer(o, host, byOffer(o.id), [], [], credentials, hostBookingsSoFar)),

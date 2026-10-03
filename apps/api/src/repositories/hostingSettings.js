@@ -91,12 +91,13 @@ export async function change(key, { value, isOn }, { by = null, why, approvalId 
         where key = $1 returning *`,
       [key, JSON.stringify(next.value), next.is_on, by, approvalId],
     );
-    await logChange({
+    const logged = await logChange({
       subjectKind: 'setting', subjectId: key, field: 'value',
       before: { value: row.value, is_on: row.is_on }, after: next,
       why: reason, by, byLabel: 'staff', approvalId,
     }, c);
-    return { row: updated };
+    // The id of the change it made, so the editor's Undo targets exactly that one (hosting update §7).
+    return { row: updated, changeId: logged?.id ?? null };
   });
   if (out.row) await list();
   return out;

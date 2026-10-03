@@ -106,17 +106,9 @@ export async function updateHost(id, patch, client = null) {
   return rows[0];
 }
 
-// --- payout accounts (SX16) ------------------------------------------------
-// Added by Stripe's own onboarding (out of this build); listed and switched
-// between here. Epic never holds the money, so only a label and the last four
-// digits are ever kept.
-
-export async function payoutAccountsOf(hostId) {
-  const { rows } = await query(
-    `select id, label, last4, holder_name, added_on, is_active
-       from host_payout_accounts where host_id = $1 order by added_on, created_at`, [hostId]);
-  return rows;
-}
+// The host's bank is Stripe's to hold and to change, in its own Express dashboard (L3, L6): Epic lists none and
+// switches none. The never-used payout-account switch and its listing are gone (3 Oct 2026); the old table stays,
+// unread, rather than drop rows in production.
 
 /** Stop hosting: the host row goes, and its offers and bookings with it (cascade). */
 export async function deleteHost(id, householdId, client) {

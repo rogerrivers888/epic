@@ -5627,12 +5627,11 @@ export type PublicHost = {
   verifiedOn?: string | null;
 };
 /** A bank a host is paid into (SX16). Epic never holds the money: only a label, the last four digits and the holder. */
-export type PayoutAccount = { id: string; label: string; last4: string; holderName: string | null; addedOn: string; isActive: boolean };
 export type OwnHost = PublicHost & {
   address: string | null; idDocument: 'passport' | 'driving_licence' | null; insuranceConfirmed: boolean; taxReference: string | null;
   payoutStatus: 'not_connected' | 'connected'; payoutLabel: string | null; dateOfBirth: string | null;
   /** Money (Settings revised v2, SX19): company tax reporting and the banks on file. When payouts land is Epic's (L3). */
-  taxIsCompany: boolean; companyNumber: string | null; payoutAccounts?: PayoutAccount[];
+  taxIsCompany: boolean; companyNumber: string | null;
   evidence?: Evidence[];
 };
 /** A fee line summed over a period: the engine's line plus the gross it was taken from and how many bookings (SX13b/SX18/SX20). */

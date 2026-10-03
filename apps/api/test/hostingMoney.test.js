@@ -20,13 +20,9 @@ import { aHousehold, testDatabase } from './helpers/db.js';
 
 const { query } = await testDatabase();
 const repo = await import('../src/repositories/hosting.js');
-const { ownHost, payoutAccountPayload } = await import('../src/routes/hosting.js');
+const { ownHost } = await import('../src/routes/hosting.js');
 const { feesForPeriod, LEVEL_RATE, LINK_RATE } = await import('../src/domain/hostFees.js');
 const { outstandingFrom } = await import('../src/domain/hosting.js');
-
-const addAccount = (hostId, label, last4, active = false) =>
-  query('insert into host_payout_accounts (host_id, label, last4, holder_name, is_active) values ($1,$2,$3,$4,$5) returning *',
-    [hostId, label, last4, 'R Sumner', active]).then((r) => r.rows[0]);
 
 test('company tax fields round-trip, and a host has no payout schedule to set (register L3)', async () => {
   const { household } = await aHousehold(query, 'a host with money settings');
@@ -42,6 +38,8 @@ test('a host can’t change their payout account: the old switch is gone (regist
   const hosting = await import('../src/routes/hosting.js');
   const repo2 = await import('../src/repositories/hosting.js');
   assert.equal(typeof repo2.setActivePayoutAccount, 'undefined');
+  assert.equal(typeof repo2.payoutAccountsOf, 'undefined', 'nor any listing of them');
+  assert.equal(typeof hosting.payoutAccountPayload, 'undefined');
   const routes = hosting.default.stack.filter((l) => l.route).map((l) => `${Object.keys(l.route.methods)[0]} ${l.route.path}`);
   assert.ok(!routes.some((r) => r.includes('payout-accounts')), 'no route changes a payout account');
 });
@@ -54,18 +52,6 @@ test("a booking remembers it came through the host's own link (the 5% fee); othe
   assert.equal(viaLink.via_host_link, true);
   const epicSurface = await repo.insertBooking({ offerId: offer.id, hostId: host.id, householdId: household.id, occurrence: '2026-12-02', party: [], heads: 1, state: 'confirmed', amountPence: 10000 }, null);
   assert.equal(epicSurface.via_host_link, false, 'an Epic-surface booking is not a host-link booking');
-});
-
-test('a payout account payload shows only a label and the last four digits', async () => {
-  const { household } = await aHousehold(query, 'a host with a bank');
-  const host = await repo.insertHost(household.id, { name: 'Shown', type: 'skill' });
-  const acct = await addAccount(host.id, 'Monzo', '42', true);
-  const p = payoutAccountPayload(acct);
-  assert.deepEqual(Object.keys(p).sort(), ['addedOn', 'holderName', 'id', 'isActive', 'label', 'last4'].sort());
-  assert.equal(p.label, 'Monzo');
-  assert.equal(p.last4, '42');
-  assert.equal(p.isActive, true);
-  assert.ok(!('account_number' in p) && !('sortCode' in p), 'no account number ever leaves the server');
 });
 
 test('the period fee comes from the engine: 5% on a host-link booking, the level rate otherwise', () => {
@@ -168,3 +154,13 @@ test('company reporting is never on without a Companies House number', async () 
   } finally { await srv.close(); }
 });
 
+
+test('a setting saved answers with the id of the change it made, so Undo can name exactly that one', async () => {
+  const settings = await import('../src/repositories/hostingSettings.js');
+  const out = await settings.change('cancellation_fee_pct', { value: 6 }, { why: 'a test of the change id' });
+  assert.ok(out.row && out.changeId);
+  const { rows: [c] } = await query('select subject_id, after from hosting_changes where id = $1', [out.changeId]);
+  assert.deepEqual([c.subject_id, c.after.value], ['cancellation_fee_pct', 6]);
+  await settings.change('cancellation_fee_pct', { value: 5 }, { why: 'put back' });
+  settings.forget();
+});

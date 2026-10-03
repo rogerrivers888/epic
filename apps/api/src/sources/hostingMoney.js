@@ -358,6 +358,7 @@ export async function moneyTick({ now = new Date() } = {}) {
   if (!last || now.getTime() - new Date(last.ran_at).getTime() > 24 * 3_600_000) reconciled = await reconcile();
   await guest.offerFreedPlaces({ now });
   await guest.guestPrompts({ now });
-  const mailed = await notifications.drainEmail();
-  return { released, reconciled, mailed };
+  // Queued notification e-mail is no longer sent from here: it has its own loop (routes/hostingMoney.js
+  // startEmailLoop), so a slow money run never holds mail back and a mail fault never holds money back.
+  return { released, reconciled };
 }
