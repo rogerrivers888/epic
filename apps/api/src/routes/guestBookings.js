@@ -743,7 +743,10 @@ async function quoteFor(b, o, sessionIds, now = new Date()) {
   const { rows: held } = await query(
     `select s.*, bs.state as held from booking_sessions bs join offer_sessions s on s.id = bs.session_id where bs.booking_id = $1`, [b.id],
   );
-  const live = held.filter((x) => x.held === 'booked' && x.state === 'scheduled');
+  // What can still be given up is what is still to come; whether a course has started is judged from every
+  // session the booking held, past ones included (Codex, 2 Oct 2026).
+  const live = held.filter((x) => x.held === 'booked' && x.state === 'scheduled' && startOf(x, o) > now);
+  const everStarted = held.filter((x) => x.held !== 'cancelled').map((x) => startOf(x, o)).some((t) => t <= now);
   const losing = sessionIds ?? live.map((x) => x.id);
   if (o.lane !== 'weekly' && sessionIds && losing.length !== live.length) throw refuse(400, 'whole_only', 'This one is cancelled as a whole.');
   if (losing.some((id) => !live.some((x) => x.id === id))) throw refuse(409, 'session_gone', 'That session isn’t yours to cancel.');
@@ -752,7 +755,9 @@ async function quoteFor(b, o, sessionIds, now = new Date()) {
   const terms = b.refund_policy ? { ...(s.refund_terms ?? {}), [b.refund_policy]: b.refund_terms ?? s.refund_terms?.[b.refund_policy] } : s.refund_terms;
   const sessions = live.map((x) => ({ id: x.id, startsAt: startOf(x, o), movedAfterBooking: movedSinceBooking(b, [x]) }));
   const forfeited = held.filter((x) => x.held === 'forfeited').length;
-  const q = cancelQuote({ booking: { ...b, all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms });
+  const q = o.lane === 'course' && everStarted
+    ? { pence: 0, cause: 'guest_cancelled', words: 'The course has started: no refund.' }
+    : cancelQuote({ booking: { ...b, all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms });
   return { ...q, losing, liveCount: live.length };
 }
 
