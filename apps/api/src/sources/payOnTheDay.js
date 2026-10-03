@@ -58,7 +58,9 @@ export async function startFeeCard({ host, household, account }) {
   const c = await stripe.retrieveCustomer(customerId, { householdId: household.id }).catch(() => null);
   const def = c?.invoice_settings?.default_payment_method;
   const pm = typeof def === 'string' ? def : def?.id ?? null;
-  if (pm) {
+  // The membership card is used without asking — unless the fee card just failed, or it is that same card: then a new
+  // one is asked for (Codex, 3 Oct 2026).
+  if (pm && !host.fee_card_failed_at && pm !== host.fee_payment_method) {
     await query('update hosts set fee_payment_method = $2, fee_card_saved_at = now(), fee_card_failed_at = null where id = $1', [host.id, pm]);
     return { saved: true };
   }
@@ -212,7 +214,18 @@ export async function confirmHeadcount({ sessionId, hostId, heads, now = new Dat
     return s;
   });
   const { rows: [up] } = await query(`select * from organiser_fees where session_id = $1 and kind = 'upfront'`, [sessionId]);
-  if (!up || n <= up.heads) return { heads: n, topUpPence: 0 };
+  // No up-front charge was ever made (the job missed its window): the fee is taken now, on how many came (Codex).
+  if (!up) {
+    const base = n * Number(s0.price_pence ?? 0);
+    const fee = await feeOn(base);
+    if (!fee || fee.feePence <= 0) return { heads: n, topUpPence: 0 };
+    const { rows: [row] } = await query(
+      `insert into organiser_fees (offer_id, session_id, host_id, kind, heads, base_pence, rate_pct, fee_pence) values ($1, $2, $3, 'upfront', $4, $5, $6, $7)
+       on conflict (session_id, kind) do nothing returning *`, [s0.offer_id, sessionId, hostId, n, base, fee.ratePct, fee.feePence]);
+    if (row) { const { rows: [host] } = await query('select * from hosts where id = $1', [hostId]); await chargeRow(row, { host, charge }); }
+    return { heads: n, topUpPence: fee.feePence };
+  }
+  if (n <= up.heads) return { heads: n, topUpPence: 0 };
   // The extra guests at the same ticket price per head as those who said they were coming — or, when nobody had said
   // so (walk-ins only), the event's own price per person (Codex, 3 Oct 2026).
   const each = up.heads > 0 ? Math.round(up.base_pence / up.heads) : Number(s0.price_pence ?? 0);

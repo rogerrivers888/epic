@@ -156,3 +156,12 @@ test('a fee the bank is still processing stays pending until Stripe settles it; 
   await pod.retryOrganiserFees({ status: ready, charge: refuse });
   assert.equal(tries, 1, 'the new card once, not every tick');
 });
+
+test('no up-front charge was made: the headcount takes the fee; a member’s refused card is not saved again by itself', async () => {
+  settings.forget();
+  const { session, host } = await anEvent({ startsInHours: -3 });
+  const charged = [];
+  const r = await pod.confirmHeadcount({ sessionId: session.id, hostId: host.id, heads: 3, charge: async (a) => { charged.push(a); return { id: 'pi_missed', status: 'succeeded' }; } });
+  assert.equal(r.topUpPence, 180, '3 × £20 = £60, 3%');
+  assert.deepEqual(charged.map((c) => [c.kind, c.amountPence]), [['upfront', 180]]);
+});
