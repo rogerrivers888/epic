@@ -115,6 +115,14 @@ test('finished for 90 days, called off for 30, then expired; a paused host’s e
     assert.equal(await st(await anEvent(h, { inDays: [-100] })), 'expired');
     assert.equal(await st(await anEvent(h, { calledOffDaysAgo: 5 })), 'called_off');
     assert.equal(await st(await anEvent(h, { calledOffDaysAgo: 40 })), 'expired');
+    // A host who cancelled every remaining session has called it off.
+    const cx = await anEvent(h);
+    await query(`update host_offers set cancelled_at = now(), state = 'ended' where id = $1`, [cx.id]);
+    assert.equal(await st(cx), 'called_off');
+    // A session called off for numbers is not the next date, and with nothing else on, the event is over.
+    const thin = await anEvent(h, { inDays: [3] });
+    await query(`update offer_sessions set state = 'called_off' where offer_id = $1`, [thin.id]);
+    assert.notEqual(await st(thin), 'live');
     const { h: paused } = await aHost({ paused: true });
     const pe = await anEvent(paused);
     assert.equal(await st(pe), 'gone');

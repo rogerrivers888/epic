@@ -1,7 +1,8 @@
 // First, and deliberately: it moves this device's stored keys from `roam.` to
 // `epic.` before any module below reads one. See src/rename.ts.
-import { PublicEventPage, PublicHostPage, ShortEvent } from './src/screens/guest/PublicPages';
 import './src/rename';
+// After the rename, never before it: this reads the session (Codex, 3 Oct 2026).
+import { PublicEventPage, PublicHostPage, ShortEvent } from './src/screens/guest/PublicPages';
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Press } from './src/components/press';

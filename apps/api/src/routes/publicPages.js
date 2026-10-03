@@ -67,14 +67,17 @@ const LISTED = `o.lane is not null and o.visibility = 'public' and o.state in ('
 /** What an event's status is today, from its sessions and its host (see the file header). */
 export function eventStatus(o, host, sessions, today) {
   if (!host || host.paused || host.stopped_at) return { status: 'gone', ended: 'host' };
-  const live = sessions.filter((s) => s.state !== 'cancelled');
-  if (o.called_off_at) {
-    const on = ymd(o.called_off_at);
+  // Only a session that is on counts: one called off for numbers, or cancelled, is neither next nor last (Codex, 3 Oct 2026).
+  const live = sessions.filter((s) => s.state === 'scheduled' || s.state === 'done');
+  // Called off for numbers, or every remaining session cancelled by the host: called off, either way (Codex, 3 Oct 2026).
+  if (o.called_off_at || o.cancelled_at) {
+    const on = ymd(o.called_off_at ?? o.cancelled_at);
     return { status: daysBetween(on, today) > CALLED_OFF_DAYS ? 'expired' : 'called_off', on, ended: 'called_off' };
   }
   const last = live.length ? ymd(live[live.length - 1].ends_on ?? live[live.length - 1].on_date) : null;
-  const ahead = live.some((s) => ymd(s.ends_on ?? s.on_date) >= today);
-  const ended = o.state === 'ended' || (o.lane !== 'onrequest' && live.length > 0 && !ahead);
+  const ahead = live.some((s) => s.state === 'scheduled' && ymd(s.ends_on ?? s.on_date) >= today);
+  // Dated, and nothing on still to come (every session past, called off or cancelled): over.
+  const ended = o.state === 'ended' || (o.lane !== 'onrequest' && sessions.length > 0 && !ahead);
   if (!ended) return { status: 'live' };
   const on = last ?? ymd(o.updated_at) ?? today;
   return { status: daysBetween(on, today) > FINISHED_DAYS ? 'expired' : 'finished', on, ended: 'finished' };
@@ -100,7 +103,7 @@ async function sessionsOf(ids) {
 
 /** A card for another event: more from this host, or more like this. */
 function cardOf(o, sessions, today) {
-  const next = sessions.find((s) => s.state !== 'cancelled' && ymd(s.on_date) >= today) ?? null;
+  const next = sessions.find((s) => s.state === 'scheduled' && ymd(s.on_date) >= today) ?? null;
   return { code: o.public_code, path: eventPath(o), title: o.title, lane: o.lane, kind: KIND_WORDS[o.lane] ?? null, photo: media(o.photo_ids?.[0]), area: o.venue_area ?? null, date: next ? ymd(next.on_date) : null, time: next ? hm(next.starts_at) : null, price: priceOf(o) };
 }
 
@@ -108,7 +111,7 @@ function cardOf(o, sessions, today) {
 async function liveCards(where, params, today, limit = 4) {
   const { rows } = await query(
     `select o.* from host_offers o join hosts h on h.id = o.host_id
-      where ${LISTED} and o.state = 'live' and o.called_off_at is null and not coalesce(h.paused, false) and h.stopped_at is null and ${where}
+      where ${LISTED} and o.state = 'live' and o.called_off_at is null and o.cancelled_at is null and not coalesce(h.paused, false) and h.stopped_at is null and ${where}
       order by o.updated_at desc limit 40`,
     params,
   );
@@ -145,7 +148,7 @@ router.get('/events/:code', async (req, res, next) => {
     // Every status gets the whole page: a page that has left the index stays readable (Roger, 3 Oct 2026).
     const base = { code: o.public_code, path: eventPath(o), status: st.status, ended: st.ended ?? null, on: st.on ?? null, mood, subcategory: o.what_label ?? null };
     // Every session still to come (a course runs to 20), and the count, so the page never says 12 of 20 (Codex, 3 Oct 2026).
-    const ahead = sessions.filter((s) => s.state !== 'cancelled' && ymd(s.ends_on ?? s.on_date) >= today).slice(0, 40);
+    const ahead = sessions.filter((s) => s.state === 'scheduled' && ymd(s.ends_on ?? s.on_date) >= today).slice(0, 40);
     const [reviews, moreFromHost, similar] = await Promise.all([
       reviewsOf(h.id),
       liveCards('o.host_id = $1 and o.id <> $2', [h.id, o.id], today),
