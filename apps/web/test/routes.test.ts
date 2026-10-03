@@ -1097,7 +1097,7 @@ test('a free guest account opens only its own pages; everything else goes to Pla
   assert.equal(GUEST_HOME, '/plans?span=events');
   const may = (href: string) => guestMayOpen(parseRoute(splitHref(href).path));
   for (const ok of ['/plans', '/bookings/b1', '/bookings/b1/chat', '/messages', '/experiences/e1', '/experiences/e1/book',
-    '/hosts/h1', '/invited/t1', '/i/t1', '/settings', '/settings/payments', '/settings/devices', '/account', '/login', '/e/abc123']) {
+    '/hosts/h1', '/invited/t1', '/i/t1', '/settings', '/settings/payments', '/settings/devices', '/settings/notifications', '/account', '/login', '/e/abc123']) {
     assert.equal(may(ok), true, ok);
   }
   for (const no of ['/inspire', '/places', '/plan', '/host', '/plans/t1', '/plans/new', '/settings/providers', paths.collections(),

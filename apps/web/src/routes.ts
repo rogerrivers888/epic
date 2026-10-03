@@ -1321,7 +1321,7 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
  * a table's order code). `unknown` stays, so a bad address still says so.
  */
 export const GUEST_HOME = paths.bookings();
-const GUEST_SETTINGS: SettingsSection[] = ['preferences', 'devices', 'payments'];
+const GUEST_SETTINGS: SettingsSection[] = ['preferences', 'devices', 'payments', 'notifications'];
 export function guestMayOpen(route: Route): boolean {
   switch (route.name) {
     case 'trips': return !route.tripId && !route.creating && !route.searching;
