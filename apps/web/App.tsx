@@ -34,8 +34,10 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { HostScreen } from './src/screens/host/HostScreen';
 import { HostProfileScreen } from './src/screens/HostProfileScreen';
 import { TagScreen } from './src/screens/TagScreen';
-import { ExperienceScreen } from './src/screens/ExperienceScreen';
-import { BookingScreen } from './src/screens/BookingScreen';
+import { HostPage } from './src/screens/guest/HostPage';
+import { GuestEvent } from './src/screens/guest/routes';
+import { Inbox } from './src/screens/guest/PlansEvents';
+import { GuestBooking } from './src/screens/guest/BookingPage';
 import { PeopleScreen } from './src/screens/PeopleScreen';
 import { CollectionsScreen } from './src/screens/CollectionsScreen';
 import { InvitedScreen, InvitedLinkScreen } from './src/screens/InvitedScreen';
@@ -56,7 +58,7 @@ import { useViewport, ViewportProvider } from './src/hooks/useViewport';
 import { useOffline } from './src/hooks/useOffline';
 import { useOutbox } from './src/hooks/useOutbox';
 import { useSession } from './src/hooks/useSession';
-import { hydrateSession, onSessionChange } from './src/session';
+import { hydrateSession, onSessionChange, signedIn } from './src/session';
 import { Icon, IconName } from './src/components/Icon';
 import { Toaster } from './src/components/Toast';
 import { UpgradePrompt } from './src/components/UpgradePrompt';
@@ -296,11 +298,14 @@ function Routed() {
    * chrome; the booking sheet under an experience needs a session and so goes
    * through the Gate, which is what asks for one.
    */
-  if (route.name === 'hostProfile') return <HostProfileScreen route={route} />;
+  // Signed in, a profile and an event page sit in the app under the tab bar (guest handoff G2–G5, G25);
+  // signed out they are the web pages — the epic.day wordmark for a back button, and no tab bar (G23, G24).
+  if (route.name === 'hostProfile' && route.layer === 'trust') return <HostProfileScreen route={route} />;
+  if (route.name === 'hostProfile' && !signedIn()) return <HostPage id={route.hostId} webPage />;
   // An invitation to a private offer (13 Sep 2026): no account, no password — yes or no, and how many.
   if (route.name === 'invited') return <InvitedScreen token={route.token} />;
   if (route.name === 'invitedLink') return <InvitedLinkScreen token={route.token} />;
-  if (route.name === 'experience' && route.layer !== 'book' && route.layer !== 'ask') return <ExperienceScreen route={route} />;
+  if (route.name === 'experience' && !signedIn() && route.layer !== 'ask') return <GuestEvent route={route} webPage />;
   /**
    * A tag's page (Host Skills, S14): public for the same reason an experience
    * page is — it is where "fossil hunting Jurassic Coast" lands, and asking a
@@ -675,8 +680,10 @@ function Shell({ route, isOwner, mayAdminister = false }: { route: Route; isOwne
       {route.name === 'host' ? <HostScreen route={route} /> : null}
       {route.name === 'people' ? <PeopleScreen household={household} /> : null}
       {route.name === 'collections' ? <CollectionsScreen /> : null}
-      {route.name === 'booking' ? <BookingScreen route={route} /> : null}
-      {route.name === 'experience' ? <ExperienceScreen route={route} /> : null}
+      {route.name === 'booking' ? <GuestBooking route={route} /> : null}
+      {route.name === 'experience' ? <GuestEvent route={route} webPage={false} /> : null}
+      {route.name === 'hostProfile' ? <HostPage id={route.hostId} webPage={false} /> : null}
+      {route.name === 'messages' ? <Inbox /> : null}
       {/* What you are up for, and the introductions it leads to (Casual meet ups). */}
       {route.name === 'open' && route.matchId ? <MatchScreen matchId={route.matchId} chat={route.chat} /> : null}
       {route.name === 'open' && !route.matchId && route.page === 'fork' ? <ForkScreen /> : null}

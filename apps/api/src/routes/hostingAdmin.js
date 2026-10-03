@@ -672,6 +672,8 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
          left join host_offers o on o.id = k.offer_id left join households hh on hh.id = k.household_id
         where k.state = 'open' order by k.created_at`,
     );
+    // Reported from a host's profile or an event page (guest handoff G25: "Report this host", going to Safety).
+    const reports = await repo.openReports();
     const { rows: incidents } = await query(
       `select i.*, h.name as host, o.title from session_incidents i left join hosts h on h.id = i.host_id left join host_offers o on o.id = i.offer_id order by i.created_at desc limit 200`,
     );
@@ -682,6 +684,7 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
       complaints: complaints.filter((k) => k.kind !== 'host_no_show').map((k) => ({ id: k.id, kind: k.kind, host: k.host, event: k.title, household: k.household, booking: k.booking_id ? k.booking_id.slice(0, 8) : null, reason: k.reason, amountPence: k.amount_pence, state: k.state, at: k.created_at, autoPayLimit: s.claim_auto_pay_limit ?? null })),
       noShows: complaints.filter((k) => k.kind === 'host_no_show').map((k) => ({ id: k.id, host: k.host, event: k.title, household: k.household, state: k.state, at: k.created_at })),
       incidentsCapped: incidents.length === 200,
+      reports: reports.map((r) => ({ id: r.id, hostId: r.host_id, host: r.host_name, event: r.title ?? null, reason: r.reason, at: r.created_at })),
       incidents: incidents.map((i) => ({ id: i.id, host: i.host, event: i.title, children: i.children ?? [], reporter: i.reporter, body: i.body, at: i.created_at })),
     });
   } catch (err) { next(err); }
@@ -715,7 +718,8 @@ router.get('/health', requires('view_hosting'), async (_req, res, next) => {
               (select count(*) from hosting_complaints where state = 'open')::int as complaints,
               (select count(*) from host_payouts where state in ('held', 'failed'))::int as payouts_waiting,
               (select count(*) from hosting_payments where kind in ('refund', 'release') and state = 'failed')::int as refunds_waiting,
-              (select count(*) from session_incidents where created_at > now() - interval '7 days')::int as incidents7`,
+              (select count(*) from session_incidents where created_at > now() - interval '7 days')::int as incidents7,
+              (select count(*) from host_reports where resolved_at is null)::int as reports`,
       [windowH],
     );
     res.json({
@@ -724,7 +728,7 @@ router.get('/health', requires('view_hosting'), async (_req, res, next) => {
       stripeMismatches: r.mismatches, openComplaints: r.complaints,
       payoutsWaiting: r.payouts_waiting, refundsWaiting: r.refunds_waiting,
       // What waits on a person in each sub-tab: the lime count beside Review, Safety and Money (BO8 §2).
-      tabs: { review: r.in_review, safety: r.complaints + r.incidents7, money: r.payouts_waiting + r.refunds_waiting + (r.mismatches ?? 0) },
+      tabs: { review: r.in_review, safety: r.complaints + r.incidents7 + r.reports, money: r.payouts_waiting + r.refunds_waiting + (r.mismatches ?? 0) },
     });
   } catch (err) { next(err); }
 });

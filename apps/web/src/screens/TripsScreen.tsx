@@ -114,8 +114,10 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
    * new. Nothing the owner asked for was removed — Where was already drawn under
    * Past only, and a trip's people are on the trip.
    */
-  const [span, setSpan] = useQueryState<'day' | 'holiday'>('span', 'day', asOneOf(['day', 'holiday'] as const, 'day'));
+  // Plans › Day trips · Holidays · Events (guest handoff G14); an old ?when=hosts link is the Events tab.
+  const [spanSet, setSpan] = useQueryState<'day' | 'holiday' | 'events'>('span', 'day', asOneOf(['day', 'holiday', 'events'] as const, 'day'));
   const [when, setWhen] = useQueryState<TripsWhen>('when', 'upcoming', asOneOf(['upcoming', 'past', 'ideas', 'hosts'] as const, 'upcoming'));
+  const span = when === 'hosts' ? 'events' : spanSet;
   // Booked with hosts (Events v4, G2): the experiences this household has booked, beside its trips.
   const [bookings, setBookings] = useState<Booking[] | null>(null);
   useEffect(() => { api.bookings().then((r) => setBookings(r.bookings)).catch(() => setBookings([])); }, [openId, when]);
@@ -295,7 +297,7 @@ export function TripsScreen({ route, household, refreshHousehold, seed, onSeedUs
       error={error}
       span={span}
       when={when}
-      onSpan={setSpan}
+      onSpan={(s) => { setSpan(s); if (when === 'hosts') setWhen('upcoming'); }}
       onWhen={setWhen}
       onOpen={(t) => navigate(paths.trip(t.id))}
       /* Holding a row opens the trip with its menu up — the ⋯ is gone from the

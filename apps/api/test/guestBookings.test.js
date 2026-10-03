@@ -542,3 +542,69 @@ test('Codex: a host can’t accept two requests that overlap', async () => {
     assert.equal(second.body.error, 'clash');
   } finally { await sa.close(); await sb.close(); await sh.close(); }
 });
+
+test('the guest pages’ reads: payments config, the inbox, Not this time, and what is due back if the most come', async () => {
+  settings.forget();
+  // Payments: a publishable key only beside a test secret, and only a test one.
+  const was = { s: process.env.STRIPE_SECRET_KEY, p: process.env.STRIPE_PUBLISHABLE_KEY };
+  const { publishableKey } = await import('../src/sources/stripe.js');
+  process.env.STRIPE_SECRET_KEY = 'sk_test_x';
+  assert.equal(publishableKey('pk_test_abc'), 'pk_test_abc');
+  assert.equal(publishableKey('pk_live_abc'), null, 'a live key never beside a test secret');
+  process.env.STRIPE_SECRET_KEY = 'sk_live_x';
+  assert.equal(publishableKey('pk_test_abc'), null, 'nothing while Stripe is live and refused');
+  process.env.STRIPE_SECRET_KEY = was.s; process.env.STRIPE_PUBLISHABLE_KEY = was.p;
+
+  // Depends on numbers: the booking page carries the floor the price can reach.
+  const { o } = await anEvent({ priceMode: 'by_numbers', total: 12000, min: 4, max: 12 });
+  const a = await aPerson();
+  const srv = await server(a.account);
+  try {
+    const cfg = await srv.get('/api/payments/config');
+    assert.equal(typeof cfg.body.ready, 'boolean');
+    const r = await srv.send('POST', `/api/experiences/${o.id}/booking`, { when: { kind: 'whole' }, party: { adults: 2 } });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const page = await srv.get(`/api/booked/${r.body.booking.id}`);
+    assert.equal(page.body.booking.numbers.paidEach, 3000, '£120 between the 4 it needs');
+    assert.deepEqual(page.body.booking.numbers.atMost, { count: 12, each: 1000, dueBackPence: 4000 }, 'if 12 come, £10 each and £20 back on each of 2');
+    assert.ok('topic' in page.body.booking.sessions[0]);
+
+    // An Ask to book the host declined reads "Not this time", with the hold released.
+    await query(`update experience_bookings set request_state = 'declined', state = 'cancelled' where id = $1`, [r.body.booking.id]);
+    const list = await srv.get('/api/booked');
+    const card = [...list.body.upcoming, ...list.body.past].find((c) => c.id === r.body.booking.id);
+    assert.equal(card.chip, 'not_this_time');
+    assert.equal(card.chipWords, 'Not this time');
+    assert.equal(card.holdReleased, true);
+
+    // The inbox: a question asked before booking is a thread, unread once the host answers.
+    const { rows: [m] } = await query('select id from members where household_id = $1 limit 1', [a.household.id]);
+    const { rows: [t] } = await query(
+      `insert into chat_topics (context_type, context_id, tag_kind, tag_ref, audience, author_member_id, title) values ('offer', $1, 'offer_aspect', 'offer', 'host_only', $2, 'Is there parking?') returning id`,
+      [o.id, m.id],
+    );
+    await query(`insert into chat_reads (target_type, target_id, member_id) values ('topic', $1, $2)`, [t.id, m.id]);
+    const { rows: [hostMember] } = await query(`select m.id from members m join hosts h on h.household_id = m.household_id where h.id = $1 limit 1`, [o.host_id]);
+    await query(`insert into chat_replies (topic_id, author_member_id, body) values ($1, $2, 'Yes, behind the hall')`, [t.id, hostMember.id]);
+    const inbox = await srv.get('/api/messages');
+    assert.equal(inbox.status, 200, JSON.stringify(inbox.body));
+    const thread = inbox.body.threads.find((x) => x.offerId === o.id);
+    assert.equal(thread.last, 'Yes, behind the hall');
+    assert.equal(thread.unread, 1);
+    assert.equal(thread.topicId, t.id);
+    assert.equal(inbox.body.unread >= 1, true);
+  } finally { await srv.close(); }
+});
+
+test('a host’s profile: reviews with their replies, the total, and no reply time from too little', async () => {
+  const repo = await import('../src/repositories/hosting.js');
+  const { o, h } = await anEvent();
+  const a = await aPerson('Amara Okoro');
+  const { rows: [b] } = await query(`insert into experience_bookings (offer_id, host_id, household_id, state) values ($1, $2, $3, 'attended') returning id`, [o.id, h.id, a.household.id]);
+  await query(`insert into host_reviews (booking_id, offer_id, host_id, household_id, stars, text, publish_on, reply) values ($1, $2, $3, $4, 3, 'Started late.', current_date - 1, 'Sorry — the start is 13:15 now.')`, [b.id, o.id, h.id, a.household.id]);
+  const [r] = await repo.publishedReviews(h.id);
+  assert.equal(r.reply, 'Sorry — the start is 13:15 now.');
+  assert.equal(r.who, 'Amara', 'the reviewer by first name only');
+  assert.equal(await repo.publishedReviewCount(h.id), 1);
+  assert.equal(await repo.replyMinutesOf(h.id), null, 'never "usually replies within" from fewer than three answers');
+});

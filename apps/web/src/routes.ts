@@ -265,8 +265,8 @@ export type IdeasTab = typeof IDEAS_TABS[number];
  */
 export const TRIP_TABS: TripSection[] = ['itinerary', 'places', 'map', 'group'];
 
-export type SettingsSection = 'preferences' | 'providers' | 'notifications' | 'devices';
-export const SETTINGS_SECTIONS: SettingsSection[] = ['preferences', 'providers', 'notifications', 'devices'];
+export type SettingsSection = 'preferences' | 'providers' | 'notifications' | 'devices' | 'payments';
+export const SETTINGS_SECTIONS: SettingsSection[] = ['preferences', 'providers', 'notifications', 'devices', 'payments'];
 
 export type PrototypeSection = 'plan' | 'places' | 'trips' | 'household' | 'settings';
 export const PROTOTYPE_SECTIONS: PrototypeSection[] = ['plan', 'places', 'trips', 'household', 'settings'];
@@ -436,6 +436,8 @@ export type Route =
   | { name: 'experience'; id: string; layer: 'book' | 'where' | 'ask' | null }
   /** A booking of ours — held, booked or past — and rating the host after. */
   | { name: 'booking'; id: string; rate: boolean; chat?: ChatLayer }
+  /** Messages (guest handoff G31): every thread with a host — one per booking, and the questions asked before booking. */
+  | { name: 'messages' }
   /** Passion-led discovery: the people near a trip who do what you love (`?trip=`, `?love=`). */
   | { name: 'people' }
   | { name: 'collections' }
@@ -642,6 +644,9 @@ export function parseRoute(path: string): Route {
       return b ? { name: 'unknown', path } : { name: 'experience', id: a, layer: null };
     }
 
+    case 'messages':
+      return a ? { name: 'unknown', path } : { name: 'messages' };
+
     case 'bookings': {
       if (!a) return { name: 'unknown', path };
       if (b === 'rate') return c ? { name: 'unknown', path } : { name: 'booking', id: a, rate: true };
@@ -823,6 +828,7 @@ export function hrefOf(route: Route): string {
       if (route.tripId) return buildHref(['open', 'trip', route.tripId, route.page === 'trip' ? null : route.page]);
       return buildHref(['open', route.page === 'fork' ? null : route.page]);
     case 'hostProfile': return buildHref(['hosts', route.hostId, route.layer]);
+    case 'messages': return '/messages';
     case 'experience': return buildHref(['experiences', route.id, route.layer]);
     case 'booking': return route.chat ? buildHref(['bookings', route.id, 'chat', chatSegment(route.chat)]) : buildHref(['bookings', route.id, route.rate ? 'rate' : null]);
     case 'people': return '/inspire/people';
@@ -970,6 +976,7 @@ export const paths = {
   experienceBook: (id: string) => buildHref(['experiences', id, 'book']),
   experienceWhere: (id: string) => buildHref(['experiences', id, 'where']),
   booking: (id: string) => buildHref(['bookings', id]),
+  messages: () => '/messages',
   bookingRate: (id: string) => buildHref(['bookings', id, 'rate']),
   /** Every collection this household can heart. */
   collections: () => '/inspire/collections',
@@ -984,7 +991,7 @@ export const paths = {
   /** A tag's page: everyone on Epic listed for it (S14). A facet has its own word in the path. */
   tag: (key: string, vocab: 'tag' | 'facet' = 'tag') => buildHref([vocab === 'facet' ? 'places-known' : 'tags', key]),
   /** Trips › Booked with hosts. */
-  bookings: () => '/plans?when=hosts',
+  bookings: () => '/plans?span=events',
   /** The spoken layer over one person: the recording, then the card of what was heard (D3, D4). */
   householdTell: (memberId: string) => buildHref(['household', memberId, 'tell']),
   householdReview: (memberId: string) => buildHref(['household', memberId, 'review']),
@@ -1107,6 +1114,9 @@ export function ownsHeader(route: Route): boolean {
   if (route.name === 'open') return true;
   // The booking sheet draws its own "Book this" head; the shell's band above it would be a second one.
   if (route.name === 'experience') return true;
+  if (route.name === 'messages') return true;
+  // A host's profile opens on its photo (guest handoff G25).
+  if (route.name === 'hostProfile') return true;
   if (route.name === 'inspire') return !route.searching;
   /**
    * Places draws its own too (handover v8, §3): the wordmark over a lime band
@@ -1176,9 +1186,10 @@ export function isImmersive(route: Route, query?: URLSearchParams): boolean {
   // profile and the recorder take the phone whole.
   if (route.name === 'host') return !['home', 'shape', 'examples', 'example', 'who', 'lanes', 'manage', ...HOST_DESK_PAGES].includes(route.page);
   if (route.name === 'open') return true;
-  if (route.name === 'booking') return true;
-  // The booking sheet is a form under a keyboard: it takes the phone whole. So is asking the host something.
-  if (route.name === 'experience') return route.layer === 'book' || route.layer === 'ask';
+  // A booking page and the Book screen keep the tab bar (guest handoff, G6–G19: drawn with it); its message
+  // thread is a conversation under a keyboard, and so is asking the host something.
+  if (route.name === 'booking') return Boolean(route.chat);
+  if (route.name === 'experience') return route.layer === 'ask';
   if (route.name !== 'trips' || route.creating || route.tripId == null) return false;
   if (route.section === 'group') return true;
   // A question open, asking one, the bell: each has a keyboard or is one thing
@@ -1216,6 +1227,11 @@ export function tabOf(route: Route): Tab | null {
     case 'collections': return 'inspire';
     case 'tag': return 'inspire';
     case 'booking': return 'trips';
+    // Members reach Messages from the icon in the Plans header (guest handoff G31).
+    case 'messages': return 'trips';
+    // Events are found in Inspire (guest handoff G1): an event page and a host's profile light that tab.
+    case 'experience': return 'inspire';
+    case 'hostProfile': return 'inspire';
     case 'prototypes': return 'prototypes';
     default: return null;
   }
@@ -1287,6 +1303,7 @@ export function parentOf(route: Route): string {
     case 'invited': return '/inspire';
     case 'hostProfile': return route.layer ? paths.hostProfile(route.hostId) : '/inspire';
     case 'experience': return route.layer ? paths.experience(route.id) : '/inspire';
+    case 'messages': return paths.trips();
     case 'booking': return route.chat ? (route.chat.page === 'list' ? paths.booking(route.id) : paths.bookingChat(route.id)) : route.rate ? paths.booking(route.id) : paths.bookings();
     case 'people': return '/inspire';
     case 'collections': return '/inspire';
@@ -1344,13 +1361,14 @@ export function titleOf(route: Route): string {
     case 'welcome': return epic('Plan less. Live more.');
     case 'opening': return epic('Welcome to Epic');
     case 'setup': return epic('Set up your family');
-    case 'settings': return epic(route.section === 'notifications' ? 'Notifications' : route.section === 'devices' ? 'Signed-in devices' : route.section === 'providers' ? 'Providers' : 'Settings');
+    case 'settings': return epic(route.section === 'notifications' ? 'Notifications' : route.section === 'devices' ? 'Signed-in devices' : route.section === 'providers' ? 'Providers' : route.section === 'payments' ? 'Payments' : 'Settings');
     case 'host': return epic(route.page in DESK_TITLE ? DESK_TITLE[route.page as keyof typeof DESK_TITLE] : route.page === 'questions' ? 'Questions' : route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Say something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.page === 'start' || route.page === 'profile' ? 'Host on Epic' : route.page === 'new' || route.page === 'edit' || route.page === 'setup' || route.page === 'compose' ? 'Your offer' : route.page === 'lanes' || route.page === 'lane' ? 'Host it' : route.page === 'publish' ? 'Before it goes' : route.page === 'done' ? 'Sent' : route.page === 'video' ? 'Your video' : route.page === 'offer' ? 'Your experience' : route.page === 'shape' ? 'How it works' : route.page === 'examples' || route.page === 'example' ? 'What people host' : route.page === 'who' ? 'Who can come' : 'Host');
     case 'invited': return epic('You are invited');
     case 'invitedLink': return epic('You are invited');
     case 'open': return epic(route.matchId ? 'An introduction' : route.page === 'who' ? 'Who you would rather meet' : 'What you are up for');
     case 'hostProfile': return epic(route.layer === 'trust' ? 'How Epic checks hosts' : 'A host');
     case 'experience': return epic(route.layer === 'book' ? 'Book this' : route.layer === 'where' ? 'Where it happens' : route.layer === 'ask' ? 'Ask the host' : 'An experience');
+    case 'messages': return epic('Messages');
     case 'booking': return epic(route.chat ? (route.chat.page === 'topic' ? 'A question' : route.chat.page === 'ask' ? 'Ask something' : route.chat.page === 'bell' ? 'What you get told about' : 'Chat') : route.rate ? 'How was it?' : 'Your booking');
     case 'people': return epic('Who does what you love?');
     case 'collections': return epic('Collections');

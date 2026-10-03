@@ -1443,11 +1443,11 @@ async function tellBooked(bookings, text) {
 
 /** A public host with its rating and its offer menu. */
 async function hostPage(h) {
-  const [rating, offers, reviews] = await Promise.all([repo.ratingOf(h.id), repo.offersOfHost(h.id), repo.publishedReviews(h.id)]);
+  const [rating, offers, reviews, reviewTotal, replyMin] = await Promise.all([repo.ratingOf(h.id), repo.offersOfHost(h.id), repo.publishedReviews(h.id), repo.publishedReviewCount(h.id), repo.replyMinutesOf(h.id)]);
   const shown = await attachSkills(offers.filter((o) => ['live', 'paused'].includes(o.state) && o.visibility === 'public'));
   const bookings = await repo.bookingsOfOffers(shown.map((o) => o.id));
   return {
-    host: publicHost(h, rating, { credentialsShown: await shownEvidence(h.id) }),
+    host: publicHost(h, rating, { credentialsShown: await shownEvidence(h.id), ...guestFacts(h, replyMin) }),
     /**
      * What this person knows, across their offers — derived, never stored
      * (owner, 13 Sep 2026). Tags belong to the offer, not the person: the same
@@ -1456,8 +1456,18 @@ async function hostPage(h) {
      */
     tags: (await skills.tagsForHost(h.id)).map((t) => ({ key: t.key, label: t.label, offers: t.offers })),
     offers: shown.map((o) => publicOffer(o, bookings.filter((b) => b.offer_id === o.id))),
-    reviews: reviews.map((r) => ({ stars: r.stars, chips: r.chips ?? [], text: r.text, on: ymd(r.publish_on), title: r.title })),
+    reviews: reviews.map((r) => ({ stars: r.stars, chips: r.chips ?? [], text: r.text, on: ymd(r.publish_on), title: r.title, who: r.who || null, reply: r.reply ?? null })),
+    reviewTotal,
   };
+}
+
+/**
+ * What the guest pages say about a host beside the name (guest handoff G2–G5, G25): how soon
+ * they usually reply — null when there is too little to say it from — and whether Checked is done.
+ */
+function guestFacts(h, replyMin) {
+  const words = replyMin == null ? null : replyMin < 60 ? `${Math.max(1, replyMin)} min` : replyMin < 24 * 60 ? `${Math.round(replyMin / 60)} hour${Math.round(replyMin / 60) === 1 ? '' : 's'}` : `${Math.round(replyMin / 1440)} days`;
+  return { replyWords: words ? `usually replies within ${words}` : null, checked: h.checked_state === 'passed' };
 }
 
 /** GET /api/hosts/:id — the profile. Public. */
@@ -1499,9 +1509,9 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
     }
     const h = await repo.hostById(o.host_id);
     await attachSkills([o]);
-    const [bookings, rating, evidence] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id), shownEvidence(h.id)]);
+    const [bookings, rating, evidence, replyMin] = await Promise.all([repo.bookingsOfOffer(o.id), repo.ratingOf(h.id), shownEvidence(h.id), repo.replyMinutesOf(h.id)]);
     const others = (await repo.offersOfHost(h.id)).filter((x) => x.id !== o.id && x.state === 'live' && x.visibility === 'public').length;
-    const offer = publicOffer(o, bookings, { host: publicHost(h, rating, { otherOffers: others, credentialsShown: evidence }) });
+    const offer = publicOffer(o, bookings, { host: publicHost(h, rating, { otherOffers: others, credentialsShown: evidence, ...guestFacts(h, replyMin) }) });
     // One view for the host's Insights (E12), by where it came from (Codex, 2 Oct 2026). Never holds the page up.
     if (o.lane) {
       const src = ['search', 'link', 'invite', 'profile', 'collection'].includes(String(req.query.src)) ? String(req.query.src) : req.query.l ? 'link' : req.query.i ? 'invite' : 'web';

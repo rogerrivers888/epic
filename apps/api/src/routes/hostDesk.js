@@ -654,12 +654,12 @@ router.post('/host/desk/events/:id/edit', async (req, res, next) => {
     });
     if (patch.description) {
       const { rows } = await query(
-        `select distinct b.household_id from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
+        `select distinct on (b.household_id) b.household_id, b.id as booking_id from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
           join offer_sessions s on s.id = bs.session_id where s.offer_id = $1 and s.state = 'scheduled' and bs.state = 'booked' and b.state in ('pending', 'confirmed')`,
         [o.id],
       );
       const stamp = new Date().toISOString().slice(0, 16);
-      for (const r of rows) await notifications.notify({ householdId: r.household_id, kind: 'event_changed', title: `${o.title ?? 'Your booking'}: the host updated the details`, link: '/trips', dedupeKey: `event_changed:${o.id}:${r.household_id}:${stamp}` }).catch(() => null);
+      for (const r of rows) await notifications.notify({ householdId: r.household_id, kind: 'event_changed', title: `${o.title ?? 'Your booking'}: the host updated the details`, link: `/bookings/${r.booking_id}`, dedupeKey: `event_changed:${o.id}:${r.household_id}:${stamp}` }).catch(() => null);
     }
     res.json({ saved: true });
   } catch (err) { next(err); }

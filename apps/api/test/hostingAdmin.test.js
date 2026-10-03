@@ -235,3 +235,16 @@ test('a hosting change replayed from Approvals carries the approval’s id; DAC7
     assert.equal(r.status, 409);
   } finally { await owner.close(); }
 });
+
+test('Report this host lands on Safety, counted on its tab, and leaves once looked into', async () => {
+  const { h } = await inReview({ adults: true });
+  const { rows: [r] } = await query(`insert into host_reports (host_id, reason) values ($1, 'Asked to be paid in cash') returning id`, [h.id]);
+  const srv = await server(STAFF);
+  try {
+    const safety = (await srv.get('/api/admin/hosting/safety')).body;
+    const row = safety.reports.find((x) => x.id === r.id);
+    assert.equal(row.reason, 'Asked to be paid in cash');
+    assert.equal(row.host, 'Kate');
+    assert.ok((await srv.get('/api/admin/hosting/health')).body.tabs.safety >= 1);
+  } finally { await srv.close(); }
+});

@@ -17,6 +17,7 @@
  * device still keeps its offline copy quietly (useOffline).
  */
 
+import { GuestPayments } from './guest/Payments';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
@@ -83,6 +84,8 @@ export function SettingsScreen({ data, refresh, route }: {
     );
   }
   if (!data) return <View style={styles.screen}><Text style={[type.small, { padding: spacing.lg }]}>Loading…</Text></View>;
+  // Settings › Payments (guest handoff G22): every payment, refund and tip, each with its receipt.
+  if (section === 'payments') return <GuestPayments onBack={() => navigate(paths.settings())} />;
   if (section === 'devices') {
     return (
       <View style={styles.screen}>
@@ -334,6 +337,7 @@ function MyAccountTab({ data, refresh }: { data: HouseholdResponse; refresh: () 
 
       <SectionHead>Account</SectionHead>
       {isLead ? <ValueRow label="Membership and billing" value={account?.plan === 'solo' ? 'Solo' : 'Household'} onPress={() => showToast('Membership and billing is coming soon')} /> : null}
+      <ValueRow label="Payments" onPress={() => navigate(paths.settings('payments'))} />
       <ValueRow label="Signed-in devices" value={devices == null ? undefined : String(devices)} onPress={() => navigate(paths.settings('devices'))} />
       {/* A plain row, no arrow: it does, it does not open (SE2). */}
       <Press onPress={async () => { await api.signOut(); if (Platform.OS === 'web' && typeof location !== 'undefined') location.reload(); }} accessibilityRole="button" style={styles.row}>

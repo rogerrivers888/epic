@@ -296,6 +296,8 @@ const PUBLIC = [
   (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+\/faq$/.test(req.path),
   // Hosting v4: what booking an event asks, so a public event page can show its button logged-out.
   (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+\/booking\/options$/.test(req.path),
+  // What a guest's browser needs to pay — the publishable key, public by Stripe's design (guest handoff G24).
+  (req) => req.method === 'GET' && req.path === '/api/payments/config',
   (req) => req.method === 'POST' && /^\/api\/hosts\/[^/]+\/report$/.test(req.path),
   (req) => req.method === 'GET' && /^\/api\/media\/[^/]+$/.test(req.path),
   /**

@@ -68,7 +68,8 @@ test('every key the app stores is in the cookie notice — read from the source,
   for (const f of files) {
     for (const m of readFileSync(f, 'utf8').matchAll(/['`](epic\.[a-zA-Z][a-zA-Z.-]*)(\$\{)?/g)) {
       const name = m[1].replace(/\.$/, '');
-      if (name === 'epic' || /\.(js|json|csv)$/.test(name)) continue;
+      // epic.day is the website's own name (the web pages' wordmark, a calendar file's id), never a stored key.
+      if (name === 'epic' || name === 'epic.day' || /\.(js|json|csv)$/.test(name)) continue;
       found.add(name);
     }
   }

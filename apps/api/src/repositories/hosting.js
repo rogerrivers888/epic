@@ -573,14 +573,47 @@ export async function insertReview(r) {
 
 /** Published guest reviews of a host, newest first, and the figures a profile shows. */
 export async function publishedReviews(hostId) {
+  // The reviewer by first name only, and the host's reply (guest handoff G25: "reviews with the host's replies").
   const { rows } = await query(
-    `select r.stars, r.chips, r.text, r.publish_on, o.title
+    `select r.stars, r.chips, r.text, r.publish_on, r.reply, o.title,
+            split_part(coalesce(nullif(trim(a.name), ''), nullif(trim(hh.name), ''), ''), ' ', 1) as who
        from host_reviews r join host_offers o on o.id = r.offer_id
+       left join households hh on hh.id = r.household_id
+       left join lateral (select name from accounts where household_id = r.household_id order by created_at limit 1) a on true
       where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date and not r.hidden
       order by r.publish_on desc limit 50`,
     [hostId],
   );
   return rows;
+}
+
+/** How many reviews a host has showing — the "All 42" beside the few on the page. */
+export async function publishedReviewCount(hostId) {
+  const { rows: [r] } = await query(
+    `select count(*)::int as n from host_reviews where host_id = $1 and side = 'guest' and publish_on <= current_date and not hidden`, [hostId],
+  );
+  return r?.n ?? 0;
+}
+
+/**
+ * How long a host usually takes to answer a question on one of their events: the
+ * median of first replies over 90 days, in minutes. Null with fewer than three to
+ * go on — "usually replies within" is never said from one answer (can't-speak).
+ */
+export async function replyMinutesOf(hostId) {
+  const { rows } = await query(
+    `select extract(epoch from (min(r.created_at) - t.created_at)) / 60 as gap
+       from chat_topics t join host_offers o on o.id = t.context_id and t.context_type = 'offer'
+       join hosts h on h.id = o.host_id
+       join chat_replies r on r.topic_id = t.id join members m on m.id = r.author_member_id and m.household_id = h.household_id
+      where o.host_id = $1 and t.created_at > now() - interval '90 days'
+      group by t.id, t.created_at`,
+    [hostId],
+  );
+  const g = rows.map((x) => Number(x.gap)).filter((x) => Number.isFinite(x) && x >= 0).sort((a, b) => a - b);
+  if (g.length < 3) return null;
+  const mid = Math.floor(g.length / 2);
+  return Math.round(g.length % 2 ? g[mid] : (g[mid - 1] + g[mid]) / 2);
 }
 
 export async function ratingOf(hostId) {

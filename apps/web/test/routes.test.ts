@@ -921,17 +921,19 @@ test('a host and an experience have public addresses; a booking is ours', () => 
   assert.deepEqual(roundTrip('/bookings/b1/rate'), { name: 'booking', id: 'b1', rate: true });
   assert.equal(parseRoute('/hosts').name, 'unknown');
   assert.equal(parseRoute('/experiences/e1/elsewhere').name, 'unknown');
-  // Logged-out pages light no tab; a booking is a layer of Trips.
-  assert.equal(tabOf(parseRoute('/hosts/h1')), null);
-  assert.equal(tabOf(parseRoute('/experiences/e1')), null);
+  // In the app an event and a host light Inspire, where events are found (guest handoff G1); a booking is a layer of Plans.
+  assert.equal(tabOf(parseRoute('/hosts/h1')), 'inspire');
+  assert.equal(tabOf(parseRoute('/experiences/e1')), 'inspire');
   assert.equal(tabOf(parseRoute('/bookings/b1')), 'trips');
   assert.equal(parentOf(parseRoute('/hosts/h1/trust')), '/hosts/h1');
   assert.equal(parentOf(parseRoute('/experiences/e1/book')), '/experiences/e1');
   assert.equal(parentOf(parseRoute('/bookings/b1/rate')), '/bookings/b1');
-  assert.equal(parentOf(parseRoute('/bookings/b1')), '/plans?when=hosts');
+  assert.equal(parentOf(parseRoute('/bookings/b1')), '/plans?span=events');
   assert.equal(titleOf(parseRoute('/experiences/e1/book')), 'Book this · Epic');
-  // The sheet is a form and takes the phone whole; the page draws its own head.
-  assert.equal(isImmersive(parseRoute('/experiences/e1/book')), true);
+  // Book and a booking page keep the tab bar (guest handoff G6–G19); the page draws its own head.
+  assert.equal(isImmersive(parseRoute('/experiences/e1/book')), false);
+  assert.equal(isImmersive(parseRoute('/bookings/b1')), false);
+  assert.equal(isImmersive(parseRoute('/bookings/b1/chat')), true, 'a message thread takes the phone whole');
   assert.equal(ownsHeader(parseRoute('/experiences/e1')), true);
 });
 
@@ -943,7 +945,7 @@ test('who near a trip does what you love is a page of Inspire', () => {
 });
 
 test('Booked with hosts is how the Trips list is set, not a page of its own', () => {
-  assert.equal(paths.bookings(), '/plans?when=hosts');
+  assert.equal(paths.bookings(), '/plans?span=events');
   assert.deepEqual(parseRoute('/plans?when=hosts'), { name: 'trips', searching: false, creating: false, tripId: null, section: null, dayId: null, stopRef: null });
 });
 

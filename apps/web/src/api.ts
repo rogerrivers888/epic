@@ -2823,6 +2823,27 @@ export const api = {
   laneBook: (offerId: string, hostId: string | null, body: Record<string, unknown>) =>
     post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number; hold: boolean } | null }>(
       `/api/experiences/${encodeURIComponent(offerId)}/booking`, { ...body, hostLink: hostLinkFor(hostId) ?? undefined }),
+  // --- The guest side (guest handoff, 3 Oct 2026, G1–G31; routes/guestBookings.js) ---
+  guestOptions: (id: string, q: { l?: string | null; i?: string | null } = {}) =>
+    request<GuestOptions>(`/api/experiences/${encodeURIComponent(id)}/booking/options${qs({ l: q.l ?? undefined, i: q.i ?? undefined })}`),
+  guestQuote: (id: string, body: GuestBookBody) => post<GuestQuote>(`/api/experiences/${encodeURIComponent(id)}/booking/quote`, body),
+  guestBook: (offerId: string, hostId: string | null, body: GuestBookBody) =>
+    post<{ booking: { id: string; state: string }; pay: { clientSecret: string | null; paymentIntent: string; amountPence: number; hold: boolean } | null }>(
+      `/api/experiences/${encodeURIComponent(offerId)}/booking`, { ...body, hostLink: hostLinkFor(hostId) ?? undefined }),
+  guestPaid: (bookingId: string, paymentIntent: string) => post<{ booking: { id: string; state: string; paymentState: string } }>(`/api/booked/${encodeURIComponent(bookingId)}/payment`, { paymentIntent }),
+  guestWaitlist: (offerId: string, body: { party?: number; sessionId?: string | null } = {}) => post<{ position: number }>(`/api/experiences/${encodeURIComponent(offerId)}/waitlist`, body),
+  guestBooked: () => request<GuestBookedList>('/api/booked'),
+  guestBooking: (id: string) => request<{ booking: GuestBooking }>(`/api/booked/${encodeURIComponent(id)}`),
+  guestCancelQuote: (id: string, sessionIds?: string[] | null) => request<{ pence: number | null; cause: string; words: string | null; release: boolean; policy: string | null }>(`/api/booked/${encodeURIComponent(id)}/cancel-quote${qs({ sessions: sessionIds?.length ? sessionIds.join(',') : undefined })}`),
+  guestCancel: (id: string, sessionIds?: string[] | null) => post<{ refundPence: number; whole: boolean }>(`/api/booked/${encodeURIComponent(id)}/cancel`, { sessionIds: sessionIds ?? null }),
+  guestKeep: (id: string) => post<{ kept: true }>(`/api/booked/${encodeURIComponent(id)}/keep`, {}),
+  guestAnswers: (id: string, answers: Record<string, unknown>) => patch<{ answers: Record<string, unknown> }>(`/api/booked/${encodeURIComponent(id)}/answers`, { answers }),
+  guestHappened: (id: string, answer: 'yes' | 'no' | 'wrong', reason?: string | null) => post<{ recorded: string }>(`/api/booked/${encodeURIComponent(id)}/happened`, { answer, reason: reason ?? null }),
+  guestRate: (id: string, body: { stars: number; hostStars?: number | null; text?: string | null; byProxy?: boolean }) => post<{ id: string }>(`/api/booked/${encodeURIComponent(id)}/rate`, body),
+  guestTip: (id: string, amountPence: number) => post<{ tip: { id: string; amountPence: number; feePence: number; totalPence: number }; pay: { clientSecret: string | null; paymentIntent: string } }>(`/api/booked/${encodeURIComponent(id)}/tip`, { amountPence }),
+  guestPayments: () => request<{ payments: GuestPayment[]; capped: boolean }>('/api/payments'),
+  guestMessages: () => request<{ threads: { offerId: string; bookingId: string | null; topicId: string | null; title: string | null; host: string; photo: string | null; last: string; at: string; unread: number }[]; unread: number; capped: boolean }>('/api/messages'),
+  paymentsConfig: () => request<{ ready: boolean; mode: 'test' | 'live' | null; publishableKey: string | null; note: string | null }>('/api/payments/config'),
   desk: () => request<DeskHome>('/api/host/desk'),
   deskCohostInvites: () => request<{ invites: { id: string; offerId: string; title: string | null; host: string; guests: boolean; messages: boolean; money: boolean }[] }>('/api/host/desk/cohost-invites'),
   deskAcceptCohost: (id: string) => post<{ accepted: true; offerId: string }>(`/api/host/desk/cohost-invites/${encodeURIComponent(id)}/accept`, {}),
@@ -5569,6 +5590,10 @@ export type PublicHost = {
   languages: string[]; childrenAges: number[];
   rating: number | null; reviewCount: number; guests: number; isNew: boolean; since: string;
   otherOffers?: number; km?: number; liveOffers?: number;
+  /** "usually replies within 2 hours", or null with too little to say it from (guest handoff G2–G5, G25). */
+  replyWords?: string | null;
+  /** Checked (DBS, insurance, references) passed — the second badge on the host's profile. */
+  checked?: boolean;
 };
 export type PaySchedule = 'weekly' | 'weekday' | 'monthly';
 /** A bank a host is paid into (SX16). Epic never holds the money: only a label, the last four digits and the holder. */
@@ -5770,7 +5795,8 @@ export type HostProfile = {
   /** What this person knows across their offers — derived, never stored. Tags belong to the offer, not the person. */
   tags: { key: string; label: string; offers: number }[];
   offers: Experience[];
-  reviews: { stars: number; chips: string[]; text: string | null; on: string; title: string | null }[];
+  reviews: { stars: number; chips: string[]; text: string | null; on: string; title: string | null; who?: string | null; reply?: string | null }[];
+  reviewTotal?: number;
 };
 export type ExperiencesNear = {
   cards: Experience[];
@@ -6200,3 +6226,54 @@ export type WaitlistResponse = {
 
 /** An invite or reset link, as L4 reads it before anything is spent. */
 export type CredentialsLink = { mode: 'invite' | 'reset'; email: string; firstName: string | null; expiresAt: string };
+
+
+// ---------------------------------------------------------------------------
+// The guest side (guest handoff, 3 Oct 2026): routes/guestBookings.js payloads
+// ---------------------------------------------------------------------------
+export type GuestLane = 'oneoff' | 'weekly' | 'course' | 'onrequest';
+export type GuestAction = 'book' | 'ask' | 'waitlist' | 'full' | 'finished' | 'closed';
+export type GuestOptions = {
+  action: GuestAction; lane: GuestLane; kinds: ('whole' | 'drop_in' | 'book_ahead' | 'request')[];
+  sessions: { id: string; n: number | null; date: string; time: string | null; placesLeft: number | null; topic: string | null }[];
+  slots: { date: string; times: string[]; lengths: number[] }[];
+  price: { mode: string; pence: number | null; childPence: number | null; per: string | null; dropInPence: number | null; bookAheadPence: number | null; totalPence: number | null; nowEach: number | null;
+    groups: { dropIn: { pct: number; min: number } | null; bookAhead: { pct: number; min: number } | null }; throughEpic: boolean };
+  who: { ageMin: number | null; ageMax: number | null; partyMax: number | null; dropOff: boolean; adultsOnly: boolean };
+  questions: Record<string, any>; refundWords: string | null;
+  waitlist: { on: boolean; offerHours: number | null }; askWindowHours: number | null;
+};
+export type GuestChild = { name?: string; age?: number | null; dob?: string | null; emergencyContact?: string | null; memberId?: string | null };
+export type GuestBookBody = {
+  when: { kind: 'whole' | 'drop_in' | 'book_ahead' | 'request'; sessionIds?: string[]; date?: string; time?: string; lengthMin?: number };
+  party: { adults: number; children: GuestChild[]; adultConfirmed?: boolean };
+  answers?: Record<string, unknown>; linkToken?: string | null; inviteToken?: string | null;
+};
+export type GuestQuote = { lines: { label: string; each: number; count: number; pence: number }[]; grossPence: number; discountPence: number; valuePence: number; numbers: { nowEach: number; decidesOn: string | null } | null; hold: boolean };
+export type GuestCard = {
+  /** Null on a waiting-list place, which carries `waitlistId` (and `offered` once a place is held for it). */
+  id: string | null; waitlistId?: string; offered?: { expiresAt: string } | null; offerId: string; title: string | null; lane: GuestLane; photo: string | null; date: string | null; time: string | null;
+  session: { n: number; of: number } | null; chip: string; chipWords: string; numbers: { booked: number; min: number } | null; rateIt: boolean; upcoming: boolean;
+  holdReleased?: boolean; refunded?: boolean;
+};
+export type GuestBookedList = {
+  upcoming: GuestCard[]; past: GuestCard[];
+  invites: { id: string; token: string; offerId: string; title: string | null; lane: GuestLane | null; photo: string | null; date: string | null; host: string | null; heads: number | null }[];
+};
+export type GuestBooking = {
+  id: string; state: string; chip: string; chipWords: string; kind: string | null; heads: number;
+  event: { id: string; title: string | null; lane: GuestLane; photo: string | null; host: { id: string; name: string }; endsAt?: string | null; refundPolicy?: string | null; partyMax?: number | null };
+  sessions: { id: string; n: number | null; topic?: string | null; date: string; time: string | null; endsAt: string | null; booked: boolean; state: string; finished: boolean; changedFrom: { date: string; time: string | null } | null }[];
+  request: { state: string; date: string | null; time: string | null; lengthMin: number | null; respondBy: string | null } | null;
+  where: { label: string | null; venue: string | null; lat: number | null; lng: number | null };
+  who: { heads: number; children: { name: string | null; age: number | null; dob: string | null; needs: string[]; emergencyContact: string | null }[] };
+  answers: Record<string, any>; answersEditable: boolean;
+  goingAhead: { min: number; booked: number; decidesOn: string | null; outcome: string | null } | null;
+  numbers: { paidEach: number; nowEach: number; dueBackPence: number; settled: boolean; heads: number; minCount: number; atMost: { count: number; each: number; dueBackPence: number } | null } | null;
+  dateChange: { sessions: { id: string; from: { date: string; time: string | null }; to: { date: string; time: string | null } }[] } | null;
+  money: { lines: { label: string; each?: number; count?: number; pence: number }[]; grossPence: number | null; discountPence: number | null; valuePence: number | null; paidPence: number | null; heldPence: number | null; refundedPence: number | null; paymentState: string; refundPolicy: string | null;
+    refunds: { pence: number; cause: string | null; state: string; at: string }[] };
+  after: { happened: string | null; rated: boolean; tipOpen: boolean } | null;
+  dropOff: boolean; [k: string]: any;
+};
+export type GuestPayment = { id: string; kind: string; pence: number; state: string; cause: string | null; at: string; title: string | null; bookingId: string | null };

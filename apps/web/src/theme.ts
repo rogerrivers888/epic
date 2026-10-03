@@ -123,6 +123,14 @@ export const DESK_REVIEWS = '#DFF5BB';  // oklch(0.94 0.08 125), ink text
 export const AMBER = '#FBECD0';         // At risk above 0, Waiting on numbers, Request
 export const AMBER_DARK = '#8A5A00';    // "· min 5" under a minimum
 export const CHIP_GREY = '#E6E2DC';     // Changed, In review
+// The guest side (guest handoff, 3 Oct 2026) — the few values its README names that nothing above already holds.
+export const GUEST_RED = '#C21725';         // oklch(0.52 0.20 25): cancel, and nothing else, on the guest's own pages
+export const GUEST_FAINT = '#7D7979';       // a lane's count beside its name
+export const GUEST_PLACEHOLDER = '#9B9797'; // an empty field's hint
+export const GUEST_DAY_OFF = '#C3BEBA';     // a calendar day the host isn't free
+export const GUEST_PHOTO_BTN = 'rgba(32,30,29,0.32)'; // back and share over the photo: 38px squares at 32% ink
+export const GUEST_SCRIM = 'rgba(32,30,29,0.42)';     // behind a sheet
+export const GUEST_WARM = '#A8A4A2';        // the × on the ink promo
 
 /**
  * Dark, from the v2 handoff's own table. Not a dimming of the light palette: a

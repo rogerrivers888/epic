@@ -146,6 +146,13 @@ function cleanAnswers(raw, asked = {}) {
 // the event page and the booking sheet
 // ---------------------------------------------------------------------------
 
+/** GET /api/payments/config — what a guest's browser needs to pay: Stripe's publishable key, or why it can't yet. */
+publicRouter.get('/payments/config', (_req, res) => {
+  const s = stripe.stripeStatus();
+  const key = stripe.publishableKey();
+  res.json({ ready: Boolean(s.ready && key), mode: s.mode, publishableKey: key, note: s.ready && !key ? 'Card payments are not switched on yet.' : s.note });
+});
+
 publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
   try {
     const e = await eventWithSessions(req.params.id);
@@ -634,7 +641,10 @@ async function bookingsOfHousehold(householdId) {
   const ids = rows.map((r) => r.id);
   const { rows: bs } = ids.length ? await query(
     `select bs.booking_id, bs.state as held, s.*,
-            coalesce((select sum(b2.heads) from booking_sessions x join experience_bookings b2 on b2.id = x.booking_id where x.session_id = s.id and x.state = 'booked' and b2.state in ('pending', 'confirmed', 'attended')), 0)::int as booked
+            coalesce((select sum(b2.heads) from booking_sessions x join experience_bookings b2 on b2.id = x.booking_id where x.session_id = s.id and x.state = 'booked' and b2.state in ('pending', 'confirmed', 'attended')), 0)::int as booked,
+            -- Who was booked when it was decided: the live bookings and the ones its calling-off cancelled (G17 "It needed 4 and had 2").
+            coalesce((select sum(b2.heads) from booking_sessions x join experience_bookings b2 on b2.id = x.booking_id where x.session_id = s.id
+                       and (b2.state in ('pending', 'confirmed', 'attended') or b2.cancel_cause = 'called_off')), 0)::int as booked_at_decision
        from booking_sessions bs join offer_sessions s on s.id = bs.session_id where bs.booking_id = any($1::uuid[]) order by s.on_date, s.starts_at`,
     [ids],
   ) : { rows: [] };
@@ -651,6 +661,9 @@ function card(b, now) {
   const seen = b.change_seen_at ? new Date(b.change_seen_at) : new Date(b.created_at);
   const chip = guestChip({ booking: b, sessions: b.sessionsList.map((x) => ({ changed: Boolean(x.changed_from && new Date(x.changed_from.at) > new Date(b.created_at) && new Date(x.changed_from.at) > seen), decided: x.decided_outcome })), min: b.min_count, booked: nextS?.booked ?? 0 });
   const lastEnd = b.sessionsList.length ? Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime())) : null;
+  // An Ask to book the host declined, or didn't answer in time (guest handoff G28): "Not this time · Hold released".
+  const notThisTime = b.request_state === 'declined' || b.request_state === 'lapsed';
+  if (notThisTime) { chip.chip = 'not_this_time'; chip.words = 'Not this time'; }
   return {
     id: b.id, offerId: b.offer_id, title: b.title, lane: b.lane, photo: mediaRef(b.photo_ids?.[0]),
     date: nextS ? ymd(nextS.on_date) : b.requested_date ? ymd(b.requested_date) : b.sessionsList[0] ? ymd(b.sessionsList[0].on_date) : null,
@@ -660,8 +673,61 @@ function card(b, now) {
     numbers: b.min_count && chip.chip === 'waiting' ? { booked: nextS?.booked ?? 0, min: b.min_count } : null,
     rateIt: Boolean(lastEnd && lastEnd <= now.getTime() && !b.rated_at && b.state !== 'cancelled'),
     upcoming: Boolean(nextS) || b.request_state === 'asked',
+    holdReleased: notThisTime,
+    refunded: Number(b.refunded_pence ?? 0) > 0,
   };
 }
+
+/**
+ * GET /api/messages — the guest's inbox (guest handoff G31): one thread per event they booked or asked about,
+ * newest first, with the last thing said and how much of it they haven't seen. Each opens where its messages
+ * already live: the booking's thread, or the question on the event page. Capped at 100 threads, and it says so.
+ */
+router.get('/messages', async (_req, res, next) => {
+  try {
+    const { household, account } = await me();
+    const memberId = account?.member_id ?? null;
+    const { rows } = await query(
+      `with mine as (
+         select o.id as offer_id, (array_agg(b.id order by b.created_at desc))[1] as booking_id
+           from experience_bookings b join host_offers o on o.id = b.offer_id
+          where b.household_id = $1 and o.lane is not null group by o.id
+         union
+         select t.context_id, null::uuid from chat_topics t join members m on m.id = t.author_member_id
+          where t.context_type = 'offer' and m.household_id = $1
+       ), threads as (select offer_id, (array_agg(booking_id) filter (where booking_id is not null))[1] as booking_id from mine group by offer_id),
+       seen as (
+         -- What this household may read on an event: its notices, and its own questions to the host.
+         select t.* from chat_topics t join threads x on x.offer_id = t.context_id
+          where t.context_type = 'offer' and not t.hidden
+            and (t.audience = 'everyone' or exists (select 1 from members m where m.id = t.author_member_id and m.household_id = $1))
+       )
+       select x.offer_id, x.booking_id, o.title, h.name as host, h.photo_id,
+              last.at as last_at, last.body as last_body, last.topic_id,
+              (select count(*)::int from seen t where t.context_id = x.offer_id and $2::uuid is not null
+                  and not exists (select 1 from chat_reads r where r.target_type = 'topic' and r.target_id = t.id and r.member_id = $2))
+            + (select count(*)::int from chat_replies y join seen t on t.id = y.topic_id where t.context_id = x.offer_id and not y.hidden and $2::uuid is not null
+                  and (y.author_member_id is null or y.author_member_id <> $2)
+                  and not exists (select 1 from chat_reads r where r.target_type = 'reply' and r.target_id = y.id and r.member_id = $2)) as unread
+         from threads x join host_offers o on o.id = x.offer_id join hosts h on h.id = o.host_id
+         left join lateral (
+           select at, body, topic_id from (
+             select t.created_at as at, t.title as body, t.id as topic_id from seen t where t.context_id = x.offer_id
+             union all
+             select y.created_at, y.body, t.id from chat_replies y join seen t on t.id = y.topic_id where t.context_id = x.offer_id and not y.hidden
+           ) z order by at desc limit 1
+         ) last on true
+        where last.at is not null
+        order by last.at desc limit 100`,
+      [household.id, memberId],
+    );
+    res.json({
+      threads: rows.map((r) => ({ offerId: r.offer_id, bookingId: r.booking_id, topicId: r.topic_id, title: r.title, host: r.host, photo: mediaRef(r.photo_id), last: String(r.last_body ?? '').slice(0, 140), at: r.last_at, unread: r.unread })),
+      unread: rows.reduce((n, r) => n + (r.unread ?? 0), 0),
+      capped: rows.length === 100,
+    });
+  } catch (err) { next(err); }
+});
 
 router.get('/booked', async (_req, res, next) => {
   try {
@@ -714,7 +780,15 @@ router.get('/booked/:id', async (req, res, next) => {
     const firstAhead = live.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     const lastEnd = b.sessionsList.length ? new Date(Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime()))) : null;
     const settlement = o.price_mode === 'by_numbers' && o.total_pence && o.min_count
-      ? (() => { const n = numbersSettlement({ totalPence: o.total_pence, minCount: o.min_count, heads: live[0]?.booked ?? o.min_count }); return { paidEach: n.paidEach, nowEach: n.finalEach, dueBackPence: n.backEach * b.heads, settled: Boolean(b.settled_at) }; })()
+      ? (() => {
+        const n = numbersSettlement({ totalPence: o.total_pence, minCount: o.min_count, heads: live[0]?.booked ?? o.min_count });
+        // And if the most come (G29 "If 7 come · due back"): the floor the price can reach, so the guest sees the whole range.
+        const most = o.max_count && o.max_count > o.min_count ? numbersSettlement({ totalPence: o.total_pence, minCount: o.min_count, heads: o.max_count }) : null;
+        return {
+          paidEach: n.paidEach, nowEach: n.finalEach, dueBackPence: n.backEach * b.heads, settled: Boolean(b.settled_at), heads: b.heads, minCount: o.min_count,
+          atMost: most ? { count: o.max_count, each: most.finalEach, dueBackPence: most.backEach * b.heads } : null,
+        };
+      })()
       : null;
     const decides = b.sessionsList.find((x) => x.decides_at);
     const changed = b.sessionsList.filter((x) => x.changed_from && new Date(x.changed_from.at) > new Date(b.created_at));
@@ -722,13 +796,14 @@ router.get('/booked/:id', async (req, res, next) => {
     res.json({
       booking: {
         id: b.id, state: b.state, chip: c.chip, chipWords: c.chipWords, kind: b.booking_kind, heads: b.heads,
-        event: { id: o.id, title: o.title, lane: o.lane, photo: mediaRef(o.photo_ids?.[0]), host: { id: host.id, name: host.name } },
-        sessions: b.sessionsList.map((x) => ({ id: x.id, n: x.n, date: ymd(x.on_date), time: hm(x.starts_at), endsAt: hm(x.ends_at), booked: x.held === 'booked', state: x.state, finished: endOf(x, o) <= now, changedFrom: x.changed_from ? { date: x.changed_from.onDate, time: x.changed_from.startsAt } : null })),
+        event: { id: o.id, title: o.title, lane: o.lane, photo: mediaRef(o.photo_ids?.[0]), host: { id: host.id, name: host.name }, endsAt: hm(o.ends_at), refundPolicy: o.refund_policy ?? null, partyMax: o.party_max ?? null },
+        sessions: b.sessionsList.map((x) => ({ id: x.id, n: x.n, topic: x.topic ?? null, date: ymd(x.on_date), time: hm(x.starts_at), endsAt: hm(x.ends_at), booked: x.held === 'booked', state: x.state, finished: endOf(x, o) <= now, changedFrom: x.changed_from ? { date: x.changed_from.onDate, time: x.changed_from.startsAt } : null })),
         request: b.request_state ? { state: b.request_state, date: ymd(b.requested_date), time: hm(b.requested_time), lengthMin: b.requested_length_min, respondBy: b.respond_by } : null,
-        where: { label: o.address_hidden === false || ['confirmed', 'attended'].includes(b.state) ? o.venue_label : o.venue_area ?? null, venue: o.venue, lat: ['confirmed', 'attended'].includes(b.state) ? o.venue_lat : null, lng: ['confirmed', 'attended'].includes(b.state) ? o.venue_lng : null },
+        // The exact address once booked (or when the host never hid it); the area until then, and whenever no address was written down.
+        where: { label: (o.address_hidden === false || ['confirmed', 'attended'].includes(b.state) ? o.venue_label : null) ?? o.venue_area ?? null, venue: o.venue, lat: ['confirmed', 'attended'].includes(b.state) ? o.venue_lat : null, lng: ['confirmed', 'attended'].includes(b.state) ? o.venue_lng : null },
         who: { heads: b.heads, children: kids.map((k) => ({ name: k.name, age: k.age, dob: ymd(k.date_of_birth), needs: k.needs ?? [], emergencyContact: k.emergency_contact })) },
         answers: b.answers ?? {}, answersEditable: answersEditable(firstAhead, now) && b.state !== 'cancelled',
-        goingAhead: o.min_count ? { min: o.min_count, booked: live[0]?.booked ?? 0, decidesOn: decides ? localDay(new Date(decides.decides_at), tzOf(o)) : null, outcome: decides?.decided_outcome ?? null } : null,
+        goingAhead: o.min_count ? { min: o.min_count, booked: b.cancel_cause === 'called_off' ? (b.sessionsList[0]?.booked_at_decision ?? 0) : live[0]?.booked ?? 0, decidesOn: decides ? localDay(new Date(decides.decides_at), tzOf(o)) : null, outcome: decides?.decided_outcome ?? null } : null,
         numbers: settlement,
         dateChange: changed.some((x) => !b.change_seen_at || new Date(x.changed_from.at) > new Date(b.change_seen_at)) ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
         money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy, refunds: refunds.map((r) => ({ pence: r.amount_pence, cause: r.cause, state: r.state, at: r.created_at })) },

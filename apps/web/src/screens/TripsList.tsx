@@ -1,11 +1,14 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
-import { Booking, TripSummary } from '../api';
+import { api, Booking, TripSummary } from '../api';
+import { paths } from '../routes';
+import { useRouter } from '../router';
+import { PlansEvents } from './guest/PlansEvents';
 import { colors, fonts, type } from '../theme';
 import { useScrollMemory } from '../cache/resourceCache';
 import { useViewport } from '../hooks/useViewport';
-import { TallBand, MicTile } from '../components/Band';
+import { TallBand, MicTile, MessagesTile } from '../components/Band';
 import { InkMenu } from '../components/InkMenu';
 import { SectionHeader } from '../components/NavRows';
 import { VenueThumb, MEDIA_RADIUS, CARD_W, CARD_H } from '../components/VenueThumb';
@@ -97,9 +100,9 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
   onOpenBooking?: (b: Booking) => void;
   loading: boolean;
   error: string | null;
-  span: 'day' | 'holiday';
+  span: 'day' | 'holiday' | 'events';
   when: TripsWhen;
-  onSpan: (s: 'day' | 'holiday') => void;
+  onSpan: (s: 'day' | 'holiday' | 'events') => void;
   onWhen: (w: TripsWhen) => void;
   onOpen: (t: TripSummary) => void;
   /** Hold a row for rename, share and delete — where the ⋯ went (5h). */
@@ -108,6 +111,10 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
   wide: boolean;
 }) {
   const all = trips ?? [];
+  const { navigate } = useRouter();
+  // Messages' unread count for the tile in the band (G14, G31). A failed read shows no count rather than a nought.
+  const [unread, setUnread] = useState(0);
+  useEffect(() => { api.guestMessages().then((r) => setUnread(r.unread)).catch(() => setUnread(0)); }, []);
   // Whether a trip is a fixed 280-wide card in a wrapping grid, or the full-width
   // phone card. The `wide` prop turns on at 1000 (Trips' own breakpoint, with the
   // 860 reading cap); the card picture must switch at the 900 the desktop shell
@@ -144,18 +151,19 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
   return (
     <View style={{ flex: 1 }}>
       <View style={wide ? styles.wide : undefined}>
-        {/* The Trips mic starts a new trip by voice (§4). */}
-        <TallBand right={<MicTile onPress={onNew} accessibilityLabel="Start a new trip" />} />
+        {/* The Plans mic starts a new trip by voice (§4); Messages sits beside it with its unread count (guest handoff G14, 4c). */}
+        <TallBand right={<View style={{ flexDirection: 'row', gap: 6 }}><MessagesTile unread={unread} onPress={() => navigate(paths.messages())} /><MicTile onPress={onNew} accessibilityLabel="Start a new trip" /></View>} />
         <InkMenu
-          tabs={[{ key: 'day', label: 'Day trips' }, { key: 'holiday', label: 'Holidays' }]}
+          tabs={[{ key: 'day', label: 'Day trips' }, { key: 'holiday', label: 'Holidays' }, { key: 'events', label: 'Events' }]}
           selected={span}
           // Choosing a span is also the way out of the bookings focus: without
           // the old `when` menu, tapping a tab is the only control left, so it
           // clears ?when=hosts back to the trip sections (Codex P1).
-          onSelect={(s) => { onSpan(s as 'day' | 'holiday'); if (when === 'hosts') onWhen('upcoming'); }}
+          onSelect={(s) => { onSpan(s as 'day' | 'holiday' | 'events'); if (when === 'hosts') onWhen('upcoming'); }}
         />
       </View>
 
+      {span === 'events' ? <View style={[{ flex: 1 }, wide ? styles.wide : null]}><PlansEvents /></View> : (
       <ScrollView ref={scroll.ref as any} onScroll={scroll.onScroll} scrollEventThrottle={scroll.scrollEventThrottle} contentContainerStyle={[styles.body, wide && styles.wideBody]} keyboardShouldPersistTaps="handled">
         {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
         {loading && !trips ? <Text style={type.small}>Loading…</Text> : null}
@@ -190,6 +198,7 @@ export function TripsList({ trips, bookings, loading, error, span, when, onSpan,
           </>
         )}
       </ScrollView>
+      )}
     </View>
   );
 }

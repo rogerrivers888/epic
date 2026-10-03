@@ -27,12 +27,14 @@ type Safety = {
   complaints: { id: string; kind: 'complaint' | 'guarantee_claim'; host: string | null; event: string | null; household: string | null; reason: string | null; at: string; autoPayLimit: number | null }[];
   noShows: { id: string; host: string | null; event: string | null; household: string | null; at: string }[];
   incidents: { id: string; host: string | null; event: string | null; children: string[]; reporter: 'host' | 'guest' | 'staff'; body: string; at: string }[];
+  reports?: { id: string; hostId: string; host: string; event: string | null; reason: string; at: string }[];
 };
 type Checked = Safety['checked'][number];
 type Rating = NonNullable<Safety['ratings']>[number] & { cantSpeak?: boolean };
 type Complaint = Safety['complaints'][number];
 type NoShow = Safety['noShows'][number];
 type Incident = Safety['incidents'][number];
+type Report = NonNullable<Safety['reports']>[number];
 
 const CHECKED_WORDS: Record<string, string> = { none: 'Missing', submitted: 'Submitted', passed: 'Passed', failed: 'Failed' };
 const KIND_OF_CLAIM: Record<string, string> = { complaint: 'Complaint', guarantee_claim: 'Guarantee claim' };
@@ -48,6 +50,8 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
   const cl = useSortParam('csort');
   const ns = useSortParam('nsort');
   const ic = useSortParam('isort');
+  const rp = useSortParam('rpsort');
+  const [reportError, setReportError] = useState<string | null>(null);
 
   /** The complaint being closed, and why — Resolve and Decline both ask for a line. */
   const [closing, setClosing] = useState<{ id: string; state: 'resolved' | 'declined' } | null>(null);
@@ -64,6 +68,8 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
   const noShows = useSorted(data?.noShows, ns.sort, ns.desc, (r, k) => (k === 'host' ? r.host : k === 'event' ? r.event : k === 'household' ? r.household : k === 'at' ? r.at : null));
   const incidents = useSorted(data?.incidents, ic.sort, ic.desc, (r, k) => (
     k === 'at' ? r.at : k === 'host' ? r.host : k === 'event' ? r.event : k === 'reporter' ? REPORTER[r.reporter] : k === 'children' ? r.children.length : k === 'body' ? r.body : null));
+
+  const reports = useSorted(data?.reports, rp.sort, rp.desc, (r, k) => (k === 'host' ? r.host : k === 'event' ? r.event : k === 'reason' ? r.reason : k === 'at' ? r.at : null));
 
   if (!data) return <Loading error={error} reload={reload} />;
 
@@ -134,6 +140,16 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
     { key: 'at', label: 'Date', sort: 'at', width: 120, tip: tip('Date', 'When it was reported.'), cell: (r) => <Word>{when(r.at)}</Word> },
   ];
 
+  // ---- Reports: "Report this host" from a profile or an event page (guest handoff G25).
+  const reportCols: Col<Report>[] = [
+    { key: 'host', label: 'Host', sort: 'host', width: 180, tip: tip('Host', 'Who was reported.'), cell: (r) => <Word>{r.host}</Word> },
+    { key: 'event', label: 'Event', sort: 'event', width: 220, tip: tip('Event', 'The event page it was sent from; a dash when it came from the profile.'), cell: (r) => (r.event ? <Word>{r.event}</Word> : <Blank />) },
+    { key: 'reason', label: 'What they said', sort: 'reason', grow: true, tip: tip('What they said', 'In the reporter’s words.'), cell: (r) => <Word>{r.reason}</Word> },
+    { key: 'at', label: 'Date', sort: 'at', width: 110, tip: tip('Date', 'When it was sent.'), cell: (r) => <Word>{when(r.at)}</Word> },
+    ...(canManage ? [{ key: 'act', label: '', width: 110, tip: tip('Done', 'Looked into and closed.'),
+      cell: (r: Report) => <Act label="Done" tone="secondary" small onPress={() => { setReportError(null); api.hostingAdminPost(`/reports/${r.id}/resolve`, {}).then(reload).catch((e) => setReportError(e?.message ?? 'That didn’t save.')); }} /> }] : []),
+  ];
+
   // ---- Incidents: never deleted, so no action column at all.
   const incidentCols: Col<Incident>[] = [
     { key: 'at', label: 'When', sort: 'at', width: 120, tip: tip('When', 'When it was recorded.'), cell: (r) => <Word>{when(r.at, true)}</Word> },
@@ -162,6 +178,7 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
         <Stat label="Caught by rating" value={data.ratings == null ? '—' : data.ratings.length.toLocaleString()}
               tip={data.ratings == null ? tip('Caught by rating', data.ratingsReason ?? 'The rating rule is not set yet.') : tip('Caught by rating', 'Hosts the rating rule has caught.')} />
         <Stat label="No-shows" value={data.noShows.length.toLocaleString()} tip={tip('No-shows', 'Open reports. Refunded in full automatically.')} />
+        <Stat label="Host reports" value={(data.reports?.length ?? 0).toLocaleString()} tip={tip('Host reports', 'Open reports sent from a host’s profile or an event page.')} />
       </Band>
 
       <View>
@@ -188,6 +205,12 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
             {failed ? <Text style={[type.small, { color: red() }]}>{failed}</Text> : null}
           </View>
         ) : null}
+      </View>
+
+      <View>
+        <TableHead tip={tip('Host reports', 'Sent from a host’s profile or an event page. Open ones, newest first.')}>Host reports</TableHead>
+        {reportError ? <Text style={[type.small, { color: red() }]}>{reportError}</Text> : null}
+        <Ladder columns={reportCols} rows={reports} keyOf={(r) => r.id} sort={rp.sort} desc={rp.desc} onSort={rp.onSort} empty={<Blank />} />
       </View>
 
       <View>

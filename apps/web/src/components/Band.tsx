@@ -3,7 +3,7 @@ import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { Press } from './press';
 import { Icon } from './Icon';
 import { Wordmark } from './Wordmark';
-import { LIME, INK, MIC_TILE, DEEP_GREEN, fonts } from '../theme';
+import { LIME, INK, CREAM, MIC_TILE, DEEP_GREEN, fonts } from '../theme';
 import { TOP_INSET } from './InspireHeader';
 
 /**
@@ -27,6 +27,22 @@ export function MicTile({ onPress, accessibilityLabel = 'Speak' }: { onPress: ()
   return (
     <Press onPress={onPress} style={styles.mic} accessibilityRole="button" accessibilityLabel={accessibilityLabel}>
       <Icon name="mic" size={22} color={INK} strokeWidth={2.2} />
+    </Press>
+  );
+}
+
+/**
+ * Plans' messages tile (guest handoff G14, 4c): the mic tile's twin, beside it,
+ * with the unread count as a small ink square in its top-right corner — none
+ * when nothing is unread. It opens Messages.
+ */
+export function MessagesTile({ unread, onPress }: { unread: number; onPress: () => void }) {
+  return (
+    <Press onPress={onPress} style={styles.mic} accessibilityRole="button" accessibilityLabel={unread ? `Messages, ${unread} unread` : 'Messages'}>
+      <Icon name="message" size={22} color={INK} strokeWidth={2.2} />
+      {unread > 0 ? (
+        <View style={styles.count}><Text style={styles.countText}>{unread > 99 ? '99+' : String(unread)}</Text></View>
+      ) : null}
     </Press>
   );
 }
@@ -159,6 +175,8 @@ const styles = StyleSheet.create({
   title: { fontFamily: fonts.heading, fontWeight: '800', fontSize: 22, letterSpacing: -22 * 0.03, lineHeight: 24, color: INK },
   context: { fontSize: 12.5, color: DEEP_GREEN, marginTop: 2 },
   mic: { width: 44, height: 44, backgroundColor: MIC_TILE, alignItems: 'center', justifyContent: 'center' },
+  count: { position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, paddingHorizontal: 4, backgroundColor: INK, alignItems: 'center', justifyContent: 'center' },
+  countText: { fontFamily: fonts.body, fontSize: 10, fontWeight: '800', color: CREAM, lineHeight: 12 },
   photo: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: INK, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   photoImg: { width: 40, height: 40, borderRadius: 20, backgroundColor: LIME, alignItems: 'center', justifyContent: 'center' },
 });
