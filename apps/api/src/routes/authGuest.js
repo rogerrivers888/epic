@@ -22,12 +22,15 @@
 import express from 'express';
 import { accountByEmail, createGuestLink, normaliseEmail } from '../repositories/accounts.js';
 import { sendLoginLink } from './session.js';
-import { guestNext } from './authGoogle.js';
+import { guestGoogleOn, guestNext } from './authGoogle.js';
 
 const router = express.Router();
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const GUEST_LINK_SENT = 'Check your email — a link to finish is on its way. It works once, for 15 minutes.';
+
+/** Which ways in the free account step may offer: email always, Google only once it is switched on. */
+router.get('/auth/guest', (_req, res) => res.json({ email: true, google: guestGoogleOn() }));
 
 router.post('/auth/guest', async (req, res, next) => {
   try {

@@ -267,7 +267,7 @@ const PUBLIC = [
   (req) => req.method === 'GET' && /^\/api\/auth\/link\/[^/]+$/.test(req.path),
   // "Use my email" on the free account step (routes/authGuest.js, G21): sends a
   // link and answers the same whatever the address; held to the sign-in limit.
-  (req) => req.method === 'POST' && req.path === '/api/auth/guest',
+  (req) => (req.method === 'POST' || req.method === 'GET') && req.path === '/api/auth/guest',
   // Postmark's delivery, open and bounce events: admitted by their own token (routes/postmark.js), never by a session.
   (req) => req.method === 'POST' && req.path === '/api/postmark/events',
   // Stripe's events (routes/hostLanes.js): admitted by their signature, never by a session.

@@ -3629,6 +3629,8 @@ export const api = {
    * account, so it cannot be used to find out who else uses Epic.
    */
   requestSignInLink: (email: string) => post<{ sent: boolean; message: string }>('/api/session/request-link', { email }),
+  /** Which ways in the free account step offers (G21): Google only once it is switched on. */
+  guestAccountOptions: () => request<{ email: boolean; google: boolean }>('/api/auth/guest'),
   /**
    * "Use my email" on the free account step (G21): a link to the address, and the
    * account is made when it is opened. Answered the same whether or not the

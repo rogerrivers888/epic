@@ -19,7 +19,7 @@
  * drawn only on the web.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { api, ApiError } from '../../api';
 import { rememberNext } from '../../afterSignIn';
@@ -39,6 +39,14 @@ export function FreeAccount({ next, line, onLeave }: {
   onLeave?: () => void;
 }) {
   const google = () => { onLeave?.(); startGoogle(next); };
+  // Google is offered only once the server says it is switched on; until then email is the way in.
+  const [googleOn, setGoogleOn] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.guestAccountOptions().then((o) => { if (live) setGoogleOn(Boolean(o?.google)); }).catch(() => null);
+    return () => { live = false; };
+  }, []);
+  const offerGoogle = Platform.OS === 'web' && googleOn;
   const [step, setStep] = useState<'choose' | 'email' | 'sent'>('choose');
   const [email, setEmail] = useState('');
   const [err, setErr] = useState<string | null>(null);
@@ -86,12 +94,12 @@ export function FreeAccount({ next, line, onLeave }: {
                  keyboardType="email-address" maxLength={254} error={err} onSubmit={() => { if (!busy) void send(); }} />
           <Buttons items={[
             { label: busy ? '…' : 'Send me a link', tone: 'ink', disabled: busy, onPress: () => { void send(); } },
-            ...(Platform.OS === 'web' ? [{ label: 'Continue with Google', onPress: google }] : []),
+            ...(offerGoogle ? [{ label: 'Continue with Google', onPress: google }] : []),
           ]} />
         </>
       ) : (
         <Buttons items={[
-          ...(Platform.OS === 'web' ? [{ label: 'Continue with Google', onPress: google }] : []),
+          ...(offerGoogle ? [{ label: 'Continue with Google', onPress: google }] : []),
           { label: 'Use my email', onPress: () => setStep('email') },
         ]} />
       )}

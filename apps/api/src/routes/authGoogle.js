@@ -173,6 +173,13 @@ export function guestNext(value) {
 }
 
 /** Where the web app lives, so the callback can hand control back to it. */
+/**
+ * Google for a free guest account is off until Roger has set it up (3 Oct 2026: "Blocked on Roger … Google sign-in
+ * for guests: build everything around it, leave it switched off"). `EPIC_GUEST_GOOGLE=on` turns it on; anything
+ * else leaves guests with "Use my email" only, and the guest door here makes nothing.
+ */
+export const guestGoogleOn = () => String(process.env.EPIC_GUEST_GOOGLE ?? '').trim().toLowerCase() === 'on';
+
 const loginUrl = (req, query) => `${webUrl(req)}/login${query ? `?${query}` : ''}`;
 
 // --- matching and the staff gate -------------------------------------------
@@ -335,6 +342,8 @@ router.get('/auth/google', toCanonicalHost, signInLimit, async (req, res) => {
     const invite = inviteToken(req.query.invite);
     // A free guest account (G21): only from a guest page, and only ever back to one.
     const guest = !invite && req.query.intent === 'guest';
+    // Switched off: straight back to the page they came from, where "Use my email" is the way in.
+    if (guest && !guestGoogleOn()) return res.redirect(`${webUrl(req)}${guestNext(req.query.next) ?? '/'}`);
     const next = guest ? guestNext(req.query.next) : safeNext(req.query.next);
 
     handshakeCookie(res, sign({ v: verifier, s: state, n: nonce, next, ...(invite ? { i: invite } : {}), ...(guest ? { g: 1 } : {}) }));
@@ -387,6 +396,8 @@ router.get('/auth/google/callback', async (req, res) => {
   // The guest door (G21) may make a free account; the plain door never does.
   let resolved;
   try {
+    // A handshake begun before the switch went off makes nothing either.
+    if (stash.g === 1 && !guestGoogleOn()) throw new Error('guest Google is off');
     resolved = stash.g === 1
       ? await resolveGuestGoogleAccount({ ...identity, name: typeof claims?.name === 'string' ? claims.name : null })
       : await resolveGoogleAccount(identity);

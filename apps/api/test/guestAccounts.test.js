@@ -28,7 +28,7 @@ process.env.EPIC_SIGNIN_MAX_FAILURES = '100';
 const { query, pool } = await testDatabase();
 
 const accounts = await import('../src/repositories/accounts.js');
-const { resolveGuestGoogleAccount, resolveGoogleAccount, guestNext } = await import('../src/routes/authGoogle.js');
+const { resolveGuestGoogleAccount, resolveGoogleAccount, guestNext, guestGoogleOn } = await import('../src/routes/authGoogle.js');
 const { default: sessionRoutes } = await import('../src/routes/session.js');
 const { default: authGuestRoutes, GUEST_LINK_SENT } = await import('../src/routes/authGuest.js');
 const { requireSession, openSession } = await import('../src/auth.js');
@@ -338,4 +338,20 @@ test('a guest household is never counted as a member', async () => {
   const { account } = await guestSession();
   const rows = await classifyHouseholds({ householdId: account.household_id });
   assert.equal(rows.length, 0, 'guest households are not classified at all');
+});
+
+test('Google for a guest is off until it is switched on, and the step offers only email until then', async () => {
+  const before = process.env.EPIC_GUEST_GOOGLE;
+  try {
+    delete process.env.EPIC_GUEST_GOOGLE;
+    assert.equal(guestGoogleOn(), false);
+    assert.deepEqual((await call('GET', '/api/auth/guest')).body, { email: true, google: false });
+    process.env.EPIC_GUEST_GOOGLE = 'yes';
+    assert.equal(guestGoogleOn(), false, 'only the word on');
+    process.env.EPIC_GUEST_GOOGLE = ' ON ';
+    assert.equal(guestGoogleOn(), true);
+    assert.deepEqual((await call('GET', '/api/auth/guest')).body, { email: true, google: true });
+  } finally {
+    if (before === undefined) delete process.env.EPIC_GUEST_GOOGLE; else process.env.EPIC_GUEST_GOOGLE = before;
+  }
 });
