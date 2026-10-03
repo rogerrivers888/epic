@@ -818,6 +818,10 @@ router.post('/host/lanes/verify', async (req, res, next) => {
     const host = await repo.hostById(first.id);
     if (host.identity_state === 'verified') return res.json({ url: null, verified: true });
     const back = `${appUrl()}/host/offers/${encodeURIComponent(str(req.body?.offerId, 40) ?? '')}/publish?back=verified`;
+    // Explicit consent to the selfie match, which is biometric data (L7), logged with its date — before a check is
+    // started, and before one already open is carried on (Codex, 3 Oct 2026). The request carries the host's yes.
+    if (req.body?.consent !== true) throw refuse(400, 'consent_required', 'Agree to the face match first.');
+    await hostingSettings.logChange({ subjectKind: 'host', subjectId: host.id, field: 'identity_consent', after: { biometric: true, at: new Date().toISOString() }, by: account?.id ?? null, byLabel: 'host' });
     // One open check at a time: a second tap carries on with the first session rather than
     // orphaning it, so finishing either one counts (Codex, 2 Oct 2026).
     if (host.identity_session_id && host.identity_state === 'pending') {
@@ -827,10 +831,6 @@ router.post('/host/lanes/verify', async (req, res, next) => {
       // Stripe is still reading what was sent: wait for it, never start a second check (Codex, 2 Oct 2026).
       if (open?.status === 'processing') return res.json({ url: null, processing: true });
     }
-    // Explicit consent to the selfie match, which is biometric data (L7), logged with its date. The words are Stripe's
-    // own, shown on the screen before the selfie; the request carries the host's yes.
-    if (req.body?.consent !== true) throw refuse(400, 'consent_required', 'Agree to the face match first.');
-    await hostingSettings.logChange({ subjectKind: 'host', subjectId: host.id, field: 'identity_consent', after: { biometric: true, at: new Date().toISOString() }, by: account?.id ?? null, byLabel: 'host' });
     // A host who will take money through Epic gets their Stripe account now, before the check, so the check can be tied
     // to the account's Person (create account → passport and selfie → Stripe's form). A free-event host gets none (L6).
     let me2 = host;
@@ -1132,7 +1132,8 @@ export async function applyStripeEvent(event) {
             subject: `Stripe is asking ${host.name ?? 'a host'} for ID again`,
             text: [`Stripe's onboarding lists ${asks.join(', ')} for ${host.name ?? 'a host'} (${obj.id}), although their passport check passed on ${host.identity_verified_at ? new Date(host.identity_verified_at).toISOString().slice(0, 10) : 'an earlier date'}.`,
               'The host has not been asked to do anything. Epic hosting › the host, or the Stripe sandbox dashboard, shows the account.'].join('\n\n'),
-          }).catch((err) => console.error(`epic-api: owner alert failed — ${err.message}`));
+          });
+          // A failure to send is not caught: the event is then not marked processed, and Stripe's retry sends it (Codex, 3 Oct 2026).
         }
       }
     } else if ((event.type === 'payout.paid' || event.type === 'payout.failed') && obj.id && typeof event.account === 'string') {

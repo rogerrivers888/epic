@@ -16,7 +16,8 @@ export async function ownerEmail() {
     `select a.email from accounts a left join roles r on r.id = a.role_id
       where a.status = 'active' and a.email is not null and (a.role = 'owner' or r.is_owner)
       order by a.created_at limit 1`,
-  ).catch(() => ({ rows: [] }));
+  );
+  // A failed lookup throws rather than reading as "no owner": the caller's event is retried, not dropped.
   return a?.email ?? null;
 }
 

@@ -671,9 +671,12 @@ test('L7: a host taking money gets their Stripe account before the passport chec
       assert.equal(calls.filter((c) => c.url === '/v1/account_links').length, linksBefore, 'Stripe’s form is not opened by the check');
       assert.equal((await repo.hostById(host.id)).stripe_link_made_at, null);
     });
+    // A check already open is carried on only with the yes too.
+    await repo.updateHost(host.id, { identityState: 'pending', identitySessionId: 'vs_test_1' });
+    assert.equal((await srv.send('POST', '/api/host/lanes/verify', { offerId: paid.id })).body.error, 'consent_required');
     // Each yes to the face match is logged with its date.
     const { rows: consents } = await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'identity_consent'`, [host.id]);
-    assert.equal(consents.length, 2);
+    assert.equal(consents.length, 2, 'two yeses, and none logged for the refused resume');
     assert.equal(consents[0].after.biometric, true);
     assert.ok(Date.parse(consents[0].after.at));
   } finally { await srv.close(); }
