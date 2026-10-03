@@ -33,7 +33,7 @@ type EventRow = {
 type EventsPayload = { rows: EventRow[]; draftsByStep: Record<string, { step: string; n: number }[]>; capped: boolean };
 
 type Session = { id: string; n: number | null; date: string | null; time: string | null; booked: number; state: string; decided: 'on' | 'called_off' | null; decidesAt: string | null; confirmedBy: number; payout: string | null; payoutId?: string | null; late: boolean | null };
-type Refund = { booking: string; bookingId: string; household: string; householdId?: string; heads: number | null; pence: number; cause: string | null; state: string; stripe: 'pending' | 'matched' | 'mismatch' | 'not_checked' | null; at: string };
+type Refund = { booking: string; bookingId: string; household: string; householdId?: string; heads: number | null; pence: number; feeKeptPence?: number; triggeredBy?: string | null; cause: string | null; state: string; stripe: 'pending' | 'matched' | 'mismatch' | 'not_checked' | null; at: string };
 type EventDetail = {
   event: {
     id: string; title: string; host: string | null; hostId: string; kind: string | null; state: string; visibility: string;
@@ -267,6 +267,8 @@ function EventPage({ id, onBack }: { id: string; onBack: () => void }) {
     { key: 'household', label: 'Household', sort: 'household', grow: true, tip: tip('Household', 'Who booked. Opens their record in Customers.'), cell: (r) => <Opens to={r.householdId ? paths.customer(r.householdId) : null}>{r.household}</Opens> },
     { key: 'heads', label: 'Guests', sort: 'heads', width: 70, align: 'right', tip: tip('Guests', 'People on the booking.'), cell: (r) => <Num n={r.heads} /> },
     { key: 'amount', label: 'Amount', sort: 'amount', width: 96, align: 'right', tip: tip('Amount', 'Refunded.'), cell: (r) => <Text style={s.num}>{gbp(r.pence)}</Text> },
+    { key: 'kept', label: 'Fee kept', width: 90, align: 'right', tip: tip('Fee kept', 'The cancellation fee Epic kept from this refund.'), cell: (r) => (r.feeKeptPence ? <Text style={s.num}>{gbp(r.feeKeptPence)}</Text> : <Blank />) },
+    { key: 'by', label: 'By', width: 70, tip: tip('By', 'Who set the refund off: the guest, the host, or Epic.'), cell: (r) => (r.triggeredBy ? <Word>{cap(r.triggeredBy)}</Word> : <Blank />) },
     { key: 'cause', label: 'Cause', sort: 'cause', width: 140, tip: tip('Cause', 'Why it was refunded.'), cell: (r) => (r.cause ? <Word>{CAUSE_WORD[r.cause] ?? cap(r.cause)}</Word> : <Blank />) },
     { key: 'at', label: 'When', sort: 'at', width: 110, tip: tip('When', 'Sent to Stripe.'), cell: (r) => <Word>{when(r.at, true)}</Word> },
     { key: 'stripe', label: 'Stripe', sort: 'stripe', width: 100, tip: tip('Stripe', 'Whether Stripe’s record matches ours at the last reconciliation.'),

@@ -174,15 +174,27 @@ export async function processRecoveries({ status = stripe.stripeStatus, balance 
   for (const x of await ledger.recoveriesDue()) {
     if (!x.stripe_account_id || x.stripe_account_model !== 'v2') { out.waiting += 1; continue; }
     try {
-      const b = await balance(x.stripe_account_id, { householdId: x.host_household });
-      if (b.availablePence < x.amount_pence) { out.waiting += 1; continue; }
+      // A debit already asked for (its reply lost, or the write after it failed) is asked again with the same key before
+      // anything else: Stripe answers with the debit it made, or makes it once — never held up by the balance it already
+      // took (Codex, 3 Oct 2026).
+      const asked = x.reason === 'debit_sent';
+      if (!asked) {
+        const b = await balance(x.stripe_account_id, { householdId: x.host_household });
+        if (b.availablePence < x.amount_pence) { out.waiting += 1; continue; }
+        await query(`update hosting_payments set reason = 'debit_sent', updated_at = now() where id = $1 and state = 'pending'`, [x.id]);
+      }
       const py = await debit({ accountId: x.stripe_account_id, amountPence: x.amount_pence, householdId: x.host_household, idempotencyKey: x.idem_key, recoveryId: x.id });
       await query(`update hosting_payments set state = 'succeeded', stripe_ref = $2, updated_at = now() where id = $1 and state = 'pending'`, [x.id, py.id]);
       out.recovered += 1;
     } catch (err) {
       if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
       // Not enough in the balance after all (it moved since the check): still owed, so it waits for the next run.
-      if (['balance_insufficient', 'insufficient_funds'].includes(err.detail)) { out.waiting += 1; continue; }
+      if (['balance_insufficient', 'insufficient_funds'].includes(err.detail)) {
+        // A definite no: nothing moved, so the balance is checked again next time.
+        await query(`update hosting_payments set reason = null, updated_at = now() where id = $1 and state = 'pending' and reason = 'debit_sent'`, [x.id]);
+        out.waiting += 1;
+        continue;
+      }
       // Anything else: failed, for a person (back office › Money, with Retry) — still owed, and still held back from
       // the host's payouts until it is settled (Codex, 3 Oct 2026).
       await query(`update hosting_payments set state = 'failed', reason = $2, updated_at = now() where id = $1 and state = 'pending'`, [x.id, String(err.detail ?? err.code ?? 'failed').slice(0, 80)]);
@@ -275,12 +287,13 @@ export async function refreshAccountFacts({ limit = 20, status = stripe.stripeSt
         break;
       }
       if (err.code === 'stripe_refused') {
-        // Stripe won't let Epic read it: deleted, or disconnected from Epic. That is trouble for a person (Safety), and
-        // the row is now whole, so it is not asked again and never holds up the accounts behind it (Codex, 3 Oct 2026).
-        await applyAccountFacts(h.id, {
-          stripeRequirements: { currentlyDue: [], eventuallyDue: [], pastDue: [], disabledReason: 'account_closed', detailsSubmitted: false, capabilities: { card_payments: null, transfers: null } },
-          stripeChargesEnabled: false, stripePayoutsEnabled: false, payoutsState: 'pending',
-        }, { accountId: h.stripe_account_id });
+        // Stripe won't let Epic read it. That doesn't prove the account was closed — a key from the wrong Stripe
+        // account would say the same of every host (Codex, 3 Oct 2026) — so nothing about the account changes: it is
+        // flagged for a person (Safety › Stripe account trouble, "Epic can't read it") and the row is whole, so it is
+        // not asked again. Only Stripe's own account.application.deauthorized marks an account closed.
+        await applyAccountFacts(h.id, async (was) => ({
+          stripeRequirements: { ...(was?.stripe_requirements ?? {}), disabledReason: 'unreadable', detailsSubmitted: Boolean(was?.stripe_requirements?.detailsSubmitted), capabilities: was?.stripe_requirements?.capabilities ?? { card_payments: null, transfers: null } },
+        }), { accountId: h.stripe_account_id });
         refreshed += 1;
         continue;
       }

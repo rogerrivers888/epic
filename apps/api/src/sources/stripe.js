@@ -273,6 +273,9 @@ export function accountFacts(a) {
       disabledReason: a?.requirements?.disabled_reason ?? null,
       // What the account-trouble watch (L15) reads: whether sign-up was finished, and each capability's state.
       detailsSubmitted: Boolean(a?.details_submitted),
+      // Stripe's terms are accepted only at the end of its form: proof sign-up was finished even when Stripe has since
+      // un-marked details_submitted for new overdue requirements (Codex, 3 Oct 2026).
+      tosAccepted: Boolean(a?.tos_acceptance?.date),
       capabilities: { card_payments: a?.capabilities?.card_payments ?? null, transfers: a?.capabilities?.transfers ?? null },
     },
     payoutsManual: payoutsManual(a),
@@ -280,7 +283,7 @@ export function accountFacts(a) {
 }
 
 /** Disabled reasons that are Stripe acting on the account, not a host part-way through its form (L15). */
-const STRIPE_ACTED = /^(rejected\.|listed$|under_review$|platform_paused$|other$|account_closed$)/;
+const STRIPE_ACTED = /^(rejected\.|listed$|under_review$|platform_paused$|other$|account_closed$|unreadable$)/;
 
 /**
  * Is Stripe disabling, restricting or closing a host's account (register L15)? From the facts Epic stored. Null when
@@ -292,6 +295,7 @@ export function accountTrouble(facts) {
   const why = r.disabledReason ?? null;
   if (why && STRIPE_ACTED.test(why)) {
     const words = why === 'account_closed' ? 'The host’s Stripe account was closed or disconnected.'
+      : why === 'unreadable' ? 'Epic can’t read this account at Stripe — check it there before anything else.'
       : why.startsWith('rejected.') ? `Stripe rejected the account (${why.slice(9).replace(/_/g, ' ')}).`
         : why === 'listed' ? 'Stripe is checking the account against a prohibited list.'
           : why === 'under_review' ? 'Stripe is reviewing the account.'
@@ -300,7 +304,7 @@ export function accountTrouble(facts) {
   }
   // Sign-up finished (now, or ever — Stripe un-marks it when new requirements go overdue), and since then Stripe has
   // turned something off.
-  if (r.detailsSubmitted || r.everSubmitted) {
+  if (r.detailsSubmitted || r.everSubmitted || r.tosAccepted) {
     const off = Object.entries(r.capabilities ?? {}).filter(([, v]) => v === 'inactive').map(([k]) => k);
     if (why || off.length) return { reason: why ?? `inactive:${off.join(',')}`, words: why ? `Stripe disabled the account (${why.replace(/[._]/g, ' ')}).` : `Stripe switched off ${off.map((k) => (k === 'card_payments' ? 'card payments' : 'transfers')).join(' and ')}.` };
   }

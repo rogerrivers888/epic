@@ -145,3 +145,10 @@ test('L15: what counts as Stripe acting on a host’s account — never a dorman
   assert.equal(off.reason, 'inactive:card_payments');
   assert.match(off.words, /card payments/);
 });
+
+test('Codex: Stripe’s terms accepted means sign-up was finished, even when it un-marks details_submitted', () => {
+  const facts = stripe.accountFacts({ details_submitted: false, tos_acceptance: { date: 1790000000 }, capabilities: { card_payments: 'inactive' }, requirements: { disabled_reason: 'requirements.past_due' } });
+  assert.equal(facts.requirements.tosAccepted, true);
+  assert.equal(stripe.accountTrouble(facts.requirements)?.reason, 'requirements.past_due');
+  assert.equal(stripe.accountTrouble({ disabledReason: 'unreadable' })?.words.includes('can’t read'), true);
+});

@@ -1161,7 +1161,7 @@ export async function applyAccountFacts(hostId, patchOrRead, { accountId = null 
   // view back over a newer one.
   // Stamped before any connection is held, a read and a direct update alike (Codex, 3 Oct 2026).
   const readAt = await readStamp();
-  const read = typeof patchOrRead === 'function' ? await patchOrRead() : patchOrRead;
+  const read = typeof patchOrRead === 'function' ? await patchOrRead(await repo.hostById(hostId)) : patchOrRead;
   return withTransaction(async (c) => {
     const { rows: [was] } = await c.query('select * from hosts where id = $1 for update', [hostId]);
     if (!was) return null;
@@ -1175,7 +1175,7 @@ export async function applyAccountFacts(hostId, patchOrRead, { accountId = null 
     // Once sign-up was finished it stays finished for the trouble watch: Stripe un-marks it when new requirements go
     // overdue, which is exactly the account the watch must keep showing (Codex, 3 Oct 2026).
     const patch = read.stripeRequirements
-      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || prev.everSubmitted || prev.detailsSubmitted || was.payouts_state === 'ready' || was.stripe_charges_enabled), readAt } }
+      ? { ...read, stripeRequirements: { ...read.stripeRequirements, everSubmitted: Boolean(read.stripeRequirements.detailsSubmitted || read.stripeRequirements.tosAccepted || prev.everSubmitted || prev.detailsSubmitted || was.payouts_state === 'ready' || was.stripe_charges_enabled), readAt } }
       : read;
     const before = stripe.accountTrouble(prev);
     const now = stripe.accountTrouble(patch.stripeRequirements ?? prev);

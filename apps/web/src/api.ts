@@ -2831,7 +2831,7 @@ export const api = {
   guestBooked: () => request<GuestBookedList>('/api/booked'),
   guestBooking: (id: string) => request<{ booking: GuestBooking }>(`/api/booked/${encodeURIComponent(id)}`),
   guestCancelQuote: (id: string, sessionIds?: string[] | null) => request<{ pence: number | null; cause: string; words: string | null; release: boolean; policy: string | null }>(`/api/booked/${encodeURIComponent(id)}/cancel-quote${qs({ sessions: sessionIds?.length ? sessionIds.join(',') : undefined })}`),
-  guestCancel: (id: string, sessionIds?: string[] | null) => post<{ refundPence: number; whole: boolean }>(`/api/booked/${encodeURIComponent(id)}/cancel`, { sessionIds: sessionIds ?? null }),
+  guestCancel: (id: string, sessionIds?: string[] | null) => post<{ refundPence: number; feeKeptPence?: number; whole: boolean }>(`/api/booked/${encodeURIComponent(id)}/cancel`, { sessionIds: sessionIds ?? null }),
   guestKeep: (id: string) => post<{ kept: true }>(`/api/booked/${encodeURIComponent(id)}/keep`, {}),
   guestAnswers: (id: string, answers: Record<string, unknown>) => patch<{ answers: Record<string, unknown> }>(`/api/booked/${encodeURIComponent(id)}/answers`, { answers }),
   guestHappened: (id: string, answer: 'yes' | 'no' | 'wrong', reason?: string | null) => post<{ recorded: string }>(`/api/booked/${encodeURIComponent(id)}/happened`, { answer, reason: reason ?? null }),
@@ -6271,7 +6271,8 @@ export type GuestBooking = {
   numbers: { paidEach: number; nowEach: number; dueBackPence: number; settled: boolean; heads: number; minCount: number; atMost: { count: number; each: number; dueBackPence: number } | null } | null;
   dateChange: { sessions: { id: string; from: { date: string; time: string | null }; to: { date: string; time: string | null } }[] } | null;
   money: { lines: { label: string; each?: number; count?: number; pence: number }[]; grossPence: number | null; discountPence: number | null; valuePence: number | null; paidPence: number | null; heldPence: number | null; refundedPence: number | null; paymentState: string; refundPolicy: string | null;
-    refunds: { pence: number; cause: string | null; state: string; at: string }[] };
+    /** feeKeptPence: the cancellation fee Epic kept from this refund (L5); triggeredBy: who set it off. */
+    refunds: { pence: number; feeKeptPence?: number; triggeredBy?: 'guest' | 'host' | 'epic' | 'staff' | null; cause: string | null; state: string; at: string }[] };
   after: { happened: string | null; rated: boolean; tipOpen: boolean; tipFee?: { pct: number; minPence: number } | null } | null;
   dropOff: boolean; [k: string]: any;
 };

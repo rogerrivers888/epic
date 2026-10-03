@@ -74,7 +74,7 @@ export function BookingPage({ id }: { id: string }) {
       <Buttons key="moved-b" row items={[
         { label: 'Keep my place', tone: 'ink', onPress: async () => { try { await api.guestKeep(b.id); toast.show(`Kept · see you ${dayWords(ch.to.date).split(' ')[0]}`); void load(); } catch (e: any) { toast.show(e?.message ?? 'That didn’t save.'); } } },
         { label: 'Cancel · full refund', tone: 'redText', onPress: async () => {
-          try { const r = await api.guestCancel(b.id, b.dateChange!.sessions.map((x) => x.id)); toast.show(`Cancelled · ${gbp(r.refundPence)} back to your card`); void load(); }
+          try { const r = await api.guestCancel(b.id, b.dateChange!.sessions.map((x) => x.id)); toast.show(`Cancelled · ${gbp(r.refundPence)} back to your card${r.feeKeptPence ? ` (${gbp(r.feeKeptPence)} cancellation fee kept)` : ''}`); void load(); }
           catch (e: any) { toast.show(e?.message ?? 'That didn’t go through.'); }
         } },
       ]} />,
@@ -174,7 +174,7 @@ export function BookingPage({ id }: { id: string }) {
     if (!cancelling || cancelling.quote == null || cancelling.quote === 'failed') return;
     try {
       const r = await api.guestCancel(b.id, cancelling.whole || !next ? null : [next.id]);
-      setCancelling(null); toast.show(r.refundPence ? `Cancelled · ${gbp(r.refundPence)} back to your card` : 'Cancelled'); void load();
+      setCancelling(null); toast.show(r.refundPence ? `Cancelled · ${gbp(r.refundPence)} back to your card${r.feeKeptPence ? ` (${gbp(r.feeKeptPence)} cancellation fee kept)` : ''}` : 'Cancelled'); void load();
     } catch (e: any) { toast.show(e instanceof ApiError ? e.message : 'That didn’t go through.'); }
   };
   const sheet = cancelling ? (

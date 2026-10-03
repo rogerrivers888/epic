@@ -537,7 +537,7 @@ test('Codex: host accounts stored before the trouble watch are read back from St
   assert.equal(again.refreshed, 0, 'refreshed once: every account’s facts are whole now');
 });
 
-test('Codex: an older account Stripe won’t let Epic read is marked closed for Safety, and never holds up the rest', async () => {
+test('Codex: an account Stripe won’t let Epic read is flagged for a person — never marked closed by the refresh — and never holds up the rest', async () => {
   const { household } = await aHousehold(query);
   const { rows: [h] } = await query(
     `insert into hosts (household_id, name, stripe_account_id, stripe_account_model, stripe_requirements) values ($1, 'Gone Away', 'acct_gone', 'v2', $2::jsonb) returning *`,
@@ -551,8 +551,11 @@ test('Codex: an older account Stripe won’t let Epic read is marked closed for 
   const read = async (id) => { if (id === 'acct_gone') throw Object.assign(new Error('no'), { code: 'stripe_refused', detail: 'resource_missing', httpStatus: 404 }); return { id, details_submitted: true, charges_enabled: true, payouts_enabled: true, capabilities: {}, settings: { payouts: { schedule: { interval: 'manual' } } }, requirements: {} }; };
   await money.refreshAccountFacts({ limit: 1000, status: () => ({ ready: true }), read });
   const facts = (await query('select stripe_requirements from hosts where id = $1', [h.id])).rows[0].stripe_requirements;
-  assert.equal(facts.disabledReason, 'account_closed');
-  assert.equal((await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'stripe_account_trouble'`, [h.id])).rows[0].after.reason, 'account_closed');
+  // A key from the wrong Stripe account would make every host look missing: nothing is closed or switched off.
+  assert.equal(facts.disabledReason, 'unreadable');
+  assert.equal((await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'stripe_account_trouble'`, [h.id])).rows[0].after.reason, 'unreadable');
+  const { rows: [row] } = await query('select stripe_account_id, payouts_state from hosts where id = $1', [h.id]);
+  assert.equal(row.stripe_account_id, 'acct_gone', 'kept: only Stripe’s own closed event replaces an account');
   assert.equal((await money.refreshAccountFacts({ limit: 1000, status: () => ({ ready: true }), read: async () => { throw new Error('not again'); } })).refreshed, 0);
 });
 

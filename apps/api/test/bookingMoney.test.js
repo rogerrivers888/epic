@@ -328,3 +328,20 @@ test('Codex: a host recovery Stripe refuses stays owed — held back from payout
   const { rows: [owed] } = await query(`select coalesce(sum(amount_pence), 0)::int as n from hosting_payments where kind = 'host_recovery' and state in ('pending', 'failed') and host_id = $1`, [host.id]);
   assert.equal(owed.n, 200, 'still held back from payouts');
 });
+
+test('Codex: a host recovery already sent to Stripe is asked again with the same key — not held up by the balance it took', async () => {
+  settings.forget();
+  const { host, offer, bookings } = await anEvent({ destination: true, guests: [{ heads: 1, charged: 4000 }] });
+  await engine.cancelSessions({ offerId: offer.id, hostId: host.id, reason: 'illness' });
+  await engine.processRefunds({ status: () => ({ ready: true }), refund: async () => ({ id: 're_s' }) });
+  const money = await import('../src/sources/hostingMoney.js');
+  const { rows: [rec] } = await query(`select * from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [bookings[0].id]);
+  // Stripe took it, but the reply was lost.
+  await money.processRecoveries({ status: () => ({ ready: true }), balance: async () => ({ availablePence: 9999 }), debit: async () => { throw Object.assign(new Error('x'), { code: 'stripe_unreachable' }); } });
+  assert.equal((await query('select reason, state from hosting_payments where id = $1', [rec.id])).rows[0].reason, 'debit_sent');
+  // Next run: the balance is now short (Stripe already took it) — the same debit is asked for anyway, and recorded.
+  const keys = [];
+  await money.processRecoveries({ status: () => ({ ready: true }), balance: async () => ({ availablePence: 0 }), debit: async (d) => { if (d.recoveryId === rec.id) keys.push(d.idempotencyKey); return { id: 'py_replay' }; } });
+  assert.deepEqual(keys, [`recovery:${rec.recovers}`]);
+  assert.deepEqual((await query('select state, stripe_ref from hosting_payments where id = $1', [rec.id])).rows.map((x) => [x.state, x.stripe_ref]), [['succeeded', 'py_replay']]);
+});

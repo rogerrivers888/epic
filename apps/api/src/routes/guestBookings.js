@@ -978,7 +978,7 @@ router.get('/booked/:id', async (req, res, next) => {
     const o = await repo.offerById(b.offer_id);
     const host = await repo.hostById(b.host_id);
     const { rows: kids } = await query('select name, age, date_of_birth, needs, emergency_contact from booking_children where booking_id = $1 order by created_at', [b.id]);
-    const { rows: refunds } = await query(`select amount_pence, fee_kept_pence, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
+    const { rows: refunds } = await query(`select amount_pence, fee_kept_pence, triggered_by, cause, state, created_at from hosting_payments where booking_id = $1 and kind in ('refund', 'release') order by created_at`, [b.id]);
     const live = b.sessionsList.filter((x) => x.held === 'booked' && x.state === 'scheduled');
     const firstAhead = live.map((x) => startOf(x, o)).sort((x, y) => x - y)[0] ?? null;
     const lastEnd = b.sessionsList.length ? new Date(Math.max(...b.sessionsList.map((x) => endOf(x, o).getTime()))) : null;
@@ -1009,7 +1009,7 @@ router.get('/booked/:id', async (req, res, next) => {
         goingAhead: o.min_count ? { min: o.min_count, booked: b.cancel_cause === 'called_off' ? (b.sessionsList[0]?.booked_at_decision ?? 0) : live[0]?.booked ?? 0, decidesOn: decides ? localDay(new Date(decides.decides_at), tzOf(o)) : null, outcome: decides?.decided_outcome ?? null } : null,
         numbers: settlement,
         dateChange: changed.some((x) => !b.change_seen_at || new Date(x.changed_from.at) > new Date(b.change_seen_at)) ? { sessions: changed.map((x) => ({ id: x.id, from: { date: x.changed_from.onDate, time: x.changed_from.startsAt }, to: { date: ymd(x.on_date), time: hm(x.starts_at) } })) } : null,
-        money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy, refunds: refunds.map((r) => ({ pence: r.amount_pence, feeKeptPence: r.fee_kept_pence ?? 0, cause: r.cause, state: r.state, at: r.created_at })) },
+        money: { lines: b.price_lines ?? [], grossPence: b.gross_pence, discountPence: b.discount_pence, valuePence: b.value_pence, paidPence: b.charged_pence, heldPence: b.held_pence, refundedPence: b.refunded_pence, paymentState: b.payment_state, refundPolicy: b.refund_policy, refunds: refunds.map((r) => ({ pence: r.amount_pence, feeKeptPence: r.fee_kept_pence ?? 0, triggeredBy: r.triggered_by ?? null, cause: r.cause, state: r.state, at: r.created_at })) },
         // The fee rule as the server will charge it, so the screen never shows a different one (Codex, 3 Oct 2026).
         after: lastEnd && lastEnd <= now ? { happened: b.confirmed_happened ?? null, rated: Boolean(b.rated_at), tipOpen: tipOpen(lastEnd, now), tipFee: await tipFeeRule() } : null,
         dropOff: o.parents === 'drop_off',
@@ -1106,7 +1106,7 @@ export async function cancelBooking({ bookingId, household, account, sessionIds 
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'guest', cancel_cause = $2 where id = $1`, [b.id, q.cause]);
       }
       await logChange({ subjectKind: 'booking', subjectId: b.id, field: 'cancelled', after: { sessions: q.losing.length, refund: q.pence, feeKept: q.feeKeptPence ?? 0, cause: q.cause }, by: account?.id ?? null, byLabel: 'guest' }, c);
-      return { refundPence: q.pence ?? 0, whole };
+      return { refundPence: q.pence ?? 0, feeKeptPence: q.feeKeptPence ?? 0, whole };
     });
     // A freed place goes to the waiting list straight away.
     void offerFreedPlaces().catch(() => null);

@@ -151,7 +151,7 @@ test('a step saves; answers that contradict themselves are refused; the money fo
     r = await p({ priceMode: 'same_each', pricePence: 3500, childPence: 2000, minCount: 5, maxCount: 10, refundPolicy: 'moderate' });
     assert.equal((await p({ decidesOn: '2027-06-19' })).body.error, 'decides_after_start', 'decides by comes before the first session');
     assert.equal(r.body.offer.money, 'epic', 'paid defaults to Epic collecting');
-    assert.equal(r.body.offer.refundWords, 'Full refund up to 5 days before');
+    assert.equal(r.body.offer.refundWords, 'Full refund less a 5% cancellation fee up to 5 days before');
     assert.equal(r.body.offer.decidesOnDefault, '2027-06-05', 'a week before the first session');
     r = await p({ money: 'direct' });
     assert.equal(r.body.offer.money, 'direct', 'a private host may be paid directly');

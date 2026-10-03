@@ -551,7 +551,7 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
     );
     const { rows: p } = await query(
       `select kind, count(*)::int as n, coalesce(sum(amount_pence), 0)::int as value, coalesce(sum(epic_pence), 0)::int as epic, coalesce(sum(host_pence), 0)::int as host
-         from hosting_payments where state = 'succeeded' and voided_at is null and kind in ('private_fee', 'pro', 'tip') and created_at >= $1 and created_at < $2 group by 1`,
+         from hosting_payments where state = 'succeeded' and voided_at is null and kind in ('private_fee', 'pro', 'tip', 'host_recovery') and created_at >= $1 and created_at < $2 group by 1`,
       [from, to],
     );
     const pub = b.filter((x) => x.visibility === 'public');
@@ -1006,8 +1006,11 @@ router.get('/reports/money', requires('view_hosting'), async (req, res, next) =>
 async function dac7Rows(year) {
   const { rows } = await query(
     `select h.id, h.name, h.tax_reference, h.tax_address,
-            coalesce(sum(case when p.kind = 'charge' then p.amount_pence when p.kind = 'refund' then -p.amount_pence end), 0)::int as consideration,
-            coalesce(sum(case when p.kind = 'charge' then p.epic_pence when p.kind = 'refund' then -coalesce(p.epic_pence, 0) end), 0)::int as fees,
+            -- A cancellation fee kept (L5) is the guest's, not the host's: the cancelled amount leaves the host's
+            -- consideration and Epic's fee on it is undone in full. A fee recovered from a host is a fee Epic charged them.
+            coalesce(sum(case when p.kind = 'charge' then p.amount_pence when p.kind = 'refund' then -(p.amount_pence + coalesce(p.fee_kept_pence, 0)) end), 0)::int as consideration,
+            coalesce(sum(case when p.kind = 'charge' then p.epic_pence when p.kind = 'refund' then -(coalesce(p.epic_pence, 0) + coalesce(p.fee_kept_pence, 0))
+                              when p.kind = 'host_recovery' then p.amount_pence end), 0)::int as fees,
             coalesce(sum(case when p.kind = 'tip' then p.host_pence end), 0)::int as tips,
             count(*) filter (where p.kind = 'charge')::int as activities
        from hosting_payments p join hosts h on h.id = p.host_id
