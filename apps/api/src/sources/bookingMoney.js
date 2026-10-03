@@ -421,7 +421,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
   const s = await settings.current();
   const { rows } = await query(
     // A refund names its own PaymentIntent when it is not the booking's (a tip charged twice); otherwise the booking's.
-    `select p.*, coalesce(p.refund_of, b.stripe_payment_intent) as stripe_payment_intent, b.charged_pence, b.refunded_pence,
+    `select p.*, coalesce(p.refund_of, b.stripe_payment_intent) as stripe_payment_intent, b.charged_pence, b.refunded_pence, b.cancellation_fee_pct,
             case when p.tip_id is not null then t.charge_model else b.charge_model end as charge_model, o.title
        from hosting_payments p join experience_bookings b on b.id = p.booking_id left join host_offers o on o.id = p.offer_id
        left join booking_tips t on t.id = p.tip_id
@@ -460,7 +460,8 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
           // The host caused it — cancelled, or moved a date the guest then left (owner, 3 Oct 2026) — so Epic recovers
           // the cancellation fee from the host's own balance. Not for a missed minimum unless the owner switches it on.
           const recover = p.kind === 'refund' && p.charge_model === 'destination' && (['host_cancelled', 'date_changed'].includes(p.cause) || (p.cause === 'called_off' && s.recovery_on_minimum === true));
-          const pct = typeof s.cancellation_fee_pct === 'number' ? s.cancellation_fee_pct : 0;
+          // The rate the booking agreed to; none for a booking made before the fee.
+          const pct = p.cancellation_fee_pct == null ? 0 : Number(p.cancellation_fee_pct);
           const owed = recover ? Math.round((Number(p.amount_pence) * pct) / 100) : 0;
           if (owed > 0) {
             await c.query(

@@ -181,6 +181,10 @@ export async function processRecoveries({ status = stripe.stripeStatus, balance 
       out.recovered += 1;
     } catch (err) {
       if (err.code === 'stripe_unreachable') { out.waiting += 1; continue; }
+      // Not enough in the balance after all (it moved since the check): still owed, so it waits for the next run.
+      if (['balance_insufficient', 'insufficient_funds'].includes(err.detail)) { out.waiting += 1; continue; }
+      // Anything else: failed, for a person (back office › Money, with Retry) — still owed, and still held back from
+      // the host's payouts until it is settled (Codex, 3 Oct 2026).
       await query(`update hosting_payments set state = 'failed', reason = $2, updated_at = now() where id = $1 and state = 'pending'`, [x.id, String(err.detail ?? err.code ?? 'failed').slice(0, 80)]);
       console.error(`epic-api: host recovery ${x.id} failed — ${err.detail ?? err.code ?? err.message}`);
       out.failed += 1;

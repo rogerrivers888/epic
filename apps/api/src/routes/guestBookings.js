@@ -387,8 +387,8 @@ async function book({ offerId, body, household, account, invite = null }) {
         `insert into experience_bookings
            (offer_id, host_id, household_id, heads, party, state, amount_pence, booking_kind, request_state, respond_by,
             requested_date, requested_time, requested_length_min, payment_state, refund_policy, refund_terms, answers, adult_confirmed,
-            source, via_host_link, price_lines, gross_pence, discount_pence, value_pence, fee_rate_pct, fee_reason, fee_pence, host_pence, charge_model)
-         values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,'none',$14,$15::jsonb,$16::jsonb,$17,$18,$19,$20::jsonb,$21,$22,$23,$24,$25,$26,$27,$28)
+            source, via_host_link, price_lines, gross_pence, discount_pence, value_pence, fee_rate_pct, fee_reason, fee_pence, host_pence, charge_model, cancellation_fee_pct)
+         values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,'none',$14,$15::jsonb,$16::jsonb,$17,$18,$19,$20::jsonb,$21,$22,$23,$24,$25,$26,$27,$28,$29)
          returning *`,
         [o.id, host.id, household.id, check.heads, JSON.stringify([...Array(check.adults)].map(() => ({ child: false })).concat(party.children.map((k) => ({ name: k.name, child: true })))),
           paid || asked ? 'pending' : 'confirmed', price.valuePence, when.kind, asked ? 'asked' : null, asked ? new Date(Date.now() + askHours * 3_600_000) : null,
@@ -396,7 +396,9 @@ async function book({ offerId, body, household, account, invite = null }) {
           policy, JSON.stringify(policy ? s.refund_terms?.[policy] ?? null : null), JSON.stringify(cleanAnswers(body.answers, o.guest_questions)), party.adultConfirmed,
           invite ? 'invite' : viaHostLink ? 'link' : ['search', 'profile', 'collection', 'web'].includes(body.source) ? body.source : 'search', viaHostLink,
           JSON.stringify(price.lines), price.grossPence, price.discountPence, price.valuePence, fee.ratePct, fee.reason, fee.feePence, fee.hostPence,
-          paid ? 'destination' : null],
+          paid ? 'destination' : null,
+          // The cancellation fee agreed now, with the refund terms (L5): later changes never reach this booking.
+          paid && typeof s.cancellation_fee_pct === 'number' ? s.cancellation_fee_pct : null],
       );
       for (const id of when.sessionIds) await c.query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, id]);
       // A one-session booking names its session too, so each weekly session is its own rated event on the fee ladder (Codex, 2 Oct 2026).
@@ -1041,7 +1043,7 @@ async function quoteFor(b, o, sessionIds, now = new Date()) {
   const forfeited = held.filter((x) => x.held === 'forfeited').length;
   const q = o.lane === 'course' && everStarted
     ? { pence: 0, cause: 'guest_cancelled', words: 'The course has started: no refund.' }
-    : cancelQuote({ booking: { ...b, all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms, feePct: typeof s.cancellation_fee_pct === 'number' ? s.cancellation_fee_pct : null });
+    : cancelQuote({ booking: { ...b, all_sessions_count: held.length, forfeited_count: forfeited }, lane: o.lane, sessions, losing, now, terms, feePct: b.cancellation_fee_pct == null ? null : Number(b.cancellation_fee_pct) });
   return { ...q, losing, liveCount: live.length };
 }
 

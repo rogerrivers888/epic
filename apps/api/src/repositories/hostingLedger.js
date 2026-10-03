@@ -152,7 +152,7 @@ export async function payoutsDue({ now = new Date(), limit = 100 } = {}) {
                at time zone coalesce(o.time_zone, 'Europe/London')) as session_ends_at,
             exists (select 1 from hosting_complaints k where k.session_id = p.session_id and k.state = 'open') as complaint_open,
             -- What the host owes Epic back (cancellation fees, L5): a payout never takes the balance it is owed from.
-            (select coalesce(sum(x.amount_pence), 0) from hosting_payments x where x.kind = 'host_recovery' and x.state = 'pending' and x.voided_at is null and x.host_id = p.host_id)::int as recovery_owed,
+            (select coalesce(sum(x.amount_pence), 0) from hosting_payments x where x.kind = 'host_recovery' and x.state in ('pending', 'failed') and x.voided_at is null and x.host_id = p.host_id)::int as recovery_owed,
             exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
                      where bs.session_id = p.session_id and b.dispute_state = 'open') as dispute_open,
             exists (select 1 from jsonb_array_elements(p.lines) l join experience_bookings b on b.id = (l->>'bookingId')::uuid

@@ -37,4 +37,7 @@ create unique index if not exists hosting_payments_recovers_idx on hosting_payme
 -- What of a booking's money Epic kept as cancellation fees: counted with what was refunded wherever "what is left"
 -- is worked out, so the host is never paid for it and the guest is never refunded it twice.
 alter table experience_bookings
-  add column if not exists cancellation_fee_pence integer not null default 0;
+  add column if not exists cancellation_fee_pence integer not null default 0,
+  -- The rate agreed when the booking was made, as the refund terms are: a booking made before the fee, or before a
+  -- change to it, keeps what it agreed to. Null: no fee (every booking before this migration).
+  add column if not exists cancellation_fee_pct   numeric;

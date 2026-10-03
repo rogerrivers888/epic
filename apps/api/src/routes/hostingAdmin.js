@@ -616,7 +616,7 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
     const { rows: refunds } = await query(`select cause, state, count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_payments where kind = 'refund' and voided_at is null and created_at > now() - interval '30 days' group by 1, 2 order by 1`);
     const { rows: stuck } = await query(
       `select p.id, p.amount_pence, p.cause, p.reason, p.created_at, p.booking_id, p.offer_id, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id
-        where p.kind in ('refund', 'release', 'tip_refund') and p.state = 'failed' and p.voided_at is null order by p.created_at`,
+        where p.kind in ('refund', 'release', 'tip_refund', 'host_recovery') and p.state = 'failed' and p.voided_at is null order by p.created_at`,
     );
     const { rows: holds } = await query(
       `select b.id, b.held_pence, b.respond_by, b.offer_id, b.host_id, b.household_id, o.title, h.name as host, hh.name as household
@@ -675,7 +675,7 @@ router.post('/money/payouts/:id/release', requireOwnerSignedIn('release a payout
 router.post('/money/refunds/:id/retry', requires('manage_hosting'), async (req, res, next) => {
   try {
     if (!UUID.test(String(req.params.id))) throw refuse(404, 'not_found', 'No such refund.');
-    const { rows: [r] } = await query(`update hosting_payments set state = 'pending', updated_at = now() where id = $1 and kind in ('refund', 'release', 'tip_refund') and state = 'failed' and voided_at is null returning id`, [req.params.id]);
+    const { rows: [r] } = await query(`update hosting_payments set state = 'pending', updated_at = now() where id = $1 and kind in ('refund', 'release', 'tip_refund', 'host_recovery') and state = 'failed' and voided_at is null returning id`, [req.params.id]);
     if (!r) throw refuse(404, 'not_found', 'That refund isn’t waiting on a person.');
     await logChange({ subjectKind: 'booking', subjectId: r.id, field: 'refund_retry', after: { state: 'pending' }, why: typeof req.body?.why === 'string' ? req.body.why.slice(0, 500) : null, by: by(), byLabel: 'staff' });
     res.json({ retried: true });
@@ -932,7 +932,7 @@ router.get('/health', requires('view_hosting'), async (_req, res, next) => {
               (select count(*) from host_payouts where state in ('held', 'failed'))::int as payouts_waiting,
               (select count(*) from hosts where identity_state = 'verified' and stripe_requirements is not null
                  and stripe_requirements::text ~ '(verification\\.(additional_)?document|proof_of_liveness|\\.identity_verification\\.)')::int as id_asked_again,
-              (select count(*) from hosting_payments where kind in ('refund', 'release', 'tip_refund') and state = 'failed' and voided_at is null)::int as refunds_waiting,
+              (select count(*) from hosting_payments where kind in ('refund', 'release', 'tip_refund', 'host_recovery') and state = 'failed' and voided_at is null)::int as refunds_waiting,
               (select count(*) from session_incidents where created_at > now() - interval '7 days')::int as incidents7,
               (select count(*) from host_reports where resolved_at is null)::int as reports`,
       [windowH],

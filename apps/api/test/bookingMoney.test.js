@@ -45,9 +45,9 @@ async function anEvent({ lane = 'oneoff', inDays = 10, days = 1, min = null, pri
   for (const [i, g] of guests.entries()) {
     const { household: gh } = await aHousehold(query);
     const { rows: [b] } = await query(
-      `insert into experience_bookings (offer_id, host_id, household_id, heads, state, payment_state, charged_pence, held_pence, host_pence, fee_pence, stripe_payment_intent, charge_model)
-       values ($1, $2, $3, $4, 'confirmed', $5, $6, $7, $8, $9, $10, $11) returning *`,
-      [offer.id, host.id, gh.id, g.heads, g.held ? 'held' : 'charged', g.held ? null : g.charged, g.held ? g.charged : null, Math.round((g.charged ?? 0) * 0.8), Math.round((g.charged ?? 0) * 0.2), `pi_${offer.id.slice(0, 8)}_${i}`, destination ? 'destination' : null],
+      `insert into experience_bookings (offer_id, host_id, household_id, heads, state, payment_state, charged_pence, held_pence, host_pence, fee_pence, stripe_payment_intent, charge_model, cancellation_fee_pct)
+       values ($1, $2, $3, $4, 'confirmed', $5, $6, $7, $8, $9, $10, $11, $12) returning *`,
+      [offer.id, host.id, gh.id, g.heads, g.held ? 'held' : 'charged', g.held ? null : g.charged, g.held ? g.charged : null, Math.round((g.charged ?? 0) * 0.8), Math.round((g.charged ?? 0) * 0.2), `pi_${offer.id.slice(0, 8)}_${i}`, destination ? 'destination' : null, destination && g.feePct !== null ? (g.feePct ?? 5) : null],
     );
     for (const s of g.sessions ? g.sessions.map((n) => sessions[n]) : sessions) await query('insert into booking_sessions (booking_id, session_id) values ($1, $2)', [b.id, s.id]);
     bookings.push(b);
@@ -302,4 +302,29 @@ test('L5: a missed minimum refunds in full and recovers nothing — unless the o
     const { rows: [rec] } = await query(`select amount_pence, triggered_by from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [on.bookings[0].id]);
     assert.deepEqual([rec.amount_pence, rec.triggered_by], [200, 'epic']);
   } finally { await query(`update hosting_settings set value = 'false' where key = 'recovery_on_minimum'`); settings.forget(); }
+});
+
+test('Codex: the fee is the one agreed at booking — a booking from before it has none to keep or recover', async () => {
+  settings.forget();
+  const { host, offer, bookings } = await anEvent({ destination: true, guests: [{ heads: 1, charged: 4000, feePct: null }] });
+  await engine.cancelSessions({ offerId: offer.id, hostId: host.id, reason: 'illness' });
+  await engine.processRefunds({ status: () => ({ ready: true }), refund: async () => ({ id: 're_old' }) });
+  assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [bookings[0].id])).rows[0].n, 0, 'no rate agreed: nothing recovered');
+});
+
+test('Codex: a host recovery Stripe refuses stays owed — held back from payouts, and retried once a person says so', async () => {
+  settings.forget();
+  const { host, offer, bookings } = await anEvent({ destination: true, guests: [{ heads: 1, charged: 4000 }] });
+  await engine.cancelSessions({ offerId: offer.id, hostId: host.id, reason: 'illness' });
+  await engine.processRefunds({ status: () => ({ ready: true }), refund: async () => ({ id: 're_r' }) });
+  const money = await import('../src/sources/hostingMoney.js');
+  const { rows: [rec] } = await query(`select * from hosting_payments where kind = 'host_recovery' and booking_id = $1`, [bookings[0].id]);
+  // The balance moved since the check: still pending, it simply waits.
+  await money.processRecoveries({ status: () => ({ ready: true }), balance: async () => ({ availablePence: 9999 }), debit: async () => { throw Object.assign(new Error('x'), { code: 'stripe_refused', detail: 'balance_insufficient' }); } });
+  assert.equal((await query('select state from hosting_payments where id = $1', [rec.id])).rows[0].state, 'pending');
+  // Refused for another reason: failed for a person — and still counted against the host's payouts.
+  await money.processRecoveries({ status: () => ({ ready: true }), balance: async () => ({ availablePence: 9999 }), debit: async () => { throw Object.assign(new Error('x'), { code: 'stripe_refused', detail: 'account_invalid' }); } });
+  assert.equal((await query('select state from hosting_payments where id = $1', [rec.id])).rows[0].state, 'failed');
+  const { rows: [owed] } = await query(`select coalesce(sum(amount_pence), 0)::int as n from hosting_payments where kind = 'host_recovery' and state in ('pending', 'failed') and host_id = $1`, [host.id]);
+  assert.equal(owed.n, 200, 'still held back from payouts');
 });

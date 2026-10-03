@@ -556,7 +556,8 @@ export function retrieveRef(ref, { householdId, accountId = null } = {}) {
   if (r.startsWith('pi_')) return retrievePaymentIntent(r, { householdId });
   if (r.startsWith('re_')) return retrieveRefund(r, { householdId });
   if (r.startsWith('po_')) return accountId ? retrievePayout(r, { accountId, householdId }) : null;
-  if (r.startsWith('py_')) return call('GET', `/charges/${encodeURIComponent(r)}`, null, { householdId, purpose: 'host.recovery.read' });
+  // A host recovery's account debit: Stripe answers with a Payment (py_, sandbox 3 Oct 2026); a charge id (ch_) is read the same way.
+  if (r.startsWith('py_') || r.startsWith('ch_')) return call('GET', `/charges/${encodeURIComponent(r)}`, null, { householdId, purpose: 'host.recovery.read' });
   if (r.startsWith('cs_')) return retrieveCheckout(r, { householdId });
   return null;
 }
