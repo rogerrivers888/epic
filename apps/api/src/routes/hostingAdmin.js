@@ -28,6 +28,7 @@ import { ladderProgress, introState } from '../domain/money.js';
 import { standingOf } from '../domain/hostDesk.js';
 import { mediaRef } from './hosting.js';
 import { stripeMode } from '../sources/stripe.js';
+import * as ledger from '../repositories/hostingLedger.js';
 
 export const router = Router();
 
@@ -366,6 +367,31 @@ router.post('/hosts/:id/fee-override', requireOwnerSignedIn('override a host’s
     await query('update hosts set fee_override_pct = $2 where id = $1', [req.params.id, pct]);
     await logChange({ subjectKind: 'host', subjectId: req.params.id, field: 'fee_override_pct', before: { pct: before.fee_override_pct }, after: { pct }, why, by: by(), byLabel: 'staff', approvalId: UUID.test(String(req.body?.approvalId ?? '')) ? req.body.approvalId : null });
     res.json({ pct });
+  } catch (err) { next(err); }
+});
+
+/** GET /payments/old-model — what voiding the pre-L1 rows would touch. Reads only; the Approval's numbers come from here. */
+router.get('/payments/old-model', requires('view_hosting'), async (_req, res, next) => {
+  try { res.json({ counts: await ledger.oldModelCounts() }); } catch (err) { next(err); }
+});
+
+/**
+ * POST /payments/void-old-model {why} — void the rows from before register L
+ * (owner, 3 Oct 2026: "void them rather than convert … keep the rows, don't
+ * delete"). Test mode only; the owner, personally, through an Approval (G7).
+ * Each host is written into the change log with the owner's name.
+ */
+router.post('/payments/void-old-model', requireOwnerSignedIn('void the old payment rows'), async (req, res, next) => {
+  try {
+    const why = typeof req.body?.why === 'string' ? req.body.why.trim().slice(0, 500) : '';
+    if (!why) throw refuse(400, 'why', 'Say why.');
+    const out = await ledger.voidOldModel();
+    const approvalId = UUID.test(String(req.body?.approvalId ?? '')) ? req.body.approvalId : null;
+    for (const id of out.hostIds) {
+      await logChange({ subjectKind: 'host', subjectId: id, field: 'stripe_account', after: { voided: true, model: 'pre-L1' }, why, by: by(), byLabel: 'staff', approvalId });
+    }
+    await logChange({ subjectKind: 'setting', subjectId: 'void-old-model', field: 'payments', after: { hosts: out.hosts, bookings: out.bookings, tips: out.tips, payouts: out.payouts, pendingLines: out.pendingLines }, why, by: by(), byLabel: 'staff', approvalId });
+    res.json({ voided: { hosts: out.hosts, bookings: out.bookings, tips: out.tips, payouts: out.payouts, pendingLines: out.pendingLines } });
   } catch (err) { next(err); }
 });
 

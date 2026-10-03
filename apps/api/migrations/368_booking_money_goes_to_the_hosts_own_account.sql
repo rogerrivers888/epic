@@ -52,6 +52,21 @@ alter table hosting_payments
 alter table host_payouts
   add column if not exists stripe_payout text;
 
+-- Voiding the old model (owner, 3 Oct 2026: "void them rather than convert … keep the rows, don't delete").
+-- These columns only make room for it. Nothing here voids a row: that is a back-office action the owner runs
+-- himself through an Approval (G7) — POST /api/admin/hosting/payments/void-old-model — so a deploy can't do it.
+alter table hosts
+  add column if not exists stripe_void_account_id text,
+  add column if not exists stripe_voided_at       timestamptz;
+alter table experience_bookings
+  add column if not exists money_voided_at timestamptz;
+alter table hosting_payments
+  add column if not exists voided_at timestamptz;
+alter table host_payouts drop constraint if exists host_payouts_state_check;
+alter table host_payouts add constraint host_payouts_state_check check (state in ('scheduled', 'held', 'released', 'paid', 'failed', 'void'));
+alter table booking_tips drop constraint if exists booking_tips_state_check;
+alter table booking_tips add constraint booking_tips_state_check check (state in ('pending', 'paid', 'failed', 'refunded', 'void'));
+
 -- Stripe's webhook, once per event: an event delivered twice is applied once.
 create table if not exists stripe_events (
   id            text primary key,          -- Stripe's evt_ id

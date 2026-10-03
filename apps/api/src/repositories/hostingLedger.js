@@ -239,7 +239,7 @@ export async function rowsToReconcile({ days = 3, limit = 500 } = {}) {
     // A payout lives on the host's own account, so its account comes with it.
     `select p.id, p.kind, p.amount_pence, p.state, p.stripe_ref, p.household_id, p.stripe_match, h.stripe_account_id
        from hosting_payments p left join hosts h on h.id = p.host_id
-      where p.stripe_ref is not null and p.mode = 'test' and p.updated_at > now() - make_interval(days => $1)
+      where p.stripe_ref is not null and p.mode = 'test' and p.voided_at is null and p.updated_at > now() - make_interval(days => $1)
       order by p.updated_at desc limit $2`,
     [days, limit],
   );
@@ -295,4 +295,65 @@ export async function scheduleTipPayouts({ now = new Date(), releaseHours = 72 }
     });
   }
   return made;
+}
+
+// ---------------------------------------------------------------------------
+// voiding the old model (owner, 3 Oct 2026)
+//
+// Before register L, guests were charged on Epic's own balance and hosts' Stripe
+// accounts were made without manual payouts. There are no real users, so those
+// rows are voided rather than converted: kept, never deleted, marked so nothing
+// pays, refunds or reconciles them again. Test mode only — a live row refuses
+// the lot. The owner runs it himself, through an Approval (G7).
+// ---------------------------------------------------------------------------
+
+const OLD_HOSTS = `stripe_account_id is not null and stripe_account_model is null`;
+const OLD_BOOKINGS = `charge_model is null and stripe_payment_intent is not null and money_voided_at is null`;
+const OLD_TIPS = `charge_model is null and stripe_ref is not null and state in ('pending', 'paid') and payout_id is null`;
+// A payout still to go for a host whose account is from before, or carrying a booking or tip charged the old way.
+const OLD_PAYOUTS = `p.state in ('scheduled', 'held', 'released') and (
+    exists (select 1 from hosts h where h.id = p.host_id and h.stripe_account_id is not null and h.stripe_account_model is null)
+    or exists (select 1 from jsonb_array_elements(p.lines) l join experience_bookings b on b.id = (l->>'bookingId')::uuid where b.charge_model is null)
+    or exists (select 1 from booking_tips t where t.payout_id = p.id and t.charge_model is null))`;
+
+/** What voiding would touch, without touching it: the Approval's "affected" and the back office's preview. */
+export async function oldModelCounts(client = null) {
+  const q = client ? (t, p) => client.query(t, p) : query;
+  const { rows: [r] } = await q(
+    `select (select count(*) from hosts where ${OLD_HOSTS})::int as hosts,
+            (select count(*) from experience_bookings where ${OLD_BOOKINGS})::int as bookings,
+            (select count(*) from booking_tips where ${OLD_TIPS})::int as tips,
+            (select count(*) from host_payouts p where ${OLD_PAYOUTS})::int as payouts,
+            (select count(*) from hosting_payments m join experience_bookings b on b.id = m.booking_id
+              where b.charge_model is null and b.stripe_payment_intent is not null and m.state = 'pending' and m.voided_at is null)::int as pending_lines,
+            (select count(*) from hosting_payments where mode = 'live')::int as live_lines,
+            (select count(*) from host_payouts where mode = 'live')::int as live_payouts`,
+  );
+  return r;
+}
+
+/**
+ * Void them, in one transaction. Hosts lose the old account id (kept beside it,
+ * as voided) so their next payouts step makes a new one the L1 way; bookings and
+ * their pending refund lines are marked and left as they are; payouts and tips
+ * not yet paid out become 'void'. Returns the counts it voided.
+ */
+export async function voidOldModel() {
+  return withTransaction(async (c) => {
+    const before = await oldModelCounts(c);
+    if (before.live_lines || before.live_payouts) throw Object.assign(new Error('There is live-mode money on the ledger. Nothing was voided.'), { status: 409, code: 'live_rows' });
+    const { rowCount: payouts } = await c.query(`update host_payouts p set state = 'void', hold_reason = 'old_model', updated_at = now() where ${OLD_PAYOUTS}`);
+    const { rowCount: tips } = await c.query(`update booking_tips set state = 'void' where ${OLD_TIPS}`);
+    const { rowCount: lines } = await c.query(
+      `update hosting_payments m set voided_at = now(), updated_at = now() from experience_bookings b
+        where b.id = m.booking_id and b.charge_model is null and b.stripe_payment_intent is not null and m.state = 'pending' and m.voided_at is null`,
+    );
+    const { rowCount: bookings } = await c.query(`update experience_bookings set money_voided_at = now() where ${OLD_BOOKINGS}`);
+    const { rows: hosts } = await c.query(
+      `update hosts set stripe_void_account_id = stripe_account_id, stripe_voided_at = now(), stripe_account_id = null,
+                        payouts_state = 'none', stripe_charges_enabled = false, stripe_payouts_enabled = false, updated_at = now()
+        where ${OLD_HOSTS} returning id`,
+    );
+    return { hosts: hosts.length, hostIds: hosts.map((h) => h.id), bookings, tips, payouts, pendingLines: lines };
+  });
 }

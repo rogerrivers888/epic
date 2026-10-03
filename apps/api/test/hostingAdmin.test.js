@@ -248,3 +248,66 @@ test('Report this host lands on Safety, counted on its tab, and leaves once look
     assert.ok((await srv.get('/api/admin/hosting/health')).body.tabs.safety >= 1);
   } finally { await srv.close(); }
 });
+
+test('voiding the old model: the owner only, test rows kept and marked, a v2 host untouched, live money refuses the lot', async () => {
+  settings.forget();
+  const mk = async (model) => {
+    const { household } = await aHousehold(query);
+    const { rows: [h] } = await query(
+      `insert into hosts (household_id, name, stripe_account_id, stripe_account_model, payouts_state) values ($1, 'Old', $2, $3, 'ready') returning *`,
+      [household.id, `acct_${model ?? 'old'}_${crypto.randomUUID().slice(0, 6)}`, model],
+    );
+    const { rows: [o] } = await query(`insert into host_offers (host_id, shape, lane, state, title) values ($1, 'oneoff', 'oneoff', 'live', 'X') returning *`, [h.id]);
+    const { household: g } = await aHousehold(query);
+    const { rows: [b] } = await query(
+      `insert into experience_bookings (offer_id, host_id, household_id, payment_state, charged_pence, host_pence, fee_pence, value_pence, stripe_payment_intent, charge_model)
+       values ($1, $2, $3, 'charged', 1000, 800, 200, 1000, $4, $5) returning *`,
+      [o.id, h.id, g.id, `pi_${crypto.randomUUID().slice(0, 8)}`, model ? 'destination' : null],
+    );
+    const { rows: [line] } = await query(
+      `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, state, idem_key) values ('refund', $1, $2, $3, $4, 500, 'pending', $5) returning *`,
+      [b.id, o.id, h.id, g.id, `k-${b.id}`],
+    );
+    const { rows: [p] } = await query(
+      `insert into host_payouts (host_id, offer_id, amount_pence, release_at, lines) values ($1, $2, 800, now(), $3::jsonb) returning *`,
+      [h.id, o.id, JSON.stringify([{ bookingId: b.id, pence: 800 }])],
+    );
+    return { h, b, line, p };
+  };
+  const old = await mk(null);
+  const kept = await mk('v2');
+
+  const staff = await server(STAFF);
+  const owner = await server(OWNER);
+  try {
+    const preview = (await staff.get('/api/admin/hosting/payments/old-model')).body.counts;
+    assert.ok(preview.hosts >= 1 && preview.bookings >= 1 && preview.payouts >= 1, 'staff can see what it would touch');
+    assert.equal((await staff.send('POST', '/api/admin/hosting/payments/void-old-model', { why: 'x' })).body.error, 'needs_personal_sign_in', 'only the owner, signed in');
+    assert.equal((await owner.send('POST', '/api/admin/hosting/payments/void-old-model', {})).body.error, 'why');
+
+    // Live money anywhere on the ledger: nothing is voided at all.
+    const { rows: [live] } = await query(`insert into hosting_payments (kind, amount_pence, state, mode) values ('charge', 1, 'succeeded', 'live') returning id`);
+    assert.equal((await owner.send('POST', '/api/admin/hosting/payments/void-old-model', { why: 'Pre-L1 test rows' })).body.error, 'live_rows');
+    assert.equal((await query('select stripe_account_id from hosts where id = $1', [old.h.id])).rows[0].stripe_account_id, old.h.stripe_account_id);
+    await query('delete from hosting_payments where id = $1', [live.id]);
+
+    const r = await owner.send('POST', '/api/admin/hosting/payments/void-old-model', { why: 'Pre-L1 test rows (owner, 3 Oct 2026)' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const host = (await query('select * from hosts where id = $1', [old.h.id])).rows[0];
+    assert.deepEqual([host.stripe_account_id, host.stripe_void_account_id, host.payouts_state], [null, old.h.stripe_account_id, 'none'], 'the old account set aside, kept beside it');
+    assert.ok((await query('select money_voided_at from experience_bookings where id = $1', [old.b.id])).rows[0].money_voided_at, 'the booking kept, and marked');
+    assert.ok((await query('select voided_at from hosting_payments where id = $1', [old.line.id])).rows[0].voided_at, 'its pending refund will never be sent');
+    assert.equal((await query('select state from host_payouts where id = $1', [old.p.id])).rows[0].state, 'void');
+    // A host made the L1 way is not touched.
+    const v2 = (await query('select * from hosts where id = $1', [kept.h.id])).rows[0];
+    assert.equal(v2.stripe_account_id, kept.h.stripe_account_id);
+    assert.equal((await query('select state from host_payouts where id = $1', [kept.p.id])).rows[0].state, 'scheduled');
+    assert.equal((await query('select voided_at from hosting_payments where id = $1', [kept.line.id])).rows[0].voided_at, null);
+    // Kept, never deleted; and the change log names it.
+    assert.equal((await query('select count(*)::int as n from experience_bookings where id = $1', [old.b.id])).rows[0].n, 1);
+    assert.ok((await query(`select count(*)::int as n from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'stripe_account'`, [old.h.id])).rows[0].n >= 1);
+    // Once is enough: a second run finds nothing to do.
+    const again = await owner.send('POST', '/api/admin/hosting/payments/void-old-model', { why: 'again' });
+    assert.deepEqual([again.body.voided.hosts, again.body.voided.bookings], [0, 0]);
+  } finally { await staff.close(); await owner.close(); }
+});

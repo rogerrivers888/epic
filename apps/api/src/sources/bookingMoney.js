@@ -406,7 +406,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
             case when p.tip_id is not null then t.charge_model else b.charge_model end as charge_model, o.title
        from hosting_payments p join experience_bookings b on b.id = p.booking_id left join host_offers o on o.id = p.offer_id
        left join booking_tips t on t.id = p.tip_id
-      where p.state = 'pending' and p.kind in ('refund', 'release') and p.idem_key is not null
+      where p.state = 'pending' and p.kind in ('refund', 'release') and p.idem_key is not null and p.voided_at is null
       order by p.created_at limit $1`,
     [limit],
   );
