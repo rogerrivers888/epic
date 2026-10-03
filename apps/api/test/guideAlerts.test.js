@@ -234,5 +234,9 @@ test('the place lookup: counties from the list, postcodes from ONS, names only o
   const before = await failures();
   assert.equal(await placeOf('Reading', { fetchImpl: async () => { throw new Error('down'); } }), null, 'a failed lookup is no answer, never a throw');
   assert.equal(await failures(), before + 1, 'a call that never came back is on the ledger as a failure');
+  const answered = async () => (await query(`select count(*)::int as n from provider_calls where purpose = 'guide-alert.place' and ok = true and watched = 1`)).rows[0].n;
+  const fine = await answered();
+  await placeOf('rg1', { fetchImpl: fake({ '/outcodes/RG1': { admin_district: ['Reading'], admin_county: [], country: ['England'], latitude: 51.45, longitude: -0.97 } }) });
+  assert.equal(await answered(), fine + 1, 'and one that answered is on it as an answer, so the failures have a denominator');
   assert.equal(await placeOf('   '), null);
 });

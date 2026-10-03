@@ -15,6 +15,7 @@
 
 import { userAgent } from '../origins.js';
 import * as providerCalls from '../repositories/providerCalls.js';
+import { noteCall, noteFault } from './meter.js';
 
 const API = 'https://api.postcodes.io';
 const UA = userAgent('guide alerts');
@@ -52,18 +53,22 @@ const KIND_RANK = ['City', 'Town', 'Village', 'Hamlet', 'Suburban Area', 'Other 
 export const keyOf = (s) => String(s ?? '').toLowerCase().replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
 
 async function ask(path, fetchImpl) {
-  // Every call is on the ledger (CLAUDE.md › provider_calls): one that answered as
-  // a call, one that timed out or never connected as a failure, so the supplier's
-  // numbers see it (Codex).
+  // Every call is on the ledger (CLAUDE.md › provider_calls), observed either way
+  // (sources/meter.js), so the supplier's numbers count the answers as well as the
+  // timeouts and refusals (Codex). A 404 is an answer: no such postcode.
   const started = Date.now();
+  const meter = { requests: 1 };
+  const write = () => providerCalls.record(null, 'postcodes', 'guide-alert.place', meter).catch(() => null);
   let res;
   try {
     res = await fetchImpl(`${API}${path}`, { signal: AbortSignal.timeout(4000), headers: { 'user-agent': UA, accept: 'application/json' } });
   } catch (err) {
-    await providerCalls.recordFailure({ provider: 'postcodes', purpose: 'guide-alert.place', ms: Date.now() - started, fault: err?.name === 'TimeoutError' ? 'timeout' : 'network' }).catch(() => null);
+    noteFault(meter, err?.name === 'TimeoutError' ? 'timeout' : 'network');
+    await write();
     throw err;
   }
-  await providerCalls.record(null, 'postcodes', 'guide-alert.place', { requests: 1 }).catch(() => null);
+  if (res.ok || res.status === 404) noteCall(meter, Date.now() - started); else noteFault(meter, `http_${res.status}`);
+  await write();
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`postcodes.io ${res.status}`);
   return (await res.json())?.result ?? null;
