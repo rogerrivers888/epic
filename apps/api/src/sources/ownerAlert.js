@@ -7,7 +7,7 @@
  * the server log and returns `{ sent: false, reason }` — never silently.
  */
 
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { mailConfigured, sendMail } from './mail.js';
 import { logChange } from '../repositories/hostingSettings.js';
 
@@ -20,16 +20,25 @@ export async function ownerEmail() {
   return a?.email ?? null;
 }
 
-/** Send one alert, once per `key`. `subjectKind`/`subjectId` say what it is about, for the change log. */
+/**
+ * Send one alert, once per `key`. Checked and written down under a lock on the
+ * key, in one transaction with the send: two deliveries of the same event at
+ * once send one e-mail, and a send that fails leaves nothing recorded, so the
+ * next delivery tries again (Codex, 3 Oct 2026). `subjectKind`/`subjectId` say
+ * what it is about, for the change log.
+ */
 export async function alertOwner({ key, subject, text, subjectKind = 'host', subjectId }, { send = sendMail, configured = mailConfigured } = {}) {
-  const { rows: [seen] } = await query(`select 1 from hosting_changes where field = 'owner_alert' and after->>'key' = $1 limit 1`, [key]);
-  if (seen) return { sent: false, reason: 'already_sent' };
   const to = await ownerEmail();
   if (!to || !configured()) {
     console.error(`epic-api: owner alert not sent (${!to ? 'no owner account' : 'mail not configured'}) — ${subject}`);
     return { sent: false, reason: !to ? 'no_owner' : 'no_mail' };
   }
-  await send({ to, subject, text, purpose: 'owner_alert' });
-  await logChange({ subjectKind, subjectId: String(subjectId), field: 'owner_alert', after: { key, subject }, byLabel: 'epic' });
-  return { sent: true };
+  return withTransaction(async (c) => {
+    await c.query('select pg_advisory_xact_lock(hashtext($1))', [`owner-alert:${key}`]);
+    const { rows: [seen] } = await c.query(`select 1 from hosting_changes where field = 'owner_alert' and after->>'key' = $1 limit 1`, [key]);
+    if (seen) return { sent: false, reason: 'already_sent' };
+    await logChange({ subjectKind, subjectId: String(subjectId), field: 'owner_alert', after: { key, subject }, byLabel: 'epic' }, c);
+    await send({ to, subject, text, purpose: 'owner_alert' });
+    return { sent: true };
+  });
 }

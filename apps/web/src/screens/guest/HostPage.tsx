@@ -66,6 +66,8 @@ export function HostPage({ id, webPage }: { id: string; webPage: boolean }) {
     <Facts key="facts" items={[
       { label: 'Rating', value: h.rating != null && total ? `${h.rating.toFixed(1)} · ${total} review${total === 1 ? '' : 's'}` : 'No reviews yet' },
       { label: 'Hosting since', value: sinceWords(h.since) },
+      // The Verified tag as a dated fact (L7): the day Stripe confirmed their passport.
+      ...(h.verifiedOn ? [{ label: 'Passport checked', value: `${new Date(`${h.verifiedOn}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} · by Stripe` }] : []),
     ]} />,
   );
   if (h.introText) blocks.push(<Kick key="about-k" top={4}>About</Kick>, <Para key="about">{h.introText}</Para>);

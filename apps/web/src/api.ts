@@ -5599,6 +5599,8 @@ export type PublicHost = {
   replyWords?: string | null;
   /** Checked (DBS, insurance, references) passed — the second badge on the host's profile. */
   checked?: boolean;
+  /** The day Stripe confirmed the host's passport (YYYY-MM-DD), or null — a dated fact, never the document (register L7). */
+  verifiedOn?: string | null;
 };
 export type PaySchedule = 'weekly' | 'weekday' | 'monthly';
 /** A bank a host is paid into (SX16). Epic never holds the money: only a label, the last four digits and the holder. */

@@ -700,6 +700,13 @@ test('L7: Stripe asking a verified host for ID again tells the owner once, and a
   assert.equal((await ownerAlert.alertOwner(args, deps)).sent, false, 'once');
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, await ownerAlert.ownerEmail());
+  // Two deliveries of the same event at once: one e-mail (Codex, 3 Oct 2026).
+  const slow = { send: async (m) => { await new Promise((r) => setTimeout(r, 50)); sent.push(m); }, configured: () => true };
+  const both = await Promise.all([ownerAlert.alertOwner({ ...args, key: 'race' }, slow), ownerAlert.alertOwner({ ...args, key: 'race' }, slow)]);
+  assert.deepEqual(both.map((x) => x.sent).sort(), [false, true]);
+  // A send that fails leaves nothing written, so the next delivery tries again.
+  await assert.rejects(ownerAlert.alertOwner({ ...args, key: 'bounce' }, { send: async () => { throw new Error('smtp down'); }, configured: () => true }));
+  assert.equal((await ownerAlert.alertOwner({ ...args, key: 'bounce' }, deps)).sent, true);
   // No mail set up: said in the log, never silent, and nothing recorded as sent.
   assert.deepEqual(await ownerAlert.alertOwner({ ...args, key: 'other' }, { send: deps.send, configured: () => false }), { sent: false, reason: 'no_mail' });
 });
