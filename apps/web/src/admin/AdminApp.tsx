@@ -396,9 +396,10 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
             {/* The person and their role, never a role alone; and a session that cannot act directly says so, since
                 its changes go to Approvals (Roger, 3 Oct 2026). */}
             <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]}>
-              {[access?.name?.trim().split(/\s+/)[0] || (access?.role?.key === 'owner' ? 'Shared passcode' : null), access?.role?.label].filter(Boolean).join(' · ') || '—'}
+              {[access?.name?.trim().split(/\s+/)[0] || (access?.role?.key === 'owner' && !access?.elevated ? 'Shared passcode' : null), access?.role?.label].filter(Boolean).join(' · ') || '—'}
             </Text>
-            {access?.role?.key === 'owner' && !access?.elevated ? <Text style={type.tiny}>Changes go to Approvals until you sign in personally</Text> : null}
+            {/* Personal sign-in is the signal, not a name (an owner may have none); and only the owner-only actions wait (Codex, 3 Oct 2026). */}
+            {access?.role?.key === 'owner' && !access?.elevated ? <Text style={type.tiny}>Owner-only changes go to Approvals until you sign in personally</Text> : null}
             <Press onPress={onLeave} style={styles.leave} accessibilityRole="button">
               <Icon name="back" size={14} color={colors.ink} />
               <Text style={[type.small, { color: colors.ink }]}>The household app</Text>
