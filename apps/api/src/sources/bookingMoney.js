@@ -320,7 +320,9 @@ async function decideOne(offerId, sessionId, now) {
       : (await c.query(`select * from offer_sessions where offer_id = $1 and state = 'scheduled' and decided_outcome is null`, [offerId])).rows;
     const ids = group.map((x) => x.id);
     const min = Number(first.min_count ?? offer.min_count ?? 0);
-    const bookings = await bookingsOn(c, [first.id]);
+    // Only places that are really held count toward the minimum: paid, card held, or a free booking confirmed — never a
+    // checkout still open, which may never pay (Codex, 2 Oct 2026).
+    const bookings = (await bookingsOn(c, [first.id])).filter((b) => ['confirmed', 'attended'].includes(b.state) || ['charged', 'held', 'partially_refunded'].includes(b.payment_state));
     const heads = bookings.reduce((n, b) => n + Number(b.heads ?? 1), 0);
     const told = [];
     const ownOff = min && heads < min ? await notifications.hostWords(offer.host_id, 'called_off') : null;
@@ -367,7 +369,7 @@ export async function warnUnderMinimum({ now = new Date(), withinHours = 48 } = 
   const { rows } = await query(
     `select s.id, s.offer_id, s.decides_at, coalesce(s.min_count, o.min_count) as min, o.title, h.household_id,
             coalesce((select sum(b.heads) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id
-                       where bs.session_id = s.id and bs.state = 'booked' and ${LIVE_BOOKING}), 0)::int as heads
+                       where bs.session_id = s.id and bs.state = 'booked' and (b.state in ('confirmed', 'attended') or b.payment_state in ('charged', 'held', 'partially_refunded'))), 0)::int as heads
        from offer_sessions s join host_offers o on o.id = s.offer_id join hosts h on h.id = o.host_id
       where s.state = 'scheduled' and s.decided_outcome is null and s.decides_at > $1 and s.decides_at <= $1 + make_interval(hours => $2)
         and coalesce(s.min_count, o.min_count) is not null`,

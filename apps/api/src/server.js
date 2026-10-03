@@ -27,6 +27,7 @@ import groupRoutes, { startReminderLoop } from './routes/groups.js';
 import hostingRoutes, { adminRouter as hostingAdminRoutes, publicRouter as hostingPublicRoutes, startHostingLoop } from './routes/hosting.js';
 import hostLanesRoutes, { webhookRouter as stripeWebhookRoutes } from './routes/hostLanes.js';
 import hostDeskRoutes from './routes/hostDesk.js';
+import * as hostingSettingsRepo from './repositories/hostingSettings.js';
 import hostingAdminV4Routes from './routes/hostingAdmin.js';
 import guestBookingRoutes, { publicRouter as guestBookingPublicRoutes } from './routes/guestBookings.js';
 import hostingMoneyRoutes, { adminRouter as hostingMoneyAdminRoutes, startHostingMoneyLoop } from './routes/hostingMoney.js';
@@ -533,6 +534,9 @@ app.use('/api', groupRoutes);
 // The tag landing pages and the browse row: public, because that is where the
 // long tail of search arrives (routes/hostSkills.js).
 app.use('/api', skillsPublicRoutes);
+// The hosting settings are read at run time: a request that reaches the hosting routes sees them no older than their
+// minute's cache, whichever process changed them (Codex, 2 Oct 2026).
+app.use(['/api/host', '/api/experiences', '/api/booked', '/api/invited'], (_req, _res, next) => { hostingSettingsRepo.current().catch(() => null).finally(() => next()); });
 // Hosting v4, the guest side: what booking asks (public), ahead of the old offer routes.
 app.use('/api', guestBookingPublicRoutes);
 app.use('/api', hostingPublicRoutes);
