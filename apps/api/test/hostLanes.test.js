@@ -705,8 +705,10 @@ test('L7: Stripe asking a verified host for ID again tells the owner once, and a
   assert.equal(sent[0].to, await ownerAlert.ownerEmail());
   // Two deliveries of the same event at once: one e-mail (Codex, 3 Oct 2026).
   const slow = { send: async (m) => { await new Promise((r) => setTimeout(r, 50)); sent.push(m); }, configured: () => true };
-  const both = await Promise.all([ownerAlert.alertOwner({ ...args, key: 'race' }, slow), ownerAlert.alertOwner({ ...args, key: 'race' }, slow)]);
-  assert.deepEqual(both.map((x) => x.sent).sort(), [false, true]);
+  const both = await Promise.allSettled([ownerAlert.alertOwner({ ...args, key: 'race' }, slow), ownerAlert.alertOwner({ ...args, key: 'race' }, slow)]);
+  assert.deepEqual(both.map((x) => (x.status === 'fulfilled' ? `sent:${x.value.sent}` : x.reason.code)).sort(), ['owner_alert_in_flight', 'sent:true'],
+    'the second is told to try again later, not that it is done');
+  assert.equal((await ownerAlert.alertOwner({ ...args, key: 'race' }, deps)).reason, 'already_sent', 'once it has gone, it is done');
   // The mail service turning it down ({ sent: false }) is a failure too: nothing recorded, retried next time.
   await assert.rejects(ownerAlert.alertOwner({ ...args, key: 'refused' }, { send: async () => ({ sent: false, reason: 'suppressed' }), configured: () => true }), (e) => e.code === 'owner_alert_not_sent');
   assert.equal((await ownerAlert.alertOwner({ ...args, key: 'refused' }, deps)).sent, true);

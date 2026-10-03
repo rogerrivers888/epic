@@ -35,14 +35,21 @@ export async function alertOwner({ key, subject, text, subjectKind = 'host', sub
     console.error(`epic-api: owner alert not sent (${!to ? 'no owner account' : 'mail not configured'}) — ${subject}`);
     return { sent: false, reason: !to ? 'no_owner' : 'no_mail' };
   }
+  // The claim says 'sending' until the mail has gone, then 'sent'. A duplicate that finds it sending is not told it
+  // is done — it throws, so its event is retried, and the alert is never lost to a send that later fails (Codex,
+  // 3 Oct 2026). A claim left 'sending' for ten minutes (the sender died) is taken over.
   const claimed = await withTransaction(async (c) => {
     await c.query('select pg_advisory_xact_lock(hashtext($1))', [`owner-alert:${key}`]);
-    const { rows: [seen] } = await c.query(`select 1 from hosting_changes where field = 'owner_alert' and after->>'key' = $1 limit 1`, [key]);
-    if (seen) return false;
-    await logChange({ subjectKind, subjectId: String(subjectId), field: 'owner_alert', after: { key, subject }, byLabel: 'epic' }, c);
-    return true;
+    const { rows: [seen] } = await c.query(
+      `select id, after->>'state' as state, at from hosting_changes where field = 'owner_alert' and after->>'key' = $1 order by at desc limit 1`, [key]);
+    if (seen && seen.state !== 'sending') return 'sent';
+    if (seen && new Date(seen.at).getTime() > Date.now() - 10 * 60_000) return 'in_flight';
+    if (seen) await c.query('delete from hosting_changes where id = $1', [seen.id]);
+    await logChange({ subjectKind, subjectId: String(subjectId), field: 'owner_alert', after: { key, subject, state: 'sending' }, byLabel: 'epic' }, c);
+    return 'claimed';
   });
-  if (!claimed) return { sent: false, reason: 'already_sent' };
+  if (claimed === 'sent') return { sent: false, reason: 'already_sent' };
+  if (claimed === 'in_flight') throw Object.assign(new Error('owner alert is being sent by another delivery'), { code: 'owner_alert_in_flight' });
   let r;
   try { r = await send({ to, subject, text, purpose: 'owner_alert' }); } catch (err) { r = { sent: false, reason: err.message }; }
   // sendMail answers { sent: false } rather than throwing when the mail service turns it down: a failure too.
@@ -50,5 +57,6 @@ export async function alertOwner({ key, subject, text, subjectKind = 'host', sub
     await query(`delete from hosting_changes where field = 'owner_alert' and after->>'key' = $1`, [key]);
     throw Object.assign(new Error(`owner alert not delivered: ${r.reason ?? r.message ?? 'refused'}`), { code: 'owner_alert_not_sent' });
   }
+  await query(`update hosting_changes set after = jsonb_set(after, '{state}', '"sent"') where field = 'owner_alert' and after->>'key' = $1 and after->>'state' = 'sending'`, [key]);
   return { sent: true };
 }
