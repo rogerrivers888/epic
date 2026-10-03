@@ -371,10 +371,14 @@ export async function voidOldModel() {
         where (${OLD_TIPS}) or (charge_model is null and state = 'paid' and payout_id = any($1::uuid[]))`,
       [voidedPayouts.map((p) => p.id)],
     );
-    const { rowCount: lines } = await c.query(
+    // Every ledger line of an old booking — its charge as well as anything still pending — so no report, statement
+    // or reconciliation counts it again; the pending ones are also never sent (Codex, 3 Oct 2026).
+    const { rows: voidedLines } = await c.query(
       `update hosting_payments m set voided_at = now(), updated_at = now() from experience_bookings b
-        where b.id = m.booking_id and b.charge_model is null and b.stripe_payment_intent is not null and m.state = 'pending' and m.voided_at is null`,
+        where b.id = m.booking_id and b.charge_model is null and b.stripe_payment_intent is not null and m.voided_at is null
+        returning m.state`,
     );
+    const lines = voidedLines.filter((l) => l.state === 'pending').length;
     const { rowCount: bookings } = await c.query(`update experience_bookings set money_voided_at = now() where ${OLD_BOOKINGS}`);
     const { rows: hosts } = await c.query(
       `update hosts set stripe_void_account_id = stripe_account_id, stripe_voided_at = now(), stripe_account_id = null,

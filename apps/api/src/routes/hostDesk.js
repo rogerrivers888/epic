@@ -753,7 +753,7 @@ router.get('/host/desk/statements/:period.csv', async (req, res, next) => {
     const { rows } = await query(
       `select p.created_at, p.kind, p.amount_pence, p.epic_pence, p.host_pence, p.rate_pct, p.cause, p.reason, p.state, o.title
          from hosting_payments p left join host_offers o on o.id = p.offer_id
-        where p.host_id = $1 and p.state = 'succeeded' and p.kind <> 'tip' and p.created_at >= $2::date and p.created_at < $3::date
+        where p.host_id = $1 and p.state = 'succeeded' and p.voided_at is null and p.kind not in ('tip', 'tip_refund') and p.created_at >= $2::date and p.created_at < $3::date
         order by p.created_at`,
       [host.id, from, to],
     );

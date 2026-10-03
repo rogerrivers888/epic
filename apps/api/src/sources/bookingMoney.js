@@ -406,7 +406,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
             case when p.tip_id is not null then t.charge_model else b.charge_model end as charge_model, o.title
        from hosting_payments p join experience_bookings b on b.id = p.booking_id left join host_offers o on o.id = p.offer_id
        left join booking_tips t on t.id = p.tip_id
-      where p.state = 'pending' and p.kind in ('refund', 'release') and p.idem_key is not null and p.voided_at is null
+      where p.state = 'pending' and p.kind in ('refund', 'release', 'tip_refund') and p.idem_key is not null and p.voided_at is null
       order by p.created_at limit $1`,
     [limit],
   );
@@ -434,7 +434,7 @@ export async function processRefunds({ status = stripe.stripeStatus, refund = st
           );
         }
       });
-      if (p.kind === 'refund') {
+      if (p.kind === 'refund' || p.kind === 'tip_refund') {
         await tell([{ householdId: p.household_id, kind: 'refund_issued', title: `£${(p.amount_pence / 100).toFixed(2)} is on its way back to you`, body: p.title ?? null, link: guestLink(p.booking_id), dedupeKey: `refund:${p.id}` }]);
       }
       out.sent += 1;

@@ -278,7 +278,11 @@ test('voiding the old model: the owner only, test rows kept and marked, a v2 hos
        values ($1, $2, $3, $4, 300, 30, 'paid', $5, $6, $7) returning *`,
       [b.id, o.id, h.id, g.id, `pi_t_${crypto.randomUUID().slice(0, 8)}`, p.id, model ? 'destination' : null],
     );
-    return { h, b, line, p, tip };
+    const { rows: [charge] } = await query(
+      `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, epic_pence, state, stripe_ref) values ('charge', $1, $2, $3, $4, 1000, 200, 'succeeded', $5) returning *`,
+      [b.id, o.id, h.id, g.id, b.stripe_payment_intent],
+    );
+    return { h, b, line, p, tip, charge };
   };
   const old = await mk(null);
   const kept = await mk('v2');
@@ -303,6 +307,8 @@ test('voiding the old model: the owner only, test rows kept and marked, a v2 hos
     assert.deepEqual([host.stripe_account_id, host.stripe_void_account_id, host.payouts_state], [null, old.h.stripe_account_id, 'none'], 'the old account set aside, kept beside it');
     assert.ok((await query('select money_voided_at from experience_bookings where id = $1', [old.b.id])).rows[0].money_voided_at, 'the booking kept, and marked');
     assert.ok((await query('select voided_at from hosting_payments where id = $1', [old.line.id])).rows[0].voided_at, 'its pending refund will never be sent');
+    assert.ok((await query('select voided_at from hosting_payments where id = $1', [old.charge.id])).rows[0].voided_at, 'its charge is out of every report and the reconciliation too');
+    assert.equal((await query('select voided_at from hosting_payments where id = $1', [kept.charge.id])).rows[0].voided_at, null);
     assert.equal((await query('select state from host_payouts where id = $1', [old.p.id])).rows[0].state, 'void');
     assert.equal((await query('select state from booking_tips where id = $1', [old.tip.id])).rows[0].state, 'void', 'a tip the voided payout had claimed goes with it');
     assert.equal((await query('select state from booking_tips where id = $1', [kept.tip.id])).rows[0].state, 'paid');

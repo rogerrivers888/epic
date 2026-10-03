@@ -595,7 +595,7 @@ async function refundLateTip(tipId, pi) {
   await query(
     `insert into hosting_payments (kind, booking_id, offer_id, host_id, household_id, amount_pence, epic_pence, host_pence,
                                    state, mode, reason, cause, idem_key, refund_of, tip_id)
-     select 'refund', $1, $2, $3, $4, $5, 0, 0, 'pending', 'test', 'duplicate tip', 'duplicate_tip', $6, $7, $8
+     select 'tip_refund', $1, $2, $3, $4, $5, 0, 0, 'pending', 'test', 'duplicate tip', 'duplicate_tip', $6, $7, $8
       where not exists (select 1 from hosting_payments where idem_key = $6)`,
     [t.booking_id, t.offer_id, t.host_id, t.household_id, amount, `duplicate_tip:${t.id}`, pi.id, t.id],
   );
@@ -1268,7 +1268,7 @@ router.get('/payments', async (_req, res, next) => {
     const { rows } = await query(
       `select p.id, p.kind, p.amount_pence, p.state, p.cause, p.created_at, o.title, p.booking_id
          from hosting_payments p left join host_offers o on o.id = p.offer_id
-        where p.household_id = $1 and p.kind in ('charge', 'hold', 'refund', 'release', 'tip', 'private_fee', 'pro')
+        where p.household_id = $1 and p.kind in ('charge', 'hold', 'refund', 'release', 'tip', 'tip_refund', 'private_fee', 'pro')
         order by p.created_at desc limit 300`,
       [household.id],
     );

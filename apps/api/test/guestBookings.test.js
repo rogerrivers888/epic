@@ -879,7 +879,9 @@ test('a tip charged after the guest had tipped again is given back in full, as a
     await guest.applyPaymentIntent(pi1);
     const { rows: lines } = await query(`select * from hosting_payments where tip_id = $1`, [first.body.tip.id]);
     assert.equal(lines.length, 1, 'one refund line, however often Stripe says so');
-    assert.deepEqual([lines[0].kind, lines[0].reason, lines[0].cause, lines[0].amount_pence, lines[0].refund_of], ['refund', 'duplicate tip', 'duplicate_tip', pi1.amount, pi1.id]);
+    assert.deepEqual([lines[0].kind, lines[0].reason, lines[0].cause, lines[0].amount_pence, lines[0].refund_of], ['tip_refund', 'duplicate tip', 'duplicate_tip', pi1.amount, pi1.id]);
+    // Its own kind: no report counts a tip given back as a refund of the booking's price (Codex, 3 Oct 2026).
+    assert.equal((await query(`select count(*)::int as n from hosting_payments where booking_id = $1 and kind = 'refund'`, [bookingId])).rows[0].n, 0);
     assert.equal((await query(`select count(*)::int as n from hosting_payments where kind = 'tip' and stripe_ref = $1`, [pi1.id])).rows[0].n, 0, 'never credited to the host');
     await engine.processRefunds();
     const sent = calls.filter((c) => c.url === '/v1/refunds').at(-1);

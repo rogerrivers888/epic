@@ -267,7 +267,7 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
       `select coalesce(sum(case when kind = 'charge' and state = 'succeeded' then amount_pence end), 0)::int as taken,
               coalesce(sum(case when kind = 'charge' and state = 'succeeded' then epic_pence end), 0)::int as epic,
               coalesce(sum(case when kind = 'payout' and state = 'succeeded' then amount_pence end), 0)::int as paid_out
-         from hosting_payments where host_id = $1`, [h.id],
+         from hosting_payments where host_id = $1 and voided_at is null`, [h.id],
     );
     const { rows: [nextPayout] } = await query(`select amount_pence + tips_pence as pence, release_at, state, hold_reason from host_payouts where host_id = $1 and state in ('scheduled', 'held') order by release_at limit 1`, [h.id]);
     const { rows: events } = await query(`select id, title, lane, state, visibility, starts_on from host_offers where host_id = $1 and lane is not null order by updated_at desc limit 100`, [h.id]);
@@ -518,13 +518,13 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
          from experience_bookings b join host_offers o on o.id = b.offer_id
          left join lateral (select sum(p.amount_pence)::int as amount, sum(coalesce(p.epic_pence, 0))::int as epic, sum(coalesce(p.host_pence, 0))::int as host
                               from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state in ('pending', 'succeeded')) r on true
-        where b.payment_state in ('charged', 'partially_refunded', 'refunded') and b.created_at >= $1 and b.created_at < $2 and ($3::text is null or o.lane = $3)
+        where b.payment_state in ('charged', 'partially_refunded', 'refunded') and b.money_voided_at is null and b.created_at >= $1 and b.created_at < $2 and ($3::text is null or o.lane = $3)
         group by 1, 2`,
       [from, to, kind],
     );
     const { rows: p } = await query(
       `select kind, count(*)::int as n, coalesce(sum(amount_pence), 0)::int as value, coalesce(sum(epic_pence), 0)::int as epic, coalesce(sum(host_pence), 0)::int as host
-         from hosting_payments where state = 'succeeded' and kind in ('private_fee', 'pro', 'tip') and created_at >= $1 and created_at < $2 group by 1`,
+         from hosting_payments where state = 'succeeded' and voided_at is null and kind in ('private_fee', 'pro', 'tip') and created_at >= $1 and created_at < $2 group by 1`,
       [from, to],
     );
     const pub = b.filter((x) => x.visibility === 'public');
@@ -545,7 +545,7 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
     // Filtered by Kind as the streams are, through each row's event (Codex, 3 Oct 2026).
     const { rows: [back] } = await query(
       `select count(*)::int as n, coalesce(sum(p.amount_pence), 0)::int as pence from hosting_payments p left join host_offers o on o.id = p.offer_id
-        where p.kind = 'refund' and p.state = 'succeeded' and p.created_at >= $1 and p.created_at < $2 and ($3::text is null or o.lane = $3)`, [from, to, kind]);
+        where p.kind = 'refund' and p.state = 'succeeded' and p.voided_at is null and p.created_at >= $1 and p.created_at < $2 and ($3::text is null or o.lane = $3)`, [from, to, kind]);
     const { rows: [claims] } = await query(
       `select count(*)::int as n, coalesce(sum(k.amount_pence), 0)::int as pence from hosting_complaints k left join host_offers o on o.id = k.offer_id
         where k.kind = 'guarantee_claim' and k.state = 'paid' and k.resolved_at >= $1 and k.resolved_at < $2 and ($3::text is null or o.lane = $3)`, [from, to, kind]);
@@ -586,10 +586,10 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
         where p.state in ('scheduled', 'held', 'failed') order by p.release_at limit 500`,
     );
     const { rows: [paid] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence + tips_pence), 0)::int as pence from host_payouts where state = 'paid' and updated_at > now() - interval '30 days'`);
-    const { rows: refunds } = await query(`select cause, state, count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_payments where kind = 'refund' and created_at > now() - interval '30 days' group by 1, 2 order by 1`);
+    const { rows: refunds } = await query(`select cause, state, count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_payments where kind = 'refund' and voided_at is null and created_at > now() - interval '30 days' group by 1, 2 order by 1`);
     const { rows: stuck } = await query(
       `select p.id, p.amount_pence, p.cause, p.reason, p.created_at, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id
-        where p.kind in ('refund', 'release') and p.state = 'failed' order by p.created_at`,
+        where p.kind in ('refund', 'release', 'tip_refund') and p.state = 'failed' and p.voided_at is null order by p.created_at`,
     );
     const { rows: holds } = await query(
       `select b.id, b.held_pence, b.respond_by, o.title, h.name as host, hh.name as household
@@ -648,7 +648,7 @@ router.post('/money/payouts/:id/release', requireOwnerSignedIn('release a payout
 router.post('/money/refunds/:id/retry', requires('manage_hosting'), async (req, res, next) => {
   try {
     if (!UUID.test(String(req.params.id))) throw refuse(404, 'not_found', 'No such refund.');
-    const { rows: [r] } = await query(`update hosting_payments set state = 'pending', updated_at = now() where id = $1 and kind in ('refund', 'release') and state = 'failed' returning id`, [req.params.id]);
+    const { rows: [r] } = await query(`update hosting_payments set state = 'pending', updated_at = now() where id = $1 and kind in ('refund', 'release', 'tip_refund') and state = 'failed' and voided_at is null returning id`, [req.params.id]);
     if (!r) throw refuse(404, 'not_found', 'That refund isn’t waiting on a person.');
     await logChange({ subjectKind: 'booking', subjectId: r.id, field: 'refund_retry', after: { state: 'pending' }, why: typeof req.body?.why === 'string' ? req.body.why.slice(0, 500) : null, by: by(), byLabel: 'staff' });
     res.json({ retried: true });
@@ -743,7 +743,7 @@ router.get('/health', requires('view_hosting'), async (_req, res, next) => {
               (select mismatched from stripe_reconciliations order by ran_at desc limit 1)::int as mismatches,
               (select count(*) from hosting_complaints where state = 'open')::int as complaints,
               (select count(*) from host_payouts where state in ('held', 'failed'))::int as payouts_waiting,
-              (select count(*) from hosting_payments where kind in ('refund', 'release') and state = 'failed')::int as refunds_waiting,
+              (select count(*) from hosting_payments where kind in ('refund', 'release', 'tip_refund') and state = 'failed' and voided_at is null)::int as refunds_waiting,
               (select count(*) from session_incidents where created_at > now() - interval '7 days')::int as incidents7,
               (select count(*) from host_reports where resolved_at is null)::int as reports`,
       [windowH],
@@ -797,7 +797,7 @@ router.get('/reports/money', requires('view_hosting'), async (req, res, next) =>
          from experience_bookings b join host_offers o on o.id = b.offer_id
          left join lateral (select sum(p.amount_pence)::int as amount, sum(coalesce(p.epic_pence, 0))::int as epic, sum(coalesce(p.host_pence, 0))::int as host
                               from hosting_payments p where p.booking_id = b.id and p.kind = 'refund' and p.state in ('pending', 'succeeded')) r on true
-        where b.payment_state in ('charged', 'partially_refunded', 'refunded') and b.created_at > now() - interval '12 months' and ($1::text is null or o.lane = $1)
+        where b.payment_state in ('charged', 'partially_refunded', 'refunded') and b.money_voided_at is null and b.created_at > now() - interval '12 months' and ($1::text is null or o.lane = $1)
         group by 1, 2 order by 1`,
       [kind],
     );
@@ -818,7 +818,7 @@ async function dac7Rows(year) {
             coalesce(sum(case when p.kind = 'tip' then p.host_pence end), 0)::int as tips,
             count(*) filter (where p.kind = 'charge')::int as activities
        from hosting_payments p join hosts h on h.id = p.host_id
-      where p.state = 'succeeded' and p.mode = $2 and p.created_at >= make_date($1, 1, 1) and p.created_at < make_date($1 + 1, 1, 1)
+      where p.state = 'succeeded' and p.voided_at is null and p.mode = $2 and p.created_at >= make_date($1, 1, 1) and p.created_at < make_date($1 + 1, 1, 1)
       group by h.id, h.name, h.tax_reference, h.tax_address order by h.name`,
     // The mode Stripe is in: test rows never count once Epic is live, and live rows never in test.
     [year, stripeMode() === 'live' ? 'live' : 'test'],
