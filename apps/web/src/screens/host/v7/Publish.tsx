@@ -121,15 +121,16 @@ export function Publish({ offerId }: { offerId: string }) {
   const feeDone = home.isPro || offer.privateFeeState === 'paid' || offer.privateFeeState === 'included' || offer.action.key === 'send';
   const showPlan = !pub && !feeDone;
   const chosen: Plan = plan ?? offer.privatePlan ?? 'event';
-  const label = pub ? offer.action.label
+  // The ID check comes first for every host (register L7): while it is the next step the button says so, private too.
+  const label = pub || offer.action.key === 'verify' ? offer.action.label
     : feeDone ? 'Send the invites'
       : chosen === 'pro' ? 'Join Pro · send the invites' : `Pay ${gbp(cfg.privateEventPence)} · send the invites`;
 
   const chargeWords = pub ? offer.charges.words
     : `${home.isPro || (showPlan && chosen === 'pro') || offer.privateFeeState === 'included' ? 'Included in Pro' : `${gbp(cfg.privateEventPence)} for this event`}${offer.throughEpic ? ` · ${cfg.privateCollectPct}% of what you collect` : ''}`;
 
-  // Stripe is needed for a paid-through-Epic offer, a private fee still to pay, or the public ID check.
-  const needsStripe = offer.throughEpic || showPlan || (pub && offer.action.key === 'verify');
+  // Stripe is needed for a paid-through-Epic offer, a private fee still to pay, or the ID check (every host, L7).
+  const needsStripe = offer.throughEpic || showPlan || offer.action.key === 'verify';
   const stripeNote = !needsStripe ? null : !cfg.stripe.ready ? 'Card payments aren’t switched on yet.' : cfg.stripe.mode === 'test' ? 'Payments are in test mode until Epic switches them on.' : null;
 
   const verifying = offer.action.key === 'verify';
