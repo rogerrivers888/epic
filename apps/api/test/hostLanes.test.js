@@ -744,3 +744,24 @@ test('L7: the host’s public page shows the day Stripe confirmed their passport
     assert.ok(!JSON.stringify(page).includes('vs_secret_1'), 'never the session id');
   } finally { await new Promise((r) => s.close(r)); }
 });
+
+test('L15: Stripe disabling or closing a host’s account is written down when it starts and when it ends', async () => {
+  const { household: h } = await aHousehold(query);
+  const host = await repo.insertHost(h.id, { name: 'Troubled' });
+  await repo.updateHost(host.id, { stripeAccountId: 'acct_trouble_1', stripeAccountModel: 'v2' });
+  const { applyStripeEvent } = await import('../src/routes/hostLanes.js');
+  const acct = (extra) => ({ id: 'acct_trouble_1', details_submitted: true, charges_enabled: true, payouts_enabled: true, settings: { payouts: { schedule: { interval: 'manual' } } }, capabilities: { card_payments: 'active', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: null }, ...extra });
+  const log = async () => (await query(`select after from hosting_changes where subject_kind = 'host' and subject_id = $1 and field = 'stripe_account_trouble' order by at`, [host.id])).rows.map((r) => r.after);
+  await applyStripeEvent({ type: 'account.updated', data: { object: acct() } });
+  assert.deepEqual(await log(), [], 'well: nothing written');
+  await applyStripeEvent({ type: 'account.updated', data: { object: acct({ charges_enabled: false, capabilities: { card_payments: 'inactive', transfers: 'active' }, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: 'under_review' } }) } });
+  await applyStripeEvent({ type: 'account.updated', data: { object: acct({ charges_enabled: false, requirements: { currently_due: [], eventually_due: [], past_due: [], disabled_reason: 'under_review' } }) } });
+  assert.deepEqual((await log()).map((x) => x.reason ?? 'cleared'), ['under_review'], 'once, however often Stripe repeats it');
+  await applyStripeEvent({ type: 'account.updated', data: { object: acct() } });
+  assert.equal((await log()).at(-1).cleared, true, 'and when Stripe says it is well again');
+  // Closed or disconnected: its own event on the Connect endpoint.
+  await applyStripeEvent({ type: 'account.application.deauthorized', account: 'acct_trouble_1', data: { object: { id: 'ca_x' } } });
+  assert.equal((await log()).at(-1).reason, 'account_closed');
+  const after = await repo.hostById(host.id);
+  assert.deepEqual([after.stripe_charges_enabled, after.stripe_payouts_enabled], [false, false]);
+});

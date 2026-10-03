@@ -28,25 +28,14 @@ const addAccount = (hostId, label, last4, active = false) =>
   query('insert into host_payout_accounts (host_id, label, last4, holder_name, is_active) values ($1,$2,$3,$4,$5) returning *',
     [hostId, label, last4, 'R Sumner', active]).then((r) => r.rows[0]);
 
-test('the pay schedule and company tax fields round-trip, and ownHost carries them', async () => {
-  const { household } = await aHousehold(query, 'a host who gets paid');
-  const host = await repo.insertHost(household.id, { name: 'Roger', type: 'skill' });
-  // Defaults the migration set.
-  assert.equal(ownHost(host).paySchedule, 'weekly');
-  assert.equal(ownHost(host).taxIsCompany, false);
-  assert.equal(ownHost(host).companyNumber, null);
-
+test('company tax fields round-trip, and a host has no payout schedule to set (register L3)', async () => {
+  const { household } = await aHousehold(query, 'a host with money settings');
+  const host = await repo.insertHost(household.id, { name: 'Money Host', type: 'skill' });
+  assert.equal('paySchedule' in ownHost(host), false, 'no schedule to show');
   const updated = await repo.updateHost(host.id, { paySchedule: 'monthly', taxIsCompany: true, companyNumber: '12345678' });
-  assert.equal(updated.pay_schedule, 'monthly');
   assert.equal(updated.tax_is_company, true);
   assert.equal(updated.company_number, '12345678');
-  const payload = ownHost(updated);
-  assert.equal(payload.paySchedule, 'monthly');
-  assert.equal(payload.taxIsCompany, true);
-  assert.equal(payload.companyNumber, '12345678');
-
-  // The schedule is constrained to the three the screen offers.
-  await assert.rejects(repo.updateHost(host.id, { paySchedule: 'fortnightly' }), /pay_schedule/i, 'only weekly/weekday/monthly');
+  assert.equal(updated.pay_schedule ?? 'weekly', 'weekly', 'a schedule sent is ignored');
 });
 
 test('a host can’t change their payout account: the old switch is gone (register L3)', async () => {

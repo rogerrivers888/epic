@@ -271,9 +271,39 @@ export function accountFacts(a) {
       eventuallyDue: a?.requirements?.eventually_due ?? [],
       pastDue: a?.requirements?.past_due ?? [],
       disabledReason: a?.requirements?.disabled_reason ?? null,
+      // What the account-trouble watch (L15) reads: whether sign-up was finished, and each capability's state.
+      detailsSubmitted: Boolean(a?.details_submitted),
+      capabilities: { card_payments: a?.capabilities?.card_payments ?? null, transfers: a?.capabilities?.transfers ?? null },
     },
     payoutsManual: payoutsManual(a),
   };
+}
+
+/** Disabled reasons that are Stripe acting on the account, not a host part-way through its form (L15). */
+const STRIPE_ACTED = /^(rejected\.|listed$|under_review$|platform_paused$|other$|account_closed$)/;
+
+/**
+ * Is Stripe disabling, restricting or closing a host's account (register L15)? From the facts Epic stored. Null when
+ * all is well — including a dormant account and a host still part-way through Stripe's form, which are not trouble.
+ * Otherwise `{ reason, words }`: Stripe's own reason, and what it means, for a person in the back office.
+ */
+export function accountTrouble(facts) {
+  const r = facts ?? {};
+  const why = r.disabledReason ?? null;
+  if (why && STRIPE_ACTED.test(why)) {
+    const words = why === 'account_closed' ? 'The host’s Stripe account was closed or disconnected.'
+      : why.startsWith('rejected.') ? `Stripe rejected the account (${why.slice(9).replace(/_/g, ' ')}).`
+        : why === 'listed' ? 'Stripe is checking the account against a prohibited list.'
+          : why === 'under_review' ? 'Stripe is reviewing the account.'
+            : why === 'platform_paused' ? 'The account is paused.' : 'Stripe disabled the account.';
+    return { reason: why, words };
+  }
+  // Sign-up finished, and since then Stripe has turned something off.
+  if (r.detailsSubmitted) {
+    const off = Object.entries(r.capabilities ?? {}).filter(([, v]) => v === 'inactive').map(([k]) => k);
+    if (why || off.length) return { reason: why ?? `inactive:${off.join(',')}`, words: why ? `Stripe disabled the account (${why.replace(/[._]/g, ' ')}).` : `Stripe switched off ${off.map((k) => (k === 'card_payments' ? 'card payments' : 'transfers')).join(' and ')}.` };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

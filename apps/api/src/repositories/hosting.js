@@ -79,7 +79,7 @@ const HOST_COLUMNS = {
   insuranceConfirmed: 'insurance_confirmed', taxReference: 'tax_reference', payoutStatus: 'payout_status', payoutLabel: 'payout_label',
   dateOfBirth: 'date_of_birth', trust: 'trust', checks: 'checks',
   // Money (SX17/SX19): when payouts land, and company tax reporting.
-  paySchedule: 'pay_schedule', taxIsCompany: 'tax_is_company', companyNumber: 'company_number', legalName: 'legal_name', taxAddress: 'tax_address',
+  taxIsCompany: 'tax_is_company', companyNumber: 'company_number', legalName: 'legal_name', taxAddress: 'tax_address',
   // Hosting v7 (migration 365): Stripe identity and payouts, and the children's check.
   stripeAccountId: 'stripe_account_id', stripeMode: 'stripe_mode', payoutsState: 'payouts_state', identityState: 'identity_state',
   identitySessionId: 'identity_session_id', identityVerifiedAt: 'identity_verified_at', checkedState: 'checked_state',

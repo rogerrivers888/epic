@@ -129,3 +129,17 @@ test('L11: the guest’s statement reads "EPIC* <host>" — 16 characters at mos
   assert.equal(body.statement_descriptor_suffix, 'KATE MORRIS');
   assert.equal(stripe.paymentIntentBody({ amountPence: 1000, destination: 'acct_h', applicationFeePence: 100, bookingId: 'b' }).statement_descriptor_suffix, undefined);
 });
+
+test('L15: what counts as Stripe acting on a host’s account — never a dormant account or a host still in Stripe’s form', () => {
+  const t = stripe.accountTrouble;
+  assert.equal(t(null), null);
+  assert.equal(t({ disabledReason: null, detailsSubmitted: false, capabilities: { card_payments: null, transfers: null } }), null, 'dormant');
+  assert.equal(t({ disabledReason: 'requirements.past_due', detailsSubmitted: false, capabilities: { card_payments: 'inactive', transfers: 'inactive' } }), null, 'still filling in the form');
+  assert.equal(t({ disabledReason: null, detailsSubmitted: true, capabilities: { card_payments: 'active', transfers: 'active' } }), null, 'all well');
+  assert.equal(t({ disabledReason: 'rejected.fraud', detailsSubmitted: false }).reason, 'rejected.fraud', 'Stripe rejecting it counts whenever');
+  for (const r of ['listed', 'under_review', 'platform_paused', 'account_closed']) assert.equal(t({ disabledReason: r }).reason, r);
+  assert.equal(t({ disabledReason: 'requirements.past_due', detailsSubmitted: true }).reason, 'requirements.past_due', 'disabled after sign-up');
+  const off = t({ disabledReason: null, detailsSubmitted: true, capabilities: { card_payments: 'inactive', transfers: 'active' } });
+  assert.equal(off.reason, 'inactive:card_payments');
+  assert.match(off.words, /card payments/);
+});

@@ -27,7 +27,7 @@ import { checklist, laneBlockers, hostingConfig, localDay, localInstant, SEQ, ag
 import { ladderProgress, introState } from '../domain/money.js';
 import { standingOf } from '../domain/hostDesk.js';
 import { mediaRef } from './hosting.js';
-import { stripeMode, storedIdAsks } from '../sources/stripe.js';
+import { stripeMode, storedIdAsks, accountTrouble } from '../sources/stripe.js';
 import * as ledger from '../repositories/hostingLedger.js';
 
 export const router = Router();
@@ -285,6 +285,8 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
     res.json({
       host: { id: h.id, name: h.name, town: h.location_label, photo: mediaRef(h.photo_id), since: h.created_at, paused: Boolean(h.paused), stopped: Boolean(h.stopped_at), adult: h.date_of_birth ? ageOn(h.date_of_birth) >= 18 : null },
       // A verified host Stripe is asking for ID again: for a person here, never sent to the host (L7 point 4).
+      // Stripe disabling, restricting or closing their account (L15): for a person here, never sent to the host.
+      stripeTrouble: accountTrouble(h.stripe_requirements),
       trust: { verified: { state: h.identity_state, on: ymd(h.identity_verified_at), stripeAsksAgain: h.identity_state === 'verified' ? storedIdAsks(h.stripe_requirements) : [] }, checked: { state: h.checked_state, level: h.checked_level ?? null, on: ymd(h.checked_on), submittedAt: h.checked_submitted_at ?? null }, insurance: { expires: ymd(h.insurance_expires) } },
       money: { stripe: h.payouts_state, tax: mask(h.tax_reference), takenPence: m.taken, epicPence: m.epic, paidOutPence: m.paid_out, nextPayout: nextPayout ? { pence: nextPayout.pence, on: ymd(nextPayout.release_at), state: nextPayout.state, holdReason: nextPayout.hold_reason } : null },
       fee: (() => {
@@ -880,6 +882,9 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
           and stripe_requirements::text ~ '(verification\\.(additional_)?document|proof_of_liveness|\\.identity_verification\\.)'
         order by name`,
     );
+    // Host accounts Stripe has disabled, restricted or closed (L15), worked out from what Stripe last sent.
+    const { rows: withStripe } = await query(`select id, name, stripe_account_id, stripe_requirements from hosts where stripe_account_id is not null and stripe_requirements is not null order by name`);
+    const trouble = withStripe.map((h) => ({ h, t: accountTrouble(h.stripe_requirements) })).filter((x) => x.t);
     const { rows: incidents } = await query(
       `select i.*, h.name as host, o.title from session_incidents i left join hosts h on h.id = i.host_id left join host_offers o on o.id = i.offer_id order by i.created_at desc limit 200`,
     );
@@ -890,6 +895,7 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
       complaints: complaints.filter((k) => k.kind !== 'host_no_show').map((k) => ({ id: k.id, kind: k.kind, hostId: k.host_id, host: k.host, offerId: k.offer_id, event: k.title, householdId: k.household_id, household: k.household, bookingId: k.booking_id, booking: k.booking_id ? k.booking_id.slice(0, 8) : null, reason: k.reason, amountPence: k.amount_pence, state: k.state, at: k.created_at, autoPayLimit: s.claim_auto_pay_limit ?? null })),
       noShows: complaints.filter((k) => k.kind === 'host_no_show').map((k) => ({ id: k.id, hostId: k.host_id, host: k.host, offerId: k.offer_id, event: k.title, householdId: k.household_id, household: k.household, bookingId: k.booking_id, state: k.state, at: k.created_at })),
       idAskedAgain: askedAgain.map((h) => ({ hostId: h.id, host: h.name, asks: storedIdAsks(h.stripe_requirements), verifiedOn: ymd(h.identity_verified_at), stripeAccount: h.stripe_account_id })),
+      accountTrouble: trouble.map(({ h, t }) => ({ hostId: h.id, host: h.name, reason: t.reason, words: t.words, stripeAccount: h.stripe_account_id })),
       incidentsCapped: incidents.length === 200,
       reports: reports.map((r) => ({ id: r.id, hostId: r.host_id, host: r.host_name, offerId: r.offer_id ?? null, event: r.title ?? null, reason: r.reason, at: r.created_at })),
       incidents: incidents.map((i) => ({ id: i.id, hostId: i.host_id, host: i.host, offerId: i.offer_id, event: i.title, children: i.children ?? [], reporter: i.reporter, body: i.body, at: i.created_at })),
@@ -931,14 +937,17 @@ router.get('/health', requires('view_hosting'), async (_req, res, next) => {
               (select count(*) from host_reports where resolved_at is null)::int as reports`,
       [windowH],
     );
+    // Host accounts Stripe has disabled, restricted or closed (L15) wait on a person in Safety.
+    const { rows: stripeHosts } = await query(`select stripe_requirements from hosts where stripe_account_id is not null and stripe_requirements is not null`);
+    const troubled = stripeHosts.filter((h) => accountTrouble(h.stripe_requirements)).length;
     res.json({
       inReview: r.in_review, overdue: windowH == null ? null : r.overdue,
       payoutsOnTimePct: r.paid30 >= 5 ? Math.round((r.on_time30 / r.paid30) * 100) : null, payoutsOnTimeReason: r.paid30 >= 5 ? null : 'Fewer than five payouts in 30 days',
       stripeMismatches: r.mismatches, openComplaints: r.complaints,
       payoutsWaiting: r.payouts_waiting, refundsWaiting: r.refunds_waiting,
       // What waits on a person in each sub-tab: the lime count beside Review, Safety and Money (BO8 §2).
-      idAskedAgain: r.id_asked_again,
-      tabs: { review: r.in_review, safety: r.complaints + r.incidents7 + r.reports + r.id_asked_again, money: r.payouts_waiting + r.refunds_waiting + (r.mismatches ?? 0) },
+      idAskedAgain: r.id_asked_again, stripeAccountTrouble: troubled,
+      tabs: { review: r.in_review, safety: r.complaints + r.incidents7 + r.reports + r.id_asked_again + troubled, money: r.payouts_waiting + r.refunds_waiting + (r.mismatches ?? 0) },
     });
   } catch (err) { next(err); }
 });

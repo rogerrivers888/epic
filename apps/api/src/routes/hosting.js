@@ -111,8 +111,9 @@ export function ownHost(h) {
     payoutStatus: h.payout_status, payoutLabel: h.payout_label, dateOfBirth: h.date_of_birth,
     // Hosting v7: the states the checklist reads (never Stripe's ids).
     identityState: h.identity_state ?? 'none', payoutsState: h.payouts_state ?? 'none', checkedState: h.checked_state ?? 'none',
-    // Money (Settings revised v2, SX17/SX19): when payouts land, and company tax.
-    paySchedule: h.pay_schedule ?? 'weekly', taxIsCompany: h.tax_is_company ?? false, companyNumber: h.company_number ?? null,
+    // Money (Settings revised v2, SX19): company tax. No payout schedule: when a host is paid is Epic's, never theirs
+    // (register L3; owner, 3 Oct 2026).
+    taxIsCompany: h.tax_is_company ?? false, companyNumber: h.company_number ?? null,
   };
 }
 
@@ -396,10 +397,8 @@ router.patch('/host', async (req, res, next) => {
     if (b.idDocument !== undefined) patch.idDocument = oneOf(['passport', 'driving_licence'], b.idDocument);
     if (b.insuranceConfirmed !== undefined) patch.insuranceConfirmed = Boolean(b.insuranceConfirmed);
     if (b.taxReference !== undefined) patch.taxReference = str(b.taxReference, 20);
-    // Money (SX17/SX19). The schedule is one of three; company reporting turns
-    // the number on, and clearing the switch leaves the old number unused but
-    // never reported under.
-    if (b.paySchedule !== undefined) patch.paySchedule = oneOf(['weekly', 'weekday', 'monthly'], b.paySchedule) ?? 'weekly';
+    // Money (SX19): company reporting turns the number on, and clearing the switch leaves the old number unused but
+    // never reported under. A payout schedule is not the host's to set (L3), so none is read here.
     if (b.taxIsCompany !== undefined) patch.taxIsCompany = Boolean(b.taxIsCompany);
     if (b.companyNumber !== undefined) patch.companyNumber = str(b.companyNumber, 20)?.replace(/\s+/g, '').toUpperCase() || null;
     // Reporting as a company needs a Companies House number: eight digits, or

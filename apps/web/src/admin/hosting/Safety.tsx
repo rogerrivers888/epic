@@ -33,6 +33,8 @@ type Safety = {
   reports?: { id: string; hostId: string; host: string; offerId?: string | null; event: string | null; reason: string; at: string }[];
   /** Verified hosts Stripe is asking for ID again (L7): taken up in Stripe by a person, never sent to the host. */
   idAskedAgain?: { hostId: string; host: string; asks: string[]; verifiedOn: string | null; stripeAccount: string | null }[];
+  /** Host accounts Stripe has disabled, restricted or closed (L15). */
+  accountTrouble?: { hostId: string; host: string; reason: string; words: string; stripeAccount: string | null }[];
 };
 type Checked = Safety['checked'][number];
 type Rating = NonNullable<Safety['ratings']>[number] & { cantSpeak?: boolean };
@@ -41,6 +43,7 @@ type NoShow = Safety['noShows'][number];
 type Incident = Safety['incidents'][number];
 type Report = NonNullable<Safety['reports']>[number];
 type AskedAgain = NonNullable<Safety['idAskedAgain']>[number];
+type Trouble = NonNullable<Safety['accountTrouble']>[number];
 
 const CHECKED_WORDS: Record<string, string> = { none: 'Missing', submitted: 'Submitted', passed: 'Passed', failed: 'Failed' };
 const KIND_OF_CLAIM: Record<string, string> = { complaint: 'Complaint', guarantee_claim: 'Guarantee claim' };
@@ -73,6 +76,7 @@ function SafetyTables({ canManage }: { canManage: boolean }) {
   const ic = useSortParam('isort');
   const rp = useSortParam('rpsort');
   const ia = useSortParam('iasort');
+  const at = useSortParam('atsort');
   const [reportError, setReportError] = useState<string | null>(null);
 
   /** The complaint being closed, and why — Resolve and Decline both ask for a line. */
@@ -95,7 +99,14 @@ function SafetyTables({ canManage }: { canManage: boolean }) {
 
   const askedAgain = useSorted(data?.idAskedAgain, ia.sort, ia.desc, (r, k) => (k === 'host' ? r.host : k === 'verified' ? r.verifiedOn : null));
 
+  const trouble = useSorted(data?.accountTrouble, at.sort, at.desc, (r, k) => (k === 'host' ? r.host : k === 'reason' ? r.reason : null));
+
   if (!data) return <Loading error={error} reload={reload} />;
+  const troubleCols: Col<Trouble>[] = [
+    { key: 'host', label: 'Host', sort: 'host', width: 180, tip: tip('Host', 'Whose Stripe account it is.'), cell: (r) => <Word>{r.host}</Word> },
+    { key: 'reason', label: 'What Stripe did', sort: 'reason', grow: true, tip: tip('What Stripe did', 'From Stripe’s last word on the account. Take it up in Stripe; the host is not told by Epic.'), cell: (r) => <Word>{r.words}</Word> },
+    { key: 'account', label: 'Stripe account', width: 200, tip: tip('Stripe account', 'To find them in Stripe.'), cell: (r) => (r.stripeAccount ? <Word>{r.stripeAccount}</Word> : <Blank />) },
+  ];
   const askedCols: Col<AskedAgain>[] = [
     { key: 'host', label: 'Host', sort: 'host', width: 180, tip: tip('Host', 'A host whose ID check passed.'), cell: (r) => <Word>{r.host}</Word> },
     { key: 'asks', label: 'What Stripe asks for', grow: true, tip: tip('What Stripe asks for', 'From Stripe’s requirements on their account. The host is not asked; take it up in Stripe.'), cell: (r) => <Word>{r.asks.join(', ')}</Word> },
@@ -210,6 +221,7 @@ function SafetyTables({ canManage }: { canManage: boolean }) {
         <Stat label="No-shows" value={data.noShows.length.toLocaleString()} tip={tip('No-shows', 'Open reports. Each holds the session’s payout until it is resolved; nothing is refunded automatically yet.')} />
         <Stat label="Host reports" value={(data.reports?.length ?? 0).toLocaleString()} tip={tip('Host reports', 'Open reports sent from a host’s profile or an event page.')} />
         <Stat label="ID asked again" value={(data.idAskedAgain?.length ?? 0).toLocaleString()} tip={tip('ID asked again', 'Verified hosts Stripe is asking for ID again. Never sent to the host.')} />
+        <Stat label="Stripe account trouble" value={(data.accountTrouble?.length ?? 0).toLocaleString()} tip={tip('Stripe account trouble', 'Host accounts Stripe has disabled, restricted or closed.')} />
       </Band>
 
       <View>
@@ -236,6 +248,11 @@ function SafetyTables({ canManage }: { canManage: boolean }) {
             {failed ? <Text style={[type.small, { color: red() }]}>{failed}</Text> : null}
           </View>
         ) : null}
+      </View>
+
+      <View>
+        <TableHead tip={tip('Stripe account trouble', 'Host accounts Stripe has disabled, restricted or closed. The row goes when Stripe says the account is well again.')}>Stripe account trouble</TableHead>
+        <Ladder columns={troubleCols} rows={trouble} keyOf={(r) => r.hostId} sort={at.sort} desc={at.desc} onSort={at.onSort} empty={<Blank />} />
       </View>
 
       <View>

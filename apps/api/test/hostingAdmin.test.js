@@ -438,3 +438,22 @@ test('L7 point 4: Stripe asking a verified host for ID is raised in the back off
     assert.equal((await staff.get('/api/admin/hosting/safety')).body.idAskedAgain.some((r) => r.hostId === h.id), false);
   } finally { await staff.close(); }
 });
+
+test('L15: host accounts Stripe has disabled, restricted or closed are listed in Safety and counted', async () => {
+  const { household } = await aHousehold(query);
+  const { rows: [h] } = await query(
+    `insert into hosts (household_id, name, stripe_account_id, stripe_account_model, stripe_requirements) values ($1, 'Under Review', 'acct_rev', 'v2', $2::jsonb) returning *`,
+    [household.id, JSON.stringify({ currentlyDue: [], eventuallyDue: [], pastDue: [], disabledReason: 'under_review', detailsSubmitted: true, capabilities: { card_payments: 'inactive', transfers: 'active' } })],
+  );
+  const { household: h2 } = await aHousehold(query);
+  await query(`insert into hosts (household_id, name, stripe_account_id, stripe_account_model, stripe_requirements) values ($1, 'Still Signing Up', 'acct_new', 'v2', $2::jsonb)`,
+    [h2.id, JSON.stringify({ currentlyDue: ['external_account'], disabledReason: 'requirements.past_due', detailsSubmitted: false, capabilities: { card_payments: 'inactive', transfers: 'inactive' } })]);
+  const staff = await server(STAFF);
+  try {
+    const rows = (await staff.get('/api/admin/hosting/safety')).body.accountTrouble;
+    assert.deepEqual(rows.map((r) => r.host), ['Under Review'], 'a host still in Stripe’s form is not trouble');
+    assert.match(rows[0].words, /reviewing/);
+    assert.equal((await staff.get(`/api/admin/hosting/hosts/${h.id}`)).body.stripeTrouble.reason, 'under_review');
+    assert.ok((await staff.get('/api/admin/hosting/health')).body.stripeAccountTrouble >= 1);
+  } finally { await staff.close(); }
+});

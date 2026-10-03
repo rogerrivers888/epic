@@ -2762,7 +2762,7 @@ export const api = {
   /** The Host tab: the invitation, or the dashboard. */
   hostHome: () => request<HostHome>('/api/host'),
   becomeHost: (body: HostInput) => post<{ host: OwnHost }>('/api/host', body),
-  updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected'; paySchedule?: PaySchedule; taxIsCompany?: boolean; companyNumber?: string | null; legalName?: string | null; taxAddress?: string | null }) =>
+  updateHost: (body: Partial<HostInput> & { introVideoId?: string | null; photoId?: string | null; idDocument?: 'passport' | 'driving_licence' | null; insuranceConfirmed?: boolean; taxReference?: string | null; payoutStatus?: 'not_connected' | 'connected'; taxIsCompany?: boolean; companyNumber?: string | null; legalName?: string | null; taxAddress?: string | null }) =>
     patch<{ host: OwnHost }>('/api/host', body),
   /** A video or a photo, as bytes. Not `request`: the body is not JSON and is never queued. */
   /**
@@ -5612,36 +5612,18 @@ export type PublicHost = {
   /** The day Stripe confirmed the host's passport (YYYY-MM-DD), or null — a dated fact, never the document (register L7). */
   verifiedOn?: string | null;
 };
-export type PaySchedule = 'weekly' | 'weekday' | 'monthly';
 /** A bank a host is paid into (SX16). Epic never holds the money: only a label, the last four digits and the holder. */
 export type PayoutAccount = { id: string; label: string; last4: string; holderName: string | null; addedOn: string; isActive: boolean };
 export type OwnHost = PublicHost & {
   address: string | null; idDocument: 'passport' | 'driving_licence' | null; insuranceConfirmed: boolean; taxReference: string | null;
   payoutStatus: 'not_connected' | 'connected'; payoutLabel: string | null; dateOfBirth: string | null;
-  /** Money (Settings revised v2, SX17/SX19): when payouts land, company tax reporting, and the banks on file. */
-  paySchedule: PaySchedule; taxIsCompany: boolean; companyNumber: string | null; payoutAccounts?: PayoutAccount[];
+  /** Money (Settings revised v2, SX19): company tax reporting and the banks on file. When payouts land is Epic's (L3). */
+  taxIsCompany: boolean; companyNumber: string | null; payoutAccounts?: PayoutAccount[];
   evidence?: Evidence[];
 };
 /** A fee line summed over a period: the engine's line plus the gross it was taken from and how many bookings (SX13b/SX18/SX20). */
 export type HostFeeAgg = HostFeeLine & { grossPence: number; count: number };
 export type HostFeePeriod = { lines: HostFeeAgg[]; grossPence: number; feePence: number; netPence: number };
-/** The Host tab's Money screen, computed server-side from bookings + the fee engine (SX9/SX14/SX16–SX20). */
-export type HostMoney = {
-  paymentsReady: boolean; note: string;
-  level: TrustLevel; levelLabel: string; feeRate: number; linkRate: number; minFeePence: number;
-  intro: { active: boolean; bookingsLeft: number; daysLeft: number };
-  nextPayout: { amountPence: number; on: string; account: string | null } | null;
-  paySchedule: PaySchedule;
-  payoutAccounts: PayoutAccount[]; activeAccount: PayoutAccount | null;
-  ladder: { level: TrustLevel; label: string; feeRate: number; keep: number; here: boolean }[];
-  trusted: { completed: number; completedNeeded: number; ratingAtLeast: number; ratingWindow: number };
-  history: { id: string; on: string; netPence: number; status: 'scheduled' | 'paid'; dates: { on: string; title: string | null; guests: number; grossPence: number; line: HostFeeLine }[]; lines: HostFeeLine[]; accountLabel: string | null }[];
-  statements: { year: number; feeLabel: string; netPence: number | null; ready: boolean }[];
-  tax: { legalName: string | null; address: string | null; taxReference: string | null; dateOfBirth: string | null; taxIsCompany: boolean; companyNumber: string | null };
-  totals: HostFeePeriod;
-  /** Per-offer money for PAST dates only — the Past tab's money block. All-time lives in `totals`. */
-  byOffer: Record<string, HostFeePeriod>;
-};
 export type HostInput = {
   name: string; type?: HostType | null; localKind?: LocalKind | null; introText?: string | null; address?: string | null;
   locationLabel?: string | null; lat?: number | null; lng?: number | null; countryCode?: string | null;
