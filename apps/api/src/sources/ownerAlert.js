@@ -39,7 +39,10 @@ export async function alertOwner({ key, subject, text, subjectKind = 'host', sub
     const { rows: [seen] } = await c.query(`select 1 from hosting_changes where field = 'owner_alert' and after->>'key' = $1 limit 1`, [key]);
     if (seen) return { sent: false, reason: 'already_sent' };
     await logChange({ subjectKind, subjectId: String(subjectId), field: 'owner_alert', after: { key, subject }, byLabel: 'epic' }, c);
-    await send({ to, subject, text, purpose: 'owner_alert' });
+    // sendMail answers { sent: false } rather than throwing when the mail service turns it down: that is a failure too,
+    // so the record is rolled back and the caller's event is retried (Codex, 3 Oct 2026).
+    const r = await send({ to, subject, text, purpose: 'owner_alert' });
+    if (r && r.sent === false) throw Object.assign(new Error(`owner alert not delivered: ${r.reason ?? r.error ?? 'refused'}`), { code: 'owner_alert_not_sent' });
     return { sent: true };
   });
 }

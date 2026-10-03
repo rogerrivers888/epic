@@ -109,3 +109,10 @@ test('webhooks: either endpoint’s secret admits an event; none set admits noth
     if (was[1] === undefined) delete process.env.STRIPE_CONNECT_WEBHOOK_SECRET; else process.env.STRIPE_CONNECT_WEBHOOK_SECRET = was[1];
   }
 });
+
+test('L7: the verified day is Stripe’s — the report’s time, else the event’s — never when Epic heard of it', () => {
+  const at = (x) => stripe.verifiedAt(...x)?.toISOString() ?? null;
+  assert.equal(at([{ last_verification_report: { created: 1790000000 } }]), new Date(1790000000 * 1000).toISOString());
+  assert.equal(at([{ last_verification_report: 'vr_123' }, 1790003600]), new Date(1790003600 * 1000).toISOString(), 'an unexpanded report: the event’s time');
+  assert.equal(at([{}]), null, 'nothing to say: the caller decides');
+});

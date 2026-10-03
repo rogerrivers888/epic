@@ -826,7 +826,7 @@ router.post('/host/lanes/verify', async (req, res, next) => {
     // orphaning it, so finishing either one counts (Codex, 2 Oct 2026).
     if (host.identity_session_id && host.identity_state === 'pending') {
       const open = await stripe.retrieveIdentity(host.identity_session_id, { householdId: household.id }).catch(() => null);
-      if (open?.status === 'verified') { await repo.updateHost(host.id, { identityState: 'verified', identityVerifiedAt: new Date() }); return res.json({ url: null, verified: true }); }
+      if (open?.status === 'verified') { await repo.updateHost(host.id, { identityState: 'verified', identityVerifiedAt: host.identity_verified_at ?? stripe.verifiedAt(open) ?? new Date() }); return res.json({ url: null, verified: true }); }
       if (open?.status === 'requires_input' && open.url) return res.json({ url: open.url });
       // Stripe is still reading what was sent: wait for it, never start a second check (Codex, 2 Oct 2026).
       if (open?.status === 'processing') return res.json({ url: null, processing: true });
@@ -871,7 +871,7 @@ router.post('/host/lanes/offers/:id/sync', async (req, res, next) => {
       if (host.identity_session_id && host.identity_state !== 'verified') {
         const s = await stripe.retrieveIdentity(host.identity_session_id, { householdId: household.id });
         const state = stripe.identityState(s);
-        host = await repo.updateHost(host.id, { identityState: state, identityVerifiedAt: state === 'verified' ? new Date() : null });
+        host = await repo.updateHost(host.id, { identityState: state, identityVerifiedAt: state === 'verified' ? (host.identity_verified_at ?? stripe.verifiedAt(s) ?? new Date()) : null });
       }
       if (offer.private_fee_ref && offer.private_fee_state === 'pending') {
         const c = await stripe.retrieveCheckout(offer.private_fee_ref, { householdId: household.id });
@@ -1146,7 +1146,8 @@ export async function applyStripeEvent(event) {
       await markDispute({ paymentIntent: obj.payment_intent, open: event.type === 'charge.dispute.created', status: obj.status ?? null });
     } else if (event.type?.startsWith('identity.verification_session.') && obj.id) {
       const host = await repo.hostByIdentitySession(obj.id);
-      if (host) { const state = stripe.identityState(obj); await repo.updateHost(host.id, { identityState: state, identityVerifiedAt: state === 'verified' ? new Date() : null }); }
+      // The day it is shown as is Stripe's, from the event, and an earlier one is never moved (Codex, 3 Oct 2026).
+      if (host) { const state = stripe.identityState(obj); await repo.updateHost(host.id, { identityState: state, identityVerifiedAt: state === 'verified' ? (host.identity_verified_at ?? stripe.verifiedAt(obj, event.created) ?? new Date()) : null }); }
     } else if (event.type === 'customer.subscription.updated' && obj.metadata?.epic_kind === 'pro' && obj.metadata?.epic_household_id) {
       // A renewal that failed (past due, unpaid) stops Pro counting; paid again, it counts again (Codex, 2 Oct 2026).
       const live = ['active', 'trialing'].includes(obj.status);

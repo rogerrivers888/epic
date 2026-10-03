@@ -250,7 +250,19 @@ export function identitySession({ returnUrl, hostId, householdId, relatedPerson 
 }
 
 export function retrieveIdentity(sessionId, { householdId } = {}) {
-  return call('GET', `/identity/verification_sessions/${encodeURIComponent(sessionId)}`, null, { householdId, purpose: 'host.identity.read' });
+  // With its last report, whose creation is when Stripe actually checked the document (verifiedAt below).
+  return call('GET', `/identity/verification_sessions/${encodeURIComponent(sessionId)}`, { expand: ['last_verification_report'] }, { householdId, purpose: 'host.identity.read' });
+}
+
+/**
+ * When Stripe verified it — never when Epic heard about it (Codex, 3 Oct 2026): the report's own time when the
+ * session carries it, else the event's (`eventCreated`, seconds), else null for the caller to fall back on.
+ */
+export function verifiedAt(session, eventCreated = null) {
+  const report = session?.last_verification_report;
+  if (report && typeof report === 'object' && Number.isFinite(report.created)) return new Date(report.created * 1000);
+  if (Number.isFinite(eventCreated)) return new Date(eventCreated * 1000);
+  return null;
 }
 
 /** Stripe's states, in Epic's words: only `verified` is Verified. */

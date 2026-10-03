@@ -707,6 +707,9 @@ test('L7: Stripe asking a verified host for ID again tells the owner once, and a
   const slow = { send: async (m) => { await new Promise((r) => setTimeout(r, 50)); sent.push(m); }, configured: () => true };
   const both = await Promise.all([ownerAlert.alertOwner({ ...args, key: 'race' }, slow), ownerAlert.alertOwner({ ...args, key: 'race' }, slow)]);
   assert.deepEqual(both.map((x) => x.sent).sort(), [false, true]);
+  // The mail service turning it down ({ sent: false }) is a failure too: nothing recorded, retried next time.
+  await assert.rejects(ownerAlert.alertOwner({ ...args, key: 'refused' }, { send: async () => ({ sent: false, reason: 'suppressed' }), configured: () => true }), (e) => e.code === 'owner_alert_not_sent');
+  assert.equal((await ownerAlert.alertOwner({ ...args, key: 'refused' }, deps)).sent, true);
   // A send that fails leaves nothing written, so the next delivery tries again.
   await assert.rejects(ownerAlert.alertOwner({ ...args, key: 'bounce' }, { send: async () => { throw new Error('smtp down'); }, configured: () => true }));
   assert.equal((await ownerAlert.alertOwner({ ...args, key: 'bounce' }, deps)).sent, true);
