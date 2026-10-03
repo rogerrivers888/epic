@@ -987,7 +987,7 @@ router.get('/host/desk/profile', async (_req, res, next) => {
                   (b.request_state = 'asked' and b.state = 'pending')
                   or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id
                               join host_offers xo on xo.id = x.offer_id
-                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled'
+                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed', 'attended') and bs.state = 'booked' and x.state = 'scheduled'
                                 -- only a session still to finish counts; one that has happened is done (Codex, 2 Oct 2026)
                                 and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
               (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`,
@@ -1069,7 +1069,7 @@ router.post('/host/desk/stop', async (_req, res, next) => {
                   (b.request_state = 'asked' and b.state = 'pending')
                   or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id
                               join host_offers xo on xo.id = x.offer_id
-                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed') and bs.state = 'booked' and x.state = 'scheduled'
+                              where bs.booking_id = b.id and b.state in ('pending', 'confirmed', 'attended') and bs.state = 'booked' and x.state = 'scheduled'
                                 -- only a session still to finish counts; one that has happened is done (Codex, 2 Oct 2026)
                                 and ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(xo.time_zone, 'Europe/London')) > now())))::int as bookings,
                 (select count(*) from host_payouts where host_id = $1 and state in ('scheduled', 'held', 'released', 'failed'))::int as payouts`,

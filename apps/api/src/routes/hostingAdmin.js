@@ -268,7 +268,7 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
     const { rows: [{ n: introUsedN }] } = await query(`select count(*)::int as n from experience_bookings where host_id = $1 and (intro_ordinal is not null or (fee_reason = 'intro' and coalesce(cancel_cause, '') not in ('unpaid', 'payment_setup_failed', 'payment_failed')))`, [h.id]);
     const { rows: [open] } = await query(`select count(*)::int as n from hosting_complaints where host_id = $1 and state = 'open'`, [h.id]);
     const { rows: [outstanding] } = await query(
-      `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed') and (
+      `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed', 'attended') and (
                   (b.request_state = 'asked')
                   or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id join host_offers xo on xo.id = x.offer_id
                               where bs.booking_id = b.id and bs.state = 'booked' and x.state = 'scheduled'
@@ -369,7 +369,7 @@ router.post('/hosts/:id/remove', requireOwnerSignedIn('remove a host'), async (r
     const out = await withTransaction(async (c) => {
       await c.query('select pg_advisory_xact_lock(hashtext($1))', [`host-intro:${req.params.id}`]);
       const { rows: [o] } = await c.query(
-        `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed') and (
+        `select (select count(*) from experience_bookings b where b.host_id = $1 and b.state in ('pending', 'confirmed', 'attended') and (
                   (b.request_state = 'asked')
                   or exists (select 1 from booking_sessions bs join offer_sessions x on x.id = bs.session_id join host_offers xo on xo.id = x.offer_id
                               where bs.booking_id = b.id and bs.state = 'booked' and x.state = 'scheduled'

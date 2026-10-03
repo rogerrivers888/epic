@@ -445,7 +445,9 @@ export async function applyPaymentIntent(pi) {
           where id = $1 returning *`,
         [b.id, pi.amount_received ?? b.value_pence],
       );
-      await c.query(`update hosting_payments set state = 'succeeded', kind = 'charge', updated_at = now() where stripe_ref = $1 and kind in ('charge', 'hold')`, [pi.id]);
+      const { rowCount: ledgered } = await c.query(`update hosting_payments set state = 'succeeded', kind = 'charge', updated_at = now() where stripe_ref = $1 and kind in ('charge', 'hold')`, [pi.id]);
+      // Stripe answered before our own ledger row was written: write it now, already succeeded; the later write is then a no-op (Codex, 2 Oct 2026).
+      if (!ledgered) await ledger.record({ kind: 'charge', bookingId: charged.id, offerId: charged.offer_id, hostId: charged.host_id, householdId: charged.household_id, amountPence: charged.charged_pence, epicPence: charged.fee_pence, hostPence: charged.host_pence, bookingValuePence: charged.value_pence, ratePct: charged.fee_rate_pct, state: 'succeeded', stripeRef: pi.id, mode: 'test', reason: charged.fee_reason }, c);
       if (charged.state === 'cancelled') {
         await owe(c, charged, { amountPence: charged.charged_pence, cause: 'paid_after_cancel', key: `paid_after_cancel:${b.id}`, wholeBooking: true });
         return 'refunded';
