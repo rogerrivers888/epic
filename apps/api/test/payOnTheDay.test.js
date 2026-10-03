@@ -1,5 +1,5 @@
 /**
- * Pay on the day (register L10; sources/payOnTheDay.js, migration 378). Stripe is handed in; nothing leaves the
+ * Pay on the day (register L10; sources/payOnTheDay.js, migration 379). Stripe is handed in; nothing leaves the
  * machine. Epic's fee goes on the organiser's card, on Epic's own account — never a destination charge, never a
  * Connect account — up front on who said they're coming, topped up when more came, never refunded when fewer did.
  */
