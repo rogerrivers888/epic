@@ -230,7 +230,12 @@ function RoleDrawer({ role, capabilities, areas, doors, canManage, onClose, onSa
 // plans
 // ---------------------------------------------------------------------------
 
-export function Plans({ canManage }: { canManage: boolean }) {
+/**
+ * The memberships a household can be on. `embedded` draws it as Billing ›
+ * Membership (Roger, 3 Oct 2026), under Billing's tab bar with no heading of
+ * its own; on its own it is the old screen, which nothing links to now.
+ */
+export function Plans({ canManage, embedded = false }: { canManage: boolean; embedded?: boolean }) {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [edited, setEdited] = useState<Record<string, string>>({});
@@ -253,8 +258,8 @@ export function Plans({ canManage }: { canManage: boolean }) {
   };
 
   return (
-    <AdminPage>
-      <PageHead title="Memberships" sub="What a household can be on, and what it is priced at." />
+    <Page embedded={embedded}>
+      {embedded ? null : <PageHead title="Memberships" sub="What a household can be on, and what it is priced at." />}
       {error ? <Banner tone="crit">{error}</Banner> : null}
 
       <Aside tone="warn" says="A price here is not a charge."
@@ -297,7 +302,7 @@ export function Plans({ canManage }: { canManage: boolean }) {
         />
       </Panel>
       <Text style={type.tiny}>An empty field is a free membership, which is a different statement from a membership priced at zero.</Text>
-    </AdminPage>
+    </Page>
   );
 }
 
@@ -364,3 +369,8 @@ const styles = StyleSheet.create({
   },
   tickOn: { backgroundColor: colors.selected, borderColor: colors.selected },
 });
+
+/** A page of its own, or its contents alone when another screen's tab holds it. */
+function Page({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  return embedded ? <>{children}</> : <AdminPage>{children}</AdminPage>;
+}

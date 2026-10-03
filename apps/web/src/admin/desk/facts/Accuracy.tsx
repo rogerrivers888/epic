@@ -170,7 +170,7 @@ function Main() {
               <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: desk.inkMuted }}>Machine agreed with families</Text>
               <Text style={[{
                 fontFamily: fonts.heading, fontSize: 56, fontWeight: '800', letterSpacing: -2.24, lineHeight: 56,
-                color: a.headline.accuracy == null ? desk.inkDim : LIME,
+                color: a.headline.accuracy == null ? desk.inkDim : desk.link,
               }, tabular]}>{a.headline.accuracy == null ? 'Building' : `${a.headline.accuracy}%`}</Text>
               <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{`from ${plural(a.headline.answered, 'family answer')}`}</Text>
             </View>
@@ -184,7 +184,7 @@ function Main() {
                 />
               </View>
               <DeskLineChart
-                series={values} labels={labels} tip={tip} color={LIME} lo={scale.lo} hi={scale.hi}
+                series={values} labels={labels} tip={tip} color={desk.link} lo={scale.lo} hi={scale.hi}
                 fmt={(v) => `${Math.round(v)}%`} height={150} axisWidth={32} gap={6}
                 blank={daily ? 'Every day has fewer than 10 answers — Building' : 'Every month has fewer than 10 answers — Building'}
               />

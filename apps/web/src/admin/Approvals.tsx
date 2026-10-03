@@ -204,11 +204,11 @@ export function Approvals({ standalone = false, onCount }: { standalone?: boolea
  * anything is waiting (owner, 1 Oct 2026: "put the approvals list somewhere
  * obvious"). The queue used to live only on the unlisted estate Overview.
  */
-export function ApprovalsScreen({ onCount }: { onCount?: (n: number) => void }) {
+export function ApprovalsScreen({ onCount, title = 'Approvals' }: { onCount?: (n: number) => void; title?: string }) {
   return (
     <AdminPage>
       <PageHead
-        title="Approvals"
+        title={title}
         sub="Actions an agent has asked you to authorise. Approving runs the exact recorded call under your name and shows the result; declining closes it."
       />
       <Approvals standalone onCount={onCount} />

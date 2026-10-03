@@ -143,7 +143,7 @@ export function Wording({ canManage }: { canManage: boolean }) {
 
       <View style={{ flexDirection: 'row', gap: 16, flexWrap: 'wrap' }}>
         <T tone={desk.inkDim} size={12.5}>{counts.keys} keys · {counts.notLooked} not looked at · {counts.changed} changed · {counts.review} needs review · {counts.na} not applicable</T>
-        <TextLink tone={onlyLeft ? LIME : desk.inkDim} onPress={() => setOnlyLeft((v) => !v)}>{onlyLeft ? '✓ ' : ''}Only what's left to look at</TextLink>
+        <TextLink tone={onlyLeft ? desk.link : desk.inkDim} onPress={() => setOnlyLeft((v) => !v)}>{onlyLeft ? '✓ ' : ''}Only what's left to look at</TextLink>
       </View>
 
       <Table width={tableWidth(cols, 22)}>
@@ -188,7 +188,7 @@ export function Wording({ canManage }: { canManage: boolean }) {
                           value stands), but preserves an edit typed while the
                           request was in flight — `expect` is the draft at click. */}
                       {r.status === 'needs-review' && r.suggestion
-                        ? <TextLink tone={LIME} onPress={() => post(`/wording/${r.namespace}/${encodeURIComponent(r.key)}`, { enUS: r.suggestion }, `${r.key} · suggestion used`, { clearKey: dk(r), expect: drafts[dk(r)] })}>Use suggestion</TextLink> : null}
+                        ? <TextLink tone={desk.link} onPress={() => post(`/wording/${r.namespace}/${encodeURIComponent(r.key)}`, { enUS: r.suggestion }, `${r.key} · suggestion used`, { clearKey: dk(r), expect: drafts[dk(r)] })}>Use suggestion</TextLink> : null}
                       {/* "Same in both" is the looked-at-and-fine path, and the reject path
                           for a suggestion — offered for any not-looked-at or suggested key,
                           subcategories included. */}

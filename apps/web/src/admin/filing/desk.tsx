@@ -27,6 +27,7 @@ import { useViewport } from '../../hooks/useViewport';
 import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import { HowIcon } from '../HowIcon';
 import type { HowAnchor } from '../../routes';
+import { cutCell } from '../explain';
 
 /** The one red on this surface: danger, never decoration. */
 export const WARN = desk.warn;
@@ -49,7 +50,7 @@ export function Kicker({ children, tone = 'dim' }: { children: React.ReactNode; 
       fontWeight: '700',
       letterSpacing: 0.7,
       textTransform: 'uppercase',
-      color: tone === 'lime' ? LIME : tone === 'warn' ? WARN : desk.inkDim,
+      color: tone === 'lime' ? desk.link : tone === 'warn' ? WARN : desk.inkDim,
     }}>
       {children}
     </Text>
@@ -293,7 +294,8 @@ export function Row({ children, onPress, lifted, align = 'center', padded = true
 /** One cell of a row, sized from the same column list the header used. */
 export function Cell({ col, children, style }: { col: Col; children?: React.ReactNode; style?: object }) {
   return (
-    <View style={[
+    // One line, cut with "…" and whole on hover (design handover §1 rule 9).
+    <View {...cutCell} style={[
       col.w === 'auto' ? { flex: 1, minWidth: 0 } : { width: col.w, flexGrow: 0, flexShrink: 0 },
       col.align === 'right' ? { alignItems: 'flex-end' } : null,
       style,
@@ -311,7 +313,7 @@ export function Value({ children, tone = 'ink', weight = '400', size = 13.5, num
   size?: number;
   numeric?: boolean;
 }) {
-  const color = tone === 'lime' ? LIME
+  const color = tone === 'lime' ? desk.link
     : tone === 'warn' ? WARN
     : tone === 'muted' ? desk.inkMuted
     : tone === 'dim' ? desk.inkDim
@@ -372,7 +374,7 @@ export function Mark({ label, tone = 'dim', title }: {
   tone?: 'lime' | 'dim' | 'warn' | 'ink';
   title?: string;
 }) {
-  const color = tone === 'lime' ? LIME : tone === 'warn' ? WARN : tone === 'ink' ? desk.ink : desk.inkDim;
+  const color = tone === 'lime' ? desk.link : tone === 'warn' ? WARN : tone === 'ink' ? desk.ink : desk.inkDim;
   const border = tone === 'dim' ? desk.inkFaint : color;
   return (
     <View
@@ -415,13 +417,13 @@ export function DeskPill({ name, kind = 'sub', pending, onRemove }: {
         paddingVertical: 5,
         paddingHorizontal: 11,
       }}>
-        {kind === 'label' ? <Icon name="keep" size={12} color={LIME} /> : null}
-        <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: solid ? ON_LIME : LIME }}>
+        {kind === 'label' ? <Icon name="keep" size={12} color={desk.link} /> : null}
+        <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: solid ? ON_LIME : desk.link }}>
           {name}
         </Text>
         {onRemove ? (
           <View style={{ opacity: 0.55 }}>
-            <Icon name="close" size={12} color={solid ? ON_LIME : LIME} />
+            <Icon name="close" size={12} color={solid ? ON_LIME : desk.link} />
           </View>
         ) : null}
       </View>
@@ -474,9 +476,9 @@ export function LimeOutline({ label, onPress, plus }: { label: string; onPress: 
         paddingHorizontal: 16,
       }}>
         {plus ? (
-          <Text style={{ fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: LIME, lineHeight: 15 }}>+</Text>
+          <Text style={{ fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: desk.link, lineHeight: 15 }}>+</Text>
         ) : null}
-        <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: LIME }}>{label}</Text>
+        <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.link }}>{label}</Text>
       </View>
     </Press>
   );
@@ -496,7 +498,7 @@ export function Act({ label, onPress, tone = 'lime', ruled = true }: {
   ruled?: boolean;
 }) {
   if (!label) return null;
-  const color = tone === 'lime' ? LIME : tone === 'warn' ? WARN : tone === 'dim' ? desk.inkDim : desk.ink;
+  const color = tone === 'lime' ? desk.link : tone === 'warn' ? WARN : tone === 'dim' ? desk.inkDim : desk.ink;
   const body = (
     <Text style={{
       fontFamily: fonts.body,

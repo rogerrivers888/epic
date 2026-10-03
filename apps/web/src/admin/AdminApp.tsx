@@ -23,12 +23,13 @@ import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
 import { Access, api } from '../api';
 import { AdminScreen, filingTabOf } from '../routes';
-import { colors, spacing, type } from '../theme';
+import { colors, desk, fonts, LIME, ON_LIME, spacing, type } from '../theme';
 import { Icon, IconName } from '../components/Icon';
 import { Wordmark } from '../components/Wordmark';
 import { useViewport } from '../hooks/useViewport';
 import { useActivity } from '../hooks/useActivity';
 import { useAdminTheme } from '../hooks/useAdminTheme';
+import { proposes, whoLine } from './who';
 import { Explain, Explains } from './explain';
 import { SpendAlarm } from './SpendAlarm';
 import { AccountsScreen } from '../screens/AccountsScreen';
@@ -43,7 +44,7 @@ import { Subscriptions } from './suite/Subscriptions';
 import { Customers } from './suite/Customers';
 import { Suppliers } from './suite/Suppliers';
 import { Behaviour } from './suite/Behaviour';
-import { Audit, Plans, Roles } from './screens/Governance';
+import { Audit, Roles } from './screens/Governance';
 import { Library } from './screens/Library';
 import { Places } from './screens/Places';
 import { ReviewQueue } from './screens/ReviewQueue';
@@ -56,7 +57,8 @@ import { Scout } from './screens/Scout';
 import { HowItWorks } from './screens/HowItWorks';
 import { VoiceLab } from './screens/VoiceLab';
 import { HostingTab } from './hosting/HostingTab';
-import { Mail } from './screens/Mail';
+import { Messages } from './screens/Messages';
+import { Billing } from './screens/Billing';
 import { Waitlist } from './screens/Waitlist';
 import { Staff } from './screens/Staff';
 import { Sources } from './screens/Sources';
@@ -68,6 +70,7 @@ const DESKTOP = 900;
 
 /** The back office's screens are `/admin/<screen>`; the list of them lives in routes.ts. */
 type Screen = AdminScreen;
+type Group = 'Insight' | 'People' | 'What we offer' | 'Commercial' | 'System';
 
 /**
  * The rail.
@@ -81,116 +84,73 @@ type Screen = AdminScreen;
  * sources screen "in a new folder on the menu called Data" (12 Sep 2026); the
  * atlas, the shelves and the sweep are where they were until he moves them.
  */
-const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: string; group?: string }[] = [
+const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: string; group?: Group }[] = [
   /**
-   * Approvals sits alone at the very top, above the Reporting folder, with no
-   * group heading of its own. It is the one rail item that is not a report but
-   * a thing waiting on the owner: an agent cannot spend, lift a hold or make a
-   * bulk change itself (G11), so it files the request here for the owner,
-   * signed in personally, to approve-and-run or decline. The rail draws it in
-   * lime with a count when any are waiting, so it cannot be missed (owner,
-   * 1 Oct 2026). `view_activity` is the capability behind the queue's read.
+   * Actions sits alone at the very top, a lime block with its count (design
+   * handover §2a). It is the one place for decisions; until its own queue is
+   * built it opens the approvals — an agent cannot spend, lift a hold or make
+   * a bulk change itself (G11), so it files the request for the owner, signed
+   * in personally, to approve-and-run or decline. `view_activity` is the
+   * capability behind the approvals read.
    */
-  { key: 'approvals', label: 'Approvals', icon: 'locked', needs: 'view_activity', sub: 'What an agent has asked you to authorise' },
+  { key: 'actions', label: 'Actions', icon: 'warning', needs: 'view_activity', sub: 'What needs a person' },
   /**
-   * The four that used to be at the top of this rail — Overview, Accounts,
-   * Households, Activity — are gone from it (owner, 20 Sep 2026: "The whole
-   * top 4 tabs can be removed completely").
+   * The five groups (design handover §2a, 3 Oct 2026; the handover wins over
+   * BOSidebar.dc.html, Roger). Items whose screens are not built yet —
+   * Reports, Automations — join their group when they are; an item that opens
+   * nothing is a dead end. Retired addresses (`/admin/overview`, `/admin/accounts`,
+   * `/admin/households`, `/admin/activity`, `/admin/engagement`, the atlas and
+   * sweep screens) still resolve, so a kept link never lands on a 404.
    *
-   * Each one was answering a question the suite below now answers better, and
-   * the two things only they could do came with them: Households' summary of
-   * the estate and Accounts' invite are both on **Customers**. Activity's feed
-   * and the old estate overview had no such remainder.
-   *
-   * Their addresses still resolve — `/admin/overview`, `/admin/accounts`,
-   * `/admin/households`, `/admin/activity` — because that is this repo's rule
-   * for a screen that leaves the rail, and because a link somebody kept should
-   * land somewhere rather than on a 404 (routes.ts). They are simply not a way
-   * in any more.
+   * Capabilities: the rail advertises what opens. Members and Money read
+   * `view_financials`/`view_reporting`; Households (`customers`) reads
+   * `/api/admin/suite/customers`, gated on accounts, so the support role sees
+   * it and it opens (Codex, 20 Sep 2026).
    */
+  { key: 'reporting', label: 'Overview', icon: 'plan', needs: 'view_reporting', sub: 'Is the business growing', group: 'Insight' },
+  { key: 'money', label: 'Money', icon: 'money', needs: 'view_reporting', sub: 'Where it comes from, and what margin survives', group: 'Insight' },
+  { key: 'behaviour', label: 'Behaviour', icon: 'inspire', needs: 'view_reporting', sub: 'What households actually do, and whether they come back', group: 'Insight' },
+  { key: 'demand', label: 'Demand', icon: 'list', needs: 'view_reporting', sub: 'What people asked for, and what we failed to give them', group: 'Insight' },
+
+  { key: 'customers', label: 'Households', icon: 'household', needs: 'view_accounts', sub: 'Every household, and the record behind one', group: 'People' },
+  // Keyed `subscriptions` so /admin/subscriptions still resolves (Roger, 3 Oct 2026: "Count memberships, not accounts").
+  { key: 'subscriptions', label: 'Members', icon: 'wallet', needs: 'view_financials', sub: 'Who is a member, of what, bought where', group: 'People' },
+  { key: 'waitlist', label: 'Waitlist', icon: 'list', needs: 'view_waitlist', sub: 'Everyone who registered interest on epic.day, before launch', group: 'People' },
+
+  { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'Hosts, events, bookings and the rules they run by', group: 'What we offer' },
+  { key: 'places', label: 'Places', icon: 'places', needs: 'view_library', sub: 'What we know, where, and how good it is', group: 'What we offer' },
   /**
-   * Reporting. Six sections over one estate model (handoff "Reporting &
-   * overview", 20 Sep 2026), answering five questions: is the business growing,
-   * where does the money come from and what margin survives, what are we
-   * selling and at what price, who are the customers, and what do households
-   * actually do in the product.
-   *
-   * Two of them are editing screens rather than reports — Members sets
-   * prices and published benefits, and a supplier's record corrects a rate —
-   * so they need their own capabilities rather than `view_reporting`.
-   *
-   * The old engagement/revenue/usage screen moved to `/admin/engagement`. It is
-   * still resolvable and no longer in the rail: `/admin/reporting`, which is
-   * the address every handover link already uses, now lands on the Overview
-   * below, which is the same question asked better.
+   * Categories is the filing desk (back-office handover, 28 Sep 2026): Overview,
+   * Categories, Facts, Mapping, Collections, Fact automations, Changes. The
+   * older Categories screen's address (`/admin/categories`) still resolves.
    */
-  { key: 'reporting', label: 'Overview', icon: 'plan', needs: 'view_reporting', sub: 'Is the business growing', group: 'Reporting' },
-  { key: 'money', label: 'Money', icon: 'money', needs: 'view_reporting', sub: 'Where it comes from, and what margin survives', group: 'Reporting' },
-  // Called Members, and keyed `subscriptions` so /admin/subscriptions still
-  // resolves (Roger, 3 Oct 2026: "Count memberships, not accounts").
-  { key: 'subscriptions', label: 'Members', icon: 'wallet', needs: 'view_financials', sub: 'Who is a member, what we sell, at what price', group: 'Reporting' },
+  { key: 'filing', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Overview, categories, facts, mapping, collections, fact automations and changes', group: 'What we offer' },
+  { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'What we offer' },
+  { key: 'queue', label: 'Content queue', icon: 'preview', needs: 'view_library', sub: 'What households have sent us, and whether it is fit to publish', group: 'What we offer' },
+  // The places and content review queue — not hosting (design handover §2a).
+  { key: 'review', label: 'Review queue', icon: 'list', needs: 'view_questions', sub: 'Features Google review-spotting found, to approve into facts or ignore', group: 'What we offer' },
+
+  // Billing holds the money values; Membership is the old plans screen (Roger, 3 Oct 2026).
+  { key: 'billing', label: 'Billing', icon: 'money', needs: 'view_accounts', sub: 'What households and hosts pay, and what is owed back', group: 'Commercial' },
   /**
-   * Customers is `view_accounts` and stays that way: it reads
-   * `/api/admin/suite/customers`, which is gated on accounts rather than on
-   * reporting, so the support role sees the item and it opens. What they pay is
-   * withheld server-side without `view_financials` (Codex, 20 Sep 2026 — it
-   * used to read the whole reporting model and answer 403).
+   * Suppliers asks for `view_reporting`, because that is what loads it: it reads
+   * the estate model, so a money-only role saw the item and got a 403 (Codex,
+   * 20 Sep 2026). The screen's own `canSeeMoney` says what may be read inside.
    */
-  { key: 'customers', label: 'Customers', icon: 'household', needs: 'view_accounts', sub: 'Every household, and the record behind one', group: 'Reporting' },
-  // Under the households (Website & Registration › WL1): everyone who
-  // registered interest on epic.day before launch.
-  { key: 'waitlist', label: 'Waitlist', icon: 'list', needs: 'view_waitlist', sub: 'Everyone who registered interest on epic.day, before launch', group: 'Reporting' },
-  /**
-   * Suppliers asks for `view_reporting`, because that is what loads it.
-   *
-   * It is money end to end, so moving the gate to `view_financials` looked
-   * right — and it reads the estate model, which is `view_reporting`, so a role
-   * holding only the money capability saw the item and got a 403 (Codex, 20 Sep
-   * 2026, having just watched me fix the same fault on Customers the other way
-   * round). The rail advertises what opens; the screen's own `canSeeMoney`
-   * says what may be read inside it, which is how Money already works.
-   */
-  { key: 'suppliers', label: 'Suppliers', icon: 'list', needs: 'view_reporting', sub: 'Who we pay, what for, and whether the pipe is plugged in', group: 'Reporting' },
-  { key: 'behaviour', label: 'Behaviour', icon: 'inspire', needs: 'view_reporting', sub: 'What households actually do, and whether they come back', group: 'Reporting' },
-  /**
-   * Data. Five screens that were each bound to a different table became three
-   * bound to three questions (17 Sep 2026): Places is what we know and where,
-   * Demand is what people asked for and what we failed to give them, and the
-   * content queue is what households sent us. Runs is the monitor for the long
-   * jobs — starting one happens on Places, where the gap is.
-   *
-   * Atlas, the sweep, Coverage and Lookup dissolved into Places. Their addresses
-   * still resolve so nothing anybody kept lands on a 404; they are simply not in
-   * this rail any more.
-   */
-  { key: 'places', label: 'Places', icon: 'places', needs: 'view_library', sub: 'What we know, where, and how good it is', group: 'Data' },
-  { key: 'demand', label: 'Demand', icon: 'list', needs: 'view_reporting', sub: 'What people asked for, and what we failed to give them', group: 'Data' },
-  { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'Data' },
-  /**
-   * Categories is the filing desk (back-office handover, 28 Sep 2026): the
-   * design's rail has one Categories item, and it opens the seven tabs —
-   * Overview, Categories, Facts, Mapping, Collections, Fact automations,
-   * Changes. The older Categories screen is no longer in the rail; its address
-   * (`/admin/categories`) still resolves, so nothing anybody kept is a 404.
-   */
-  { key: 'filing', label: 'Categories', icon: 'filters', needs: 'view_library', sub: 'Overview, categories, facts, mapping, collections, fact automations and changes', group: 'Data' },
-  { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences', group: 'Data' },
-  { key: 'hosting', label: 'Hosting', icon: 'host', needs: 'view_hosting', sub: 'Review · Hosts · Events · Money · Safety · Settings · Reports · Changes', group: 'Data' },
-  { key: 'skills', label: 'Skills', icon: 'credential', needs: 'view_skills', sub: 'What hosts say they are expert in, the sixteen buckets it is browsed by, and the words Epic has not heard before', group: 'Data' },
-  { key: 'queue', label: 'Content queue', icon: 'preview', needs: 'view_library', sub: 'What households have sent us, and whether it is fit to publish', group: 'Data' },
-  { key: 'review', label: 'Review queue', icon: 'list', needs: 'view_questions', sub: 'Features Google review-spotting found, to approve into facts or ignore', group: 'Data' },
-  { key: 'runs', label: 'Runs', icon: 'download', needs: 'view_library', sub: 'What is going, what it cost, and what failed', group: 'Data' },
-  // First in the Admin group, above Roles (Supporting docs › EPIC staff
-  // management). manage_staff is owner-only, so only the owner sees it.
-  { key: 'staff', label: 'Staff', icon: 'accounts', needs: 'manage_staff', sub: 'Who can log in to the back office, and what their role lets them open', group: 'Admin' },
-  { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities', group: 'Admin' },
-  { key: 'mail', label: 'Mail', icon: 'mail', needs: 'view_activity', sub: 'Every e-mail sent, and whether it was delivered, opened or bounced', group: 'Admin' },
-  { key: 'plans', label: 'Memberships', icon: 'money', needs: 'view_accounts', sub: 'What a household can be on', group: 'Admin' },
+  { key: 'suppliers', label: 'Suppliers', icon: 'list', needs: 'view_reporting', sub: 'Who we pay, what for, and whether the pipe is plugged in', group: 'Commercial' },
+
+  { key: 'sources', label: 'Sources', icon: 'list', needs: 'view_reporting', sub: 'Every provider, every field, and which of them we read', group: 'System' },
+  { key: 'voice', label: 'Voice lab', icon: 'mic', needs: 'manage_settings', sub: 'The ways of hearing, compared on the same sentences', group: 'System' },
+  { key: 'runs', label: 'Runs', icon: 'download', needs: 'view_library', sub: 'What is going, what it cost, and what failed', group: 'System' },
+  // manage_staff is owner-only, so only the owner sees it.
+  { key: 'staff', label: 'Staff', icon: 'accounts', needs: 'manage_staff', sub: 'Who can log in to the back office, and what their role lets them open', group: 'System' },
+  { key: 'roles', label: 'Roles', icon: 'locked', needs: 'view_accounts', sub: 'Doors and capabilities', group: 'System' },
+  // Mail is its Sent tab (Roger, 3 Oct 2026); `view_activity` is what Mail always read.
+  { key: 'messages', label: 'Messages and emails', icon: 'mail', needs: 'view_activity', sub: 'Every message Epic sends, and what became of it', group: 'System' },
   // "Audit" is called Changes (hosting v4 handover §3.8); the address stays /admin/audit so every kept link lands.
-  { key: 'audit', label: 'Changes', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom', group: 'Admin' },
-  // No capability: the decisions behind what Epic does are not a privilege, and
-  // an account that can see any of this should be able to see why.
-  { key: 'how', label: 'How it works', icon: 'owned', sub: 'The decisions, what they cost, and where each rule lives', group: 'Admin' },
+  { key: 'audit', label: 'Changes', icon: 'info', needs: 'view_audit', sub: 'Who did what to whom', group: 'System' },
+  // No capability: the decisions behind what Epic does are not a privilege.
+  { key: 'how', label: 'How it works', icon: 'owned', sub: 'The decisions, what they cost, and where each rule lives', group: 'System' },
 ];
 
 /**
@@ -203,10 +163,10 @@ const NAV: { key: Screen; label: string; icon: IconName; needs?: string; sub: st
  */
 export function firstAdminScreen(access?: { capabilities?: string[] | null } | null): Screen {
   const held = new Set(access?.capabilities ?? []);
-  // Approvals is top of the rail but is never where the back office *begins* —
+  // Actions is top of the rail but is never where the back office *begins* —
   // it is an alert, not a landing. Begin on the first real destination (the
   // reporting Overview for most), exactly as before Approvals joined the rail.
-  const item = NAV.find((n) => n.key !== 'approvals' && (!n.needs || held.has(n.needs)));
+  const item = NAV.find((n) => n.key !== 'actions' && (!n.needs || held.has(n.needs)));
   return item?.key ?? 'how';
 }
 
@@ -226,9 +186,7 @@ function Lights() {
         <Press key={k} effect="none" onPress={() => setPref(k)} accessibilityRole="button"
                accessibilityState={{ selected: now === k }} accessibilityLabel={`${k} back office`}
                style={[styles.light, now === k && styles.lightOn]}>
-          <Text style={[type.tiny, { fontWeight: '700', color: now === k ? colors.selectedFg : colors.inkMuted }]}>
-            {k === 'dark' ? 'Dark' : 'Light'}
-          </Text>
+          <Text style={[styles.lightText, now === k && styles.lightTextOn]}>{k === 'dark' ? 'Dark' : 'Light'}</Text>
         </Press>
       ))}
     </View>
@@ -240,8 +198,8 @@ function Lights() {
 // own sidebar, so there is no third entry — one was carried for a group nothing
 // belongs to, which is a tooltip that could never be shown (18 Sep 2026, the
 // separate audit).
-const GROUP_TIP: Record<string, 'railData' | 'railAdmin' | 'railReporting'> = {
-  Reporting: 'railReporting', Data: 'railData', Admin: 'railAdmin',
+const GROUP_TIP: Record<Group, 'railInsight' | 'railPeople' | 'railOffer' | 'railCommercial' | 'railSystem'> = {
+  Insight: 'railInsight', People: 'railPeople', 'What we offer': 'railOffer', Commercial: 'railCommercial', System: 'railSystem',
 };
 
 export function AdminApp({ access, screen, onScreen, onLeave }: {
@@ -259,7 +217,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
   const items = NAV.filter((n) => !n.needs || held.has(n.needs));
   const can = (c: string) => held.has(c);
 
-  // How many approvals are waiting, for the rail's "Approvals (n)" badge. Read
+  // How many approvals are waiting, for the rail's "Actions (n)". Read
   // once on mount and again whenever the screen changes (so declining one and
   // stepping away refreshes it); the Approvals screen also reports its own
   // count through `onCount` so a decision made there updates the badge at once.
@@ -276,7 +234,6 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
   // estate's own numbers quietly wrong.
   useActivity(`admin.${screen}`);
 
-  const current = items.find((n) => n.key === screen) ?? items[0];
   /**
    * The lit item follows the screen (handover §7). On the desk that is
    * Categories only while a Categories page is open; Facts, Mapping,
@@ -285,11 +242,17 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
    */
   const { query } = useRouter();
   const deskTab = filingTabOf(query.get('tab')) ?? 'overview';
-  const lit = (key: string) => key === screen && !(screen === 'filing' && deskTab !== 'categories');
+  const home: Partial<Record<Screen, Screen>> = { approvals: 'actions', plans: 'billing', mail: 'messages' };
+  const at = home[screen] ?? screen;
+  const lit = (key: string) => key === at && !(at === 'filing' && deskTab !== 'categories');
 
   const body = (
     <>
-      {screen === 'approvals' ? <ApprovalsScreen onCount={setPending} /> : null}
+      {/* Actions opens the approvals until its own queue is built; the old
+          address still draws them, though `legacyHref` sends it here first. */}
+      {screen === 'actions' || screen === 'approvals' ? <ApprovalsScreen onCount={setPending} title="Actions" /> : null}
+      {screen === 'billing' || screen === 'plans' ? <Billing canManage={can('manage_plans')} /> : null}
+      {screen === 'messages' || screen === 'mail' ? <Messages canSend={can('manage_settings')} /> : null}
       {screen === 'overview' ? <Overview /> : null}
       {screen === 'accounts' ? <AccountsScreen /> : null}
       {screen === 'households' ? <People canManageRoles={can('manage_roles')} /> : null}
@@ -328,10 +291,8 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
       {screen === 'hosting' ? <HostingTab canManage={can('manage_hosting')} /> : null}
       {screen === 'skills' ? <Skills canManage={can('manage_skills')} /> : null}
       {screen === 'staff' ? <Staff canManage={can('manage_staff')} /> : null}
-      {screen === 'mail' ? <Mail canSend={can('manage_settings')} /> : null}
       {screen === 'waitlist' ? <Waitlist canManage={can('manage_waitlist')} /> : null}
       {screen === 'roles' ? <Roles canManage={can('manage_roles')} /> : null}
-      {screen === 'plans' ? <Plans canManage={can('manage_plans')} /> : null}
       {screen === 'audit' ? <Audit /> : null}
       {screen === 'how' ? <HowItWorks /> : null}
     </>
@@ -359,10 +320,18 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
           </View>
 
           {items.map((n, i) => {
-            // Approvals lights lime whenever something waits, even when it is not
-            // the open screen — the one item that is an alert, not a destination.
-            const hot = n.key === 'approvals' && pending > 0;
-            const on = lit(n.key) || hot;
+            // Actions is a lime block whatever is open, with its count when
+            // something waits (design handover §2a); it is an alert as well as a place.
+            if (n.key === 'actions') {
+              return (
+                <Press key={n.key} onPress={() => setScreen(n.key)} style={styles.actions}
+                       accessibilityRole="tab" accessibilityState={{ selected: lit(n.key) }}>
+                  <Icon name={n.icon} size={14} strokeWidth={2.2} color={ON_LIME} />
+                  <Text style={styles.actionsLabel}>{pending > 0 ? `${n.label} (${pending})` : n.label}</Text>
+                </Press>
+              );
+            }
+            const on = lit(n.key);
             return (
             <React.Fragment key={n.key}>
               {/* A group heading is a header, and the owner asked for a tooltip
@@ -374,15 +343,13 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
               ) : null}
               <Press
                 onPress={() => setScreen(n.key)}
-                style={[styles.navItem, on && styles.navItemOn, n.group ? styles.navItemGrouped : null]}
+                style={[styles.navItem, on && styles.navItemOn]}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: lit(n.key) }}
+                accessibilityState={{ selected: on }}
               >
-                <Icon name={n.icon} size={15} strokeWidth={1.8} color={on ? colors.selectedFg : colors.ink} />
+                <Icon name={n.icon} size={14} strokeWidth={2} color={on ? desk.ink : desk.inkDim} />
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.navLabel, on && { color: colors.selectedFg, fontWeight: '700' }]}>
-                    {hot ? `${n.label} (${pending})` : n.label}
-                  </Text>
+                  <Text style={[styles.navLabel, on && styles.navLabelOn]}>{n.label}</Text>
                 </View>
               </Press>
             </React.Fragment>
@@ -394,19 +361,16 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
           {/* Which profile you are in, and the way back. Never a silent switch:
               the two applications hold the same account and different powers. */}
           <View style={styles.profile}>
-            <Text style={type.tiny}>Signed in as</Text>
-            {/* The person and their role, never a role alone; and a session that cannot act directly says so, since
-                its changes go to Approvals (Roger, 3 Oct 2026). */}
-            <Text style={[type.small, { color: colors.ink, fontWeight: '700' }]}>
-              {[access?.name?.trim().split(/\s+/)[0] || (access?.role?.key === 'owner' && !access?.elevated ? 'Shared passcode' : null), access?.role?.label].filter(Boolean).join(' · ') || '—'}
-            </Text>
-            {/* Personal sign-in is the signal, not a name (an owner may have none); and only the owner-only actions wait (Codex, 3 Oct 2026). */}
-            {access?.role?.key === 'owner' && !access?.elevated ? <Text style={type.tiny}>Owner-only changes go to Approvals until you sign in personally</Text> : null}
+            <Text style={styles.signedIn}>Signed in as</Text>
+            {/* "Signed in as Roger · Owner" for a personal sign-in, "Shared passcode · Owner" for the shared one
+                (design handover §2a); a session that cannot act directly says its changes go to Approvals. */}
+            <Text style={styles.who}>{whoLine(access)}</Text>
+            {proposes(access) ? <Text style={styles.signedIn}>Changes go to Approvals until you sign in personally</Text> : null}
+            <View style={{ marginTop: 10 }}><Lights /></View>
             <Press onPress={onLeave} style={styles.leave} accessibilityRole="button">
-              <Icon name="back" size={14} color={colors.ink} />
-              <Text style={[type.small, { color: colors.ink }]}>The household app</Text>
+              <Icon name="back" size={13} color={desk.inkDim} />
+              <Text style={styles.leaveText}>The household app</Text>
             </Press>
-            <Lights />
           </View>
         </ScrollView>
       ) : (
@@ -422,7 +386,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
             {items.map((n) => {
-              const hot = n.key === 'approvals' && pending > 0;
+              const hot = n.key === 'actions';
               const on = lit(n.key) || hot;
               return (
               <Press
@@ -433,7 +397,7 @@ export function AdminApp({ access, screen, onScreen, onLeave }: {
                 accessibilityState={{ selected: lit(n.key) }}
               >
                 <Icon name={n.icon} size={13} color={on ? colors.selectedFg : colors.ink} />
-                <Text style={[type.tiny, { color: on ? colors.selectedFg : colors.ink }, on && { fontWeight: '700' }]}>{hot ? `${n.label} (${pending})` : n.label}</Text>
+                <Text style={[type.tiny, { color: on ? colors.selectedFg : colors.ink }, on && { fontWeight: '700' }]}>{hot && pending > 0 ? `${n.label} (${pending})` : n.label}</Text>
               </Press>
               );
             })}
@@ -455,30 +419,34 @@ const styles = StyleSheet.create({
   root: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg, minHeight: 0 },
   content: { flex: 1 },
 
-  // 196px and a hairline edge — the handoff's own measurements ("Category
-  // screens v2", 14 Sep 2026). The rail stands on the same ground as the page:
-  // a second surface colour behind it would be the panel the handoff forbids,
-  // and the one rule is enough to say where the page starts.
-  railBox: { width: 196, flexGrow: 0, flexShrink: 0, borderRightWidth: 1, borderRightColor: colors.lineSoft },
-  rail: { flexGrow: 1, paddingVertical: 20, paddingHorizontal: spacing.sm, gap: 1 },
-  brand: { gap: 3, marginBottom: 20, paddingHorizontal: spacing.xs },
+  // The design's rail (prototype, 3 Oct 2026): 206px on the raised ground with
+  // a 1px rule, items 13.5px with a 3px edge that turns lime on the open one.
+  railBox: { width: 206, flexGrow: 0, flexShrink: 0, backgroundColor: desk.raised, borderRightWidth: 1, borderRightColor: desk.rule },
+  rail: { flexGrow: 1, paddingTop: 22, paddingBottom: 26, gap: 2 },
+  brand: { gap: 3, marginBottom: 20, paddingHorizontal: 18 },
   badge: {
     ...type.tiny, fontSize: 9.5, textTransform: 'uppercase', letterSpacing: 1.3, fontWeight: '700',
     color: colors.inkMuted,
   },
-  navItem: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 7, paddingHorizontal: spacing.md },
-  /** The live row is a flat lime block with ink type — the brand moment, square. */
-  navItemOn: { backgroundColor: colors.selected },
-  /** A folder in the rail: a small heading over the items it holds. */
-  navGroup: { ...type.tiny, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '700', color: colors.inkMuted, paddingHorizontal: spacing.md, paddingTop: 18, paddingBottom: 7 },
-  navItemGrouped: {},
-  navLabel: { ...type.small, fontSize: 13.5, color: colors.ink },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 9, marginHorizontal: 12, marginBottom: 6, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: LIME },
+  actionsLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '800', color: ON_LIME },
+  navItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, paddingHorizontal: 18, borderLeftWidth: 3, borderLeftColor: 'transparent' },
+  navItemOn: { backgroundColor: desk.hover, borderLeftColor: LIME },
+  /** A group: a small heading over the items it holds. */
+  navGroup: { fontFamily: fonts.heading, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '800', color: desk.inkFaint, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 6 },
+  navLabel: { fontFamily: fonts.body, fontSize: 13.5, color: desk.inkDim },
+  navLabelOn: { color: desk.ink, fontWeight: '700' },
 
-  profile: { gap: 1, paddingTop: spacing.lg, marginTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.lineSoft, paddingHorizontal: spacing.xs },
-  lights: { flexDirection: 'row', alignSelf: 'flex-start', marginTop: spacing.sm },
-  light: { paddingHorizontal: 9, paddingVertical: 4 },
-  lightOn: { backgroundColor: colors.selected },
+  profile: { gap: 3, paddingTop: 18, marginTop: spacing.lg, borderTopWidth: 1, borderTopColor: desk.rule, paddingHorizontal: 18 },
+  signedIn: { fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim },
+  who: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.ink },
+  lights: { flexDirection: 'row', alignSelf: 'flex-start', gap: 3, padding: 2, borderWidth: 1, borderColor: desk.ruleStrong },
+  light: { paddingHorizontal: 10, paddingVertical: 5 },
+  lightOn: { backgroundColor: LIME },
+  lightText: { fontFamily: fonts.body, fontSize: 12, fontWeight: '600', color: desk.inkDim },
+  lightTextOn: { fontWeight: '800', color: ON_LIME },
   leave: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 13 },
+  leaveText: { fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim },
 
   rootPhone: { flexDirection: 'column' },
   phoneHead: {

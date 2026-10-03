@@ -1046,3 +1046,36 @@ test('the guest pages have addresses: every event near you, messages, payments (
   assert.equal(paths.bookings(), '/plans?span=events');
   assert.equal(ownsHeader(parseRoute('/messages')), true);
 });
+
+test('the back-office redesign: Actions, Billing and Messages and emails have addresses, and the screens they absorbed redirect (design handover, 3 Oct 2026)', () => {
+  assert.deepEqual(roundTrip('/admin/actions'), { name: 'admin', screen: 'actions' });
+  assert.deepEqual(roundTrip('/admin/billing'), { name: 'admin', screen: 'billing' });
+  assert.deepEqual(roundTrip('/admin/messages'), { name: 'admin', screen: 'messages' });
+
+  // The default of each is not written down; anything else is the query.
+  assert.equal(paths.actions(), '/admin/actions');
+  assert.equal(paths.actions('all'), '/admin/actions');
+  assert.equal(paths.actions('safety'), '/admin/actions?area=safety');
+  assert.equal(paths.billing(), '/admin/billing');
+  assert.equal(paths.billing('membership'), '/admin/billing');
+  assert.equal(paths.billing('recovery'), '/admin/billing?tab=recovery');
+  assert.equal(paths.adminMessages(), '/admin/messages');
+  assert.equal(paths.adminMessages('sent'), '/admin/messages?tab=sent');
+  assert.deepEqual(parseRoute(paths.billing('hosting')), { name: 'admin', screen: 'billing' });
+
+  // Approvals is an area of Actions; the plans screen is Billing › Membership;
+  // Mail is Messages and emails › Sent (Roger, 3 Oct 2026). Old links land,
+  // query and all.
+  assert.equal(legacyHref('/admin/approvals', new URLSearchParams()), '/admin/actions?area=approvals');
+  assert.equal(legacyHref('/admin/plans', new URLSearchParams()), '/admin/billing');
+  assert.equal(legacyHref('/admin/mail', new URLSearchParams()), '/admin/messages?tab=sent');
+  assert.equal(legacyHref('/admin/mail', new URLSearchParams('status=bounced')), '/admin/messages?status=bounced&tab=sent');
+  assert.equal(legacyHref('/admin/plans/', new URLSearchParams()), '/admin/billing');
+  // Everything else in the back office is left alone.
+  assert.equal(legacyHref('/admin/staff', new URLSearchParams()), null);
+  assert.equal(legacyHref('/admin/messages', new URLSearchParams()), null);
+  // The old addresses still parse, so a page that has not been redirected yet still draws something.
+  assert.deepEqual(parseRoute('/admin/approvals'), { name: 'admin', screen: 'approvals' });
+  assert.deepEqual(parseRoute('/admin/plans'), { name: 'admin', screen: 'plans' });
+  assert.deepEqual(parseRoute('/admin/mail'), { name: 'admin', screen: 'mail' });
+});

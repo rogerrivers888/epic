@@ -384,7 +384,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
           {VIEWS.map((v) => {
             const on = v.key === view;
             const x = state.counts[v.count];
-            const fg = on ? LIME : v.key === 'needs' && x ? desk.ink : desk.inkDim;
+            const fg = on ? desk.link : v.key === 'needs' && x ? desk.ink : desk.inkDim;
             return (
               <Press key={v.key} effect="none" onPress={() => go(v.key)}>
                 <View style={{ gap: 2 }}>
@@ -432,8 +432,8 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
             return (
               <Press key={o.key} effect="none" onPress={() => { setSort({ key: o.key, dir: on && sort?.dir !== 'asc' ? 'asc' : o.first }); setMenu(null); }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: desk.rule }}>
-                  <View style={{ width: 14, alignItems: 'center' }}><Icon name={on ? 'check' : 'add'} size={13} color={on ? LIME : desk.ink} /></View>
-                  <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? LIME : desk.ink }}>{o.name}</Text>
+                  <View style={{ width: 14, alignItems: 'center' }}><Icon name={on ? 'check' : 'add'} size={13} color={on ? desk.link : desk.ink} /></View>
+                  <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? desk.link : desk.ink }}>{o.name}</Text>
                   <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim }}>{o.dir}</Text>
                 </View>
               </Press>
@@ -461,8 +461,8 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
               return (
                 <Press key={o.key} effect="none" onPress={() => setFilterKeys(on ? filterKeys.filter((k) => k !== o.key) : [...filterKeys, o.key])}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7, paddingHorizontal: 14, flexWrap: narrow ? 'wrap' : 'nowrap' }}>
-                    <View style={{ width: 14, alignItems: 'center' }}><Icon name={on ? 'check' : 'add'} size={13} color={on ? LIME : desk.ink} /></View>
-                    <Text style={{ width: narrow ? 180 : 280, fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? LIME : desk.ink }}>{o.name}</Text>
+                    <View style={{ width: 14, alignItems: 'center' }}><Icon name={on ? 'check' : 'add'} size={13} color={on ? desk.link : desk.ink} /></View>
+                    <Text style={{ width: narrow ? 180 : 280, fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? desk.link : desk.ink }}>{o.name}</Text>
                     <Text style={{ width: 130, fontFamily: fonts.body, fontSize: 11.5, letterSpacing: 0.46, fontWeight: '700', color: desk.inkDim }}>{o.kind}</Text>
                     <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>{o.note}</Text>
                   </View>
@@ -540,7 +540,7 @@ export function Mapping({ canManage = false }: { canManage?: boolean }) {
 // The toolbar's Filter and Sort buttons
 
 function ToolButton({ icon, label, lit, arrow, onPress }: { icon: 'filters' | 'sort'; label: string; lit?: boolean; arrow?: 'ascending' | 'descending'; onPress: () => void }) {
-  const fg = lit ? LIME : desk.inkMuted;
+  const fg = lit ? desk.link : desk.inkMuted;
   return (
     <Press effect="none" onPress={onPress}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1.5, borderColor: lit ? LIME : desk.ruleStrong, paddingVertical: 9, paddingHorizontal: 14 }}>
@@ -636,7 +636,7 @@ function WordTable({ words, out, narrow, speaks, sort, onSort, open, onToggle, r
               <TCell width={110}><T size={12.5} tone={desk.inkDim}>{ago(w.decidedAt)}</T></TCell>
               <TCell width={130}>
                 <Press effect="none" onPress={() => onBringBack(w.word)}>
-                  <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: LIME }}>Bring it back</Text>
+                  <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.link }}>Bring it back</Text>
                 </Press>
               </TCell>
             </>
@@ -651,7 +651,7 @@ function WordTable({ words, out, narrow, speaks, sort, onSort, open, onToggle, r
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center', flexShrink: 1 }}>
                       {!w.targets.length && !w.facts.length ? (
-                        <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: w.answer === 'secondary' ? desk.inkMuted : LIME }}>{pointsOf(w)}</Text>
+                        <Text style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: w.answer === 'secondary' ? desk.inkMuted : desk.link }}>{pointsOf(w)}</Text>
                       ) : null}
                       {w.targets.map((t, i) => (
                         <Chip key={t.key} primary={i === 0} name={t.label + (i === 0 && w.targets.length > 1 ? ' (primary)' : '')} />
@@ -724,7 +724,7 @@ function WordTable({ words, out, narrow, speaks, sort, onSort, open, onToggle, r
 
 /** A Points-at chip: the primary lime, others lime-ruled, facts outlined with a tag. */
 function Chip({ name, primary, fact }: { name: string; primary?: boolean; fact?: boolean }) {
-  const fg = fact ? desk.inkMuted : primary ? ON_LIME : LIME;
+  const fg = fact ? desk.inkMuted : primary ? ON_LIME : desk.link;
   return (
     <View style={{
       flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 3, paddingHorizontal: 9, borderWidth: 1.5,

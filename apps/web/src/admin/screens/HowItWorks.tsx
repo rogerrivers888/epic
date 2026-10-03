@@ -1339,8 +1339,8 @@ function WhatWeOwe({ phone }: { phone: boolean }) {
         </View>
         <View style={[owedStyles.stats, phone && { gap: 20 }]}>
           <Explain tip={OWED_TIP['Not started']} style={{ gap: 2 }}>
-            <Text style={[owedStyles.kicker, { color: LIME }]}>Not started</Text>
-            <Text style={[owedStyles.statValue, { color: LIME }]}>{count('Not started')}</Text>
+            <Text style={[owedStyles.kicker, { color: desk.link }]}>Not started</Text>
+            <Text style={[owedStyles.statValue, { color: desk.link }]}>{count('Not started')}</Text>
           </Explain>
           <Explain tip={OWED_TIP['With the log']} style={{ gap: 2 }}>
             <Text style={owedStyles.kicker}>With this build</Text>
@@ -1370,7 +1370,7 @@ function WhatWeOwe({ phone }: { phone: boolean }) {
         <View key={o.what} style={[owedStyles.row, i === OWED.length - 1 && { borderBottomWidth: 0 }]}>
           <Explain tip="whatWeOwe" style={{ flex: 1, minWidth: 0 }}><Text style={owedStyles.what}>{o.what}</Text></Explain>
           <Explain tip={OWED_TIP[o.state]} style={{ width: 150 }}>
-            <Text style={[owedStyles.state, o.state === 'Not started' && { color: LIME, fontWeight: '700' }]}>{o.state}</Text>
+            <Text style={[owedStyles.state, o.state === 'Not started' && { color: desk.link, fontWeight: '700' }]}>{o.state}</Text>
           </Explain>
           <Explain tip="whose" style={{ width: 140 }}><Text style={owedStyles.whose}>{o.whose}</Text></Explain>
         </View>
@@ -1575,7 +1575,7 @@ const styles = StyleSheet.create({
   // Where a rule lives: the monospace is what marks it as a path, so it needs
   // no fill behind it. A filled token in a list of them reads as a row of chips.
   where: { fontFamily: MONO, fontSize: 11, color: desk.inkDim, alignSelf: 'flex-start', paddingVertical: 2 },
-  link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: LIME },
+  link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: desk.link },
 });
 
 /**
@@ -1592,7 +1592,7 @@ const doc = StyleSheet.create({
   cantSpeak: { fontFamily: fonts.body, fontSize: 13.5, color: desk.amber, marginBottom: 6 },
   lede: { fontFamily: fonts.body, fontSize: 19, lineHeight: 29.5, color: desk.ink, marginTop: 24 },
   nav: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 6, marginTop: 26 },
-  navLink: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '600', color: LIME, borderBottomWidth: 1, borderBottomColor: desk.rule },
+  navLink: { fontFamily: fonts.heading, fontSize: 14, fontWeight: '600', color: desk.link, borderBottomWidth: 1, borderBottomColor: desk.rule },
   section: { marginTop: 56, paddingTop: 18, borderTopWidth: BORDER, borderTopColor: desk.ink },
   // The section a link landed on, marked with a lime rule so the eye finds it
   // after the scroll. A rule, not a fill.

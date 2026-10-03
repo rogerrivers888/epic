@@ -55,7 +55,7 @@ export function Count({ label, n, onPress, lime, align = 'center', weight = '800
     <View style={{ alignItems: align, gap: 2 }}>
       <Text style={{ fontFamily: fonts.heading, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: desk.inkDim }}>{label}</Text>
       <Text style={[{
-        fontFamily: fonts.body, fontSize: 15, fontWeight: weight, color: lime ? LIME : desk.ink,
+        fontFamily: fonts.body, fontSize: 15, fontWeight: weight, color: lime ? desk.link : desk.ink,
         borderBottomWidth: lime ? 1.5 : 0, borderBottomColor: LIME,
       }, tabular]}>{n}</Text>
     </View>
@@ -130,7 +130,7 @@ export function OptPill({ label, on, onPress }: { label: string; on: boolean; on
     <Press effect="none" onPress={onPress}>
       <Text style={{
         fontFamily: fonts.body, fontSize: 12, fontWeight: '700', borderWidth: 1.5,
-        borderColor: on ? LIME : desk.ruleStrong, color: on ? LIME : desk.inkMuted, paddingVertical: 3, paddingHorizontal: 8,
+        borderColor: on ? LIME : desk.ruleStrong, color: on ? desk.link : desk.inkMuted, paddingVertical: 3, paddingHorizontal: 8,
       }} numberOfLines={1}>{label}</Text>
     </Press>
   );

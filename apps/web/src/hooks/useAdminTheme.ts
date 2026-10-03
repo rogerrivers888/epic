@@ -15,7 +15,7 @@ export function useAdminTheme(): { pref: AdminThemePref; setPref: (p: AdminTheme
   const [pref, setPrefState] = useState<AdminThemePref>(getAdminThemePref());
   useEffect(() => {
     adminHoldsTheme(pref);
-    applyTheme(pref === 'follow' ? resolveTheme() : pref);
+    applyTheme(pref === 'follow' ? resolveTheme() : pref, { admin: true });
     // Leaving the back office hands the palette back to the app, whatever the
     // back office was set to: the two are different preferences and the app's
     // is the one that outlives this screen.

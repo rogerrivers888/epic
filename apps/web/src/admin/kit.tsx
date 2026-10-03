@@ -26,9 +26,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Press } from '../components/press';
-import { colors, spacing, TARGET, type, BORDER } from '../theme';
+import { colors, desk, fonts, LIME, ON_LIME, spacing, TARGET, type, BORDER } from '../theme';
 import { Icon, IconName } from '../components/Icon';
-import { Explain } from './explain';
+import { Explain, cutCell } from './explain';
 import type { TipKey } from './tips';
 import { Button as BaseButton, Row, Wrap } from '../components/ui';
 import { useViewport } from '../hooks/useViewport';
@@ -401,7 +401,7 @@ export function DataTable<T extends { id?: string }>({ rows, columns, onRow, emp
             // `minWidth: 0` is what lets a long description ellipsize instead of
             // running over the next column: a flex child's default minimum is its
             // content, so without it the text refuses to shrink.
-            <View key={c.key} style={wide ? { flex: c.width ?? 2, minWidth: 0, alignItems: c.align === 'right' ? 'flex-end' : 'flex-start' } : undefined}>
+            <View key={c.key} {...(wide ? cutCell : {})} style={wide ? { flex: c.width ?? 2, minWidth: 0, alignItems: c.align === 'right' ? 'flex-end' : 'flex-start' } : undefined}>
               {!wide ? <Text style={styles.cellLabel}>{c.head}</Text> : null}
               {c.cell(row)}
             </View>
@@ -451,6 +451,29 @@ export function RangePicker({ days, onDays }: { days: number; onDays: (d: number
         </Press>
       ))}
     </Row>
+  );
+}
+
+/**
+ * A screen's tabs (design handover §2): 14px, the chosen one 700 in lime with a
+ * 2px lime underline, the others 500 and muted, over a 1px rule. Lime type is
+ * `desk.link`, which is moss on the light back office.
+ */
+export function TabBar<K extends string>({ tabs, value, onPick }: {
+  tabs: readonly { key: K; label: string }[]; value: K; onPick: (k: K) => void;
+}) {
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 22, borderBottomWidth: 1, borderBottomColor: desk.rule }} accessibilityRole="tablist">
+      {tabs.map((t) => {
+        const on = t.key === value;
+        return (
+          <Press key={t.key} onPress={() => onPick(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                 style={{ paddingBottom: 10, marginBottom: -1, borderBottomWidth: 2, borderBottomColor: on ? LIME : 'transparent' }}>
+            <Text style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: on ? '700' : '500', color: on ? desk.link : desk.inkDim }}>{t.label}</Text>
+          </Press>
+        );
+      })}
+    </View>
   );
 }
 
@@ -1381,26 +1404,107 @@ const card = StyleSheet.create({
 export function SidePanel({ title, kicker, onClose, children }: {
   title: string; kicker?: string; onClose: () => void; children: React.ReactNode;
 }) {
+  return (
+    <Drawer title={title} kicker={kicker} onClose={onClose} width={420}>
+      <ScrollView contentContainerStyle={side.body}>{children}</ScrollView>
+    </Drawer>
+  );
+}
+
+/**
+ * The back office's drawer (design handover §1 rule 7, §2 "Drawers"; the
+ * prototype's Actions and automation drawers).
+ *
+ * A full-height panel from the right over a dimmed backdrop, closed by a click
+ * outside or ×. A coloured header carries the area — `kicker` over `title`, or
+ * the area alone as the title — and an optional chip on the right (the
+ * deadline, amber with a clock). A lime edge runs the full height on the left.
+ *
+ * Detail and decision: `tabs` run across the top of the left column with
+ * Summary first, and `aside` is the right-hand column — the story in large
+ * type, the decision, a preview of what the person is told — with `foot`
+ * pinned to its bottom (Confirm). Without `aside` the drawer is one column and
+ * `children` fill it. Below 900px the columns stack and the drawer is the
+ * whole frame.
+ *
+ * Like every portalled sheet it pins itself to the phone frame (CLAUDE.md):
+ * `framed` and `origin` from `useViewport`, never the window.
+ */
+export function Drawer<K extends string>({
+  title, kicker, chip, onClose, width = 1100, tabs, tab, onTab, aside, foot, children,
+}: {
+  title: string;
+  kicker?: string;
+  /** On the header's right, before ×: the deadline, say. */
+  chip?: { label: string; icon?: IconName; tone?: 'amber' | 'plain' } | null;
+  onClose: () => void;
+  width?: number;
+  tabs?: readonly { key: K; label: string }[];
+  tab?: K;
+  onTab?: (k: K) => void;
+  aside?: React.ReactNode;
+  foot?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   const { width: screen, height: screenH, framed, origin } = useViewport();
   const left0 = framed && origin ? origin.x : 0;
   const top0 = framed && origin ? origin.y : 0;
-  const full = screen < 560;
-  const w = full ? screen : Math.min(420, screen - 40);
+  const narrow = screen < 900;
+  const w = screen < 560 ? screen : Math.min(width, Math.round(screen * 0.92));
+  const left = (
+    <View style={{ flex: 1, minWidth: 0 }}>
+      {tabs && tabs.length ? (
+        <View style={side.tabs} accessibilityRole="tablist">
+          {tabs.map((t) => {
+            const on = t.key === tab;
+            return (
+              <Press key={t.key} onPress={() => onTab?.(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}
+                     style={[side.tab, on && side.tabOn]}>
+                <Text style={[side.tabText, on && side.tabTextOn]}>{t.label}</Text>
+              </Press>
+            );
+          })}
+        </View>
+      ) : null}
+      {aside ? <ScrollView style={{ flex: 1 }} contentContainerStyle={side.leftBody}>{children}</ScrollView> : children}
+    </View>
+  );
   return (
     <Modal transparent visible animationType="none" onRequestClose={onClose}>
-      <Press style={[side.scrim, { left: left0, top: top0, width: screen, height: screenH }]}
+      <Press effect="none" style={[side.scrim, { left: left0, top: top0, width: screen, height: screenH }]}
              onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
       <View style={[side.panel, { left: left0 + screen - w, top: top0, width: w, height: screenH }]}>
         <View style={side.head}>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            {kicker ? <Text style={side.kicker}>{kicker}</Text> : null}
+            {kicker ? <Text style={side.kicker} numberOfLines={1}>{kicker}</Text> : null}
             <Text style={side.title} numberOfLines={2}>{title}</Text>
           </View>
+          {chip ? (
+            <View style={[side.chip, chip.tone === 'amber' && side.chipAmber]}>
+              {chip.icon ? <Icon name={chip.icon} size={14} strokeWidth={2.4} color={chip.tone === 'amber' ? ON_LIME : desk.ink} /> : null}
+              <Text style={[side.chipText, chip.tone === 'amber' && { color: ON_LIME }]} numberOfLines={1}>{chip.label}</Text>
+            </View>
+          ) : null}
           <Press onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
-            <Icon name="close" size={18} color={colors.ink} strokeWidth={2} />
+            <Icon name="close" size={20} color={desk.inkDim} strokeWidth={2} />
           </Press>
         </View>
-        <ScrollView contentContainerStyle={side.body}>{children}</ScrollView>
+        {aside ? (
+          narrow ? (
+            <ScrollView style={{ flex: 1 }}>
+              <View style={[side.aside, side.asideStacked]}>{aside}{foot}</View>
+              {left}
+            </ScrollView>
+          ) : (
+            <View style={{ flex: 1, minHeight: 0, flexDirection: 'row' }}>
+              {left}
+              <View style={side.asideCol}>
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={side.aside}>{aside}</ScrollView>
+                {foot ? <View style={side.foot}>{foot}</View> : null}
+              </View>
+            </View>
+          )
+        ) : <View style={{ flex: 1, minHeight: 0 }}>{left}</View>}
       </View>
     </Modal>
   );
@@ -1417,14 +1521,28 @@ export function Fact({ label, children }: { label: string; children: React.React
 }
 
 const side = StyleSheet.create({
-  scrim: { position: 'absolute', backgroundColor: 'rgba(32,30,29,0.28)' },
-  panel: { position: 'absolute', backgroundColor: colors.bg, borderLeftWidth: BORDER, borderLeftColor: colors.ink },
-  head: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md,
-          paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.md,
-          borderBottomWidth: 1, borderBottomColor: colors.line },
-  kicker: { ...type.tiny, fontWeight: '700', color: colors.inkMuted },
-  title: { ...type.title, fontSize: 22, lineHeight: 26, letterSpacing: -0.6 },
-  body: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl },
+  scrim: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.45)' },
+  // The lime edge runs the full height; no shadow, as everywhere in Epic.
+  panel: { position: 'absolute', backgroundColor: desk.ground, borderLeftWidth: 3, borderLeftColor: LIME },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 22, paddingVertical: 14,
+          backgroundColor: desk.drawerHead, borderBottomWidth: 1, borderBottomColor: desk.ruleStrong },
+  kicker: { fontFamily: fonts.body, fontSize: 11, fontWeight: '800', letterSpacing: 0.77, textTransform: 'uppercase', color: desk.inkDim },
+  title: { fontFamily: fonts.heading, fontSize: 22, lineHeight: 26, fontWeight: '800', letterSpacing: -0.44, color: desk.ink },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, paddingHorizontal: 12 },
+  chipAmber: { backgroundColor: desk.amberFill },
+  chipText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '800', color: desk.inkMuted },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 24, paddingTop: 16, paddingHorizontal: 26,
+          backgroundColor: desk.raised, borderBottomWidth: 1, borderBottomColor: desk.ruleStrong },
+  tab: { paddingBottom: 10, marginBottom: -1, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabOn: { borderBottomColor: LIME },
+  tabText: { fontFamily: fonts.body, fontSize: 14, fontWeight: '500', color: desk.inkDim },
+  tabTextOn: { fontWeight: '700', color: desk.link },
+  leftBody: { paddingVertical: 18, paddingHorizontal: 26, gap: 12 },
+  asideCol: { width: 440, flexGrow: 0, flexShrink: 0, borderLeftWidth: 1, borderLeftColor: desk.rule, backgroundColor: desk.raised },
+  aside: { padding: 22, gap: 14 },
+  asideStacked: { backgroundColor: desk.raised, borderBottomWidth: 1, borderBottomColor: desk.rule },
+  foot: { padding: 22, paddingTop: 0 },
+  body: { paddingHorizontal: 22, paddingBottom: spacing.xl },
   fact: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md,
           paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.lineSoft },
   factLabel: { ...type.small, color: colors.inkMuted, width: 118 },

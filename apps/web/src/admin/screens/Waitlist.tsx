@@ -135,7 +135,7 @@ export function Waitlist({ canManage = false }: { canManage?: boolean } = {}) {
           <Text style={styles.count}>{data ? `${data.count.toLocaleString()} of ${total.toLocaleString()} sign-ups` : 'Loading…'}</Text>
           {any ? (
             <Press onPress={clear} effect="none" accessibilityRole="button">
-              {({ hovered }: any) => <Text style={[styles.clear, hovered && { color: LIME }]}>Clear filters</Text>}
+              {({ hovered }: any) => <Text style={[styles.clear, hovered && { color: desk.link }]}>Clear filters</Text>}
             </Press>
           ) : null}
         </View>
@@ -200,7 +200,7 @@ function Breakdown({ title, rows, on, onPick }: {
       {rows.map((r) => (
         <Press key={r.key} onPress={() => onPick(r.key)} effect="none" accessibilityRole="button" accessibilityState={{ selected: on === r.key }}
           style={({ hovered }: any) => [styles.bRow, (hovered || on === r.key) && { backgroundColor: desk.picked }]}>
-          <Text style={[styles.cell, on === r.key && { color: LIME, fontWeight: '700' }]} numberOfLines={1}>{r.label}</Text>
+          <Text style={[styles.cell, on === r.key && { color: desk.link, fontWeight: '700' }]} numberOfLines={1}>{r.label}</Text>
           <Text style={styles.cell}>{r.signups.toLocaleString()}</Text>
           <View style={[styles.cellBox, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
             <View style={styles.barTrack}><View style={[styles.bar, { width: `${Math.round((r.share ?? 0) * 100)}%` }]} /></View>
@@ -221,15 +221,15 @@ function Select({ label, value, options, onPick }: { label: string; value?: stri
     <View style={[styles.selectWrap, open && { zIndex: 20 }]}>
       <Press onPress={() => setOpen((o) => !o)} effect="none" accessibilityRole="button" accessibilityLabel={label}
         style={({ hovered }: any) => [styles.select, on && { borderColor: LIME }, hovered && { backgroundColor: desk.picked }]}>
-        <Text style={[styles.selectText, on && { color: LIME, fontWeight: '700' }]} numberOfLines={1}>{current ? current.label : label}</Text>
-        <Icon name="expand" size={14} color={on ? LIME : desk.inkDim} strokeWidth={2.2} />
+        <Text style={[styles.selectText, on && { color: desk.link, fontWeight: '700' }]} numberOfLines={1}>{current ? current.label : label}</Text>
+        <Icon name="expand" size={14} color={on ? desk.link : desk.inkDim} strokeWidth={2.2} />
       </Press>
       {open ? (
         <View style={styles.menu}>
           {[{ key: '', label: `Any ${label.toLowerCase()}` }, ...options].map((o) => (
             <Press key={o.key || 'any'} onPress={() => { setOpen(false); onPick(o.key || undefined); }} effect="none"
               style={({ hovered }: any) => [styles.menuItem, hovered && { backgroundColor: desk.picked }]}>
-              <Text style={[styles.selectText, (o.key || undefined) === value && { color: LIME, fontWeight: '700' }]} numberOfLines={1}>{o.label}</Text>
+              <Text style={[styles.selectText, (o.key || undefined) === value && { color: desk.link, fontWeight: '700' }]} numberOfLines={1}>{o.label}</Text>
             </Press>
           ))}
         </View>

@@ -357,6 +357,81 @@ const DARK: typeof LIGHT = {
 };
 
 export const PALETTES: Record<ThemeName, typeof LIGHT> = { light: LIGHT, dark: DARK };
+
+/**
+ * The back office's own two palettes (back-office design handover, 3 Oct 2026,
+ * §2 "Build rules", and the prototype's own dark-to-light map).
+ *
+ * Dark is the default; Light is Epic's light palette — cream, ink, #D7D3D3
+ * rules, moss for links. Lime fills stay lime in both, and amber and red keep
+ * their meanings: amber needs you, red is overdue, lost or refused.
+ *
+ * `DESK` is every token the back office's screens draw with (`desk` below);
+ * `ADMIN_COLORS` is what the shared `colors` palette becomes while the back
+ * office is on screen, so the kit's tables, panels and rules follow the same
+ * switch. Neither touches the household app: leaving the back office hands
+ * the palette back (`useAdminTheme`).
+ */
+const DESK = {
+  dark: {
+    /** The page behind everything, and a well or an input sunk into it. */
+    page: '#141211', well: '#141211',
+    /** The screen itself. */
+    ground: '#1A1817',
+    /** The rail, a panel lifted off the screen. */
+    raised: '#201E1D', lifted: '#1F1D1C',
+    /** A row under the pointer, and the rail's selection. */
+    hover: '#262220', picked: '#262220',
+    /** A drawer's coloured header. */
+    drawerHead: '#2B2826',
+    ink: '#F2EFEC', inkMuted: '#CFCAC7', inkDim: '#9A9492', inkFaint: '#6B6664',
+    /** 1px between rows; 2px under a section. */
+    rule: '#2E2A29', ruleStrong: '#46413F',
+    off: '#2E2A29',
+    /** Links, live, done, selected — lime type only ever sits on the dark. */
+    link: LIME,
+    /** Needs you, deadlines, waiting: oklch(0.80 0.15 75), as type. */
+    amber: '#F5AE39',
+    /** The same amber as a fill — a deadline chip — with ink on it, in both themes. */
+    amberFill: '#F5AE39',
+    /** Overdue, lost, refusals: oklch(0.68 0.19 25). */
+    warn: '#F75D59',
+  },
+  light: {
+    page: '#EAE7E7', well: '#EAE7E7',
+    ground: CREAM,
+    raised: '#F3F1EC', lifted: '#F3F1EC',
+    hover: '#EBE7E1', picked: '#EBE7E1',
+    drawerHead: '#ECE8E2',
+    ink: INK, inkMuted: '#605D5D', inkDim: '#605D5D', inkFaint: '#9B9797',
+    rule: '#D7D3D3', ruleStrong: '#D7D3D3',
+    off: '#E6E2DC',
+    /** Moss, oklch(0.45 0.13 130): never lime type on cream. */
+    link: '#3C6200',
+    amber: '#8A5A00',
+    amberFill: '#F5AE39',
+    /** oklch(0.52 0.20 25). */
+    warn: '#C21725',
+  },
+} as const;
+export type DeskToken = keyof typeof DESK.dark;
+
+const ADMIN_COLORS: Record<ThemeName, Partial<typeof LIGHT>> = {
+  dark: {
+    bg: DESK.dark.ground, surface: DESK.dark.raised, panel: DESK.dark.raised, well: DESK.dark.well,
+    tabbar: DESK.dark.ground, headerBg: DESK.dark.ground,
+    ink: DESK.dark.ink, inkMuted: DESK.dark.inkMuted, inkFaint: DESK.dark.inkDim, ghost: DESK.dark.inkFaint, decor: DESK.dark.inkFaint,
+    line: DESK.dark.ruleStrong, lineSoft: DESK.dark.rule, ruleSoft: DESK.dark.rule, ruleMuted: DESK.dark.ruleStrong,
+    accent: DESK.dark.link, icon: DESK.dark.ink, hover: DESK.dark.hover, warm: DESK.dark.raised,
+  },
+  light: {
+    bg: DESK.light.ground, surface: DESK.light.ground, panel: DESK.light.raised, well: DESK.light.well,
+    tabbar: DESK.light.ground,
+    inkMuted: DESK.light.inkMuted, inkFaint: DESK.light.inkDim,
+    line: DESK.light.ruleStrong, lineSoft: DESK.light.rule, ruleSoft: DESK.light.rule, ruleMuted: DESK.light.ruleStrong,
+    accent: DESK.light.link, hover: DESK.light.hover, warm: DESK.light.raised,
+  },
+};
 export type ColorName = keyof typeof LIGHT;
 
 const isWeb = Platform.OS === 'web' && typeof document !== 'undefined';
@@ -381,10 +456,13 @@ const listeners = new Set<(t: ThemeName) => void>();
 export const onThemeChange = (fn: (t: ThemeName) => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 
 /** Write the palette onto <html> so every var(--epic-…) resolves; also the browser chrome colour and the map tiles. */
-export function applyTheme(name: ThemeName = resolveTheme()) {
+export function applyTheme(name: ThemeName = resolveTheme(), opts: { admin?: boolean } = {}) {
   if (!isWeb) return;
   const root = document.documentElement;
-  const p = PALETTES[name];
+  // The back office lays its own palette over the app's while it is on screen.
+  const p = opts.admin ? { ...PALETTES[name], ...ADMIN_COLORS[name] } : PALETTES[name];
+  for (const [k, v] of Object.entries(DESK[name])) root.style.setProperty(`--epic-desk-${k}`, v);
+  root.setAttribute('data-admin-theme', opts.admin ? name : '');
   for (const [k, v] of Object.entries(p)) root.style.setProperty(`--epic-${k}`, v);
   root.setAttribute('data-theme', name);
   root.style.colorScheme = name;
@@ -416,7 +494,7 @@ export const getAdminThemePref = (): AdminThemePref => {
 };
 export function setAdminThemePref(pref: AdminThemePref) {
   if (isWeb && typeof localStorage !== 'undefined') localStorage.setItem(ADMIN_THEME_KEY, pref);
-  applyTheme(pref === 'follow' ? resolveTheme() : pref);
+  applyTheme(pref === 'follow' ? resolveTheme() : pref, { admin: true });
 }
 
 /**
@@ -434,7 +512,7 @@ if (isWeb) {
   applyTheme();
   if (typeof window.matchMedia === 'function') {
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
-      if (adminHolds) { applyTheme(adminHolds === 'follow' ? resolveTheme() : adminHolds); return; }
+      if (adminHolds) { applyTheme(adminHolds === 'follow' ? resolveTheme() : adminHolds, { admin: true }); return; }
       if (getThemePref() === 'system') applyTheme();
     });
   }
@@ -492,7 +570,9 @@ export const memberPastel = (index: number) => memberPastels[index % memberPaste
 /**
  * The filing desk's own ladder (the Places redesign, 20 Sep 2026).
  *
- * The back office is pinned dark, and the drawing this section is built from
+ * The back office is dark by default and has a Light of its own (`DESK`
+ * above, design handover 3 Oct 2026); these are CSS variables on the web so
+ * one switch repaints every screen. The drawing this section is built from
  * works on a warmer, lighter ground than the app's dark mode with more rungs
  * between the ground and the type than a palette meant for a phone needs: a
  * table wants a hairline between rows, a heavier rule under a header and a
@@ -506,50 +586,9 @@ export const memberPastel = (index: number) => memberPastels[index % memberPaste
  * not decoration — and is the only colour on this screen that is not from the
  * lime/ink/cream axis.
  */
-export const desk = {
-  /** The screen itself, and the sidebar. */
-  ground: '#1A1817',
-  /** A panel lifted off it — the picker, an input. Darker, not lighter. */
-  well: '#141212',
-  /** A row that is open, hearted, or otherwise the one being worked on. */
-  lifted: '#1F1D1C',
-  /** A row that is ticked, and the left rail's selection. */
-  picked: '#232120',
-  /** Every letter. */
-  ink: '#F2EFEC',
-  /** A second line under a name: still read, quieter. */
-  inkMuted: '#CFCAC7',
-  /** A label, a count, a note. The quietest thing that is still text. */
-  inkDim: '#9A9492',
-  /** Not text — a rule that has to disappear, or a disabled word. */
-  inkFaint: '#6B6664',
-  /** Between rows in a table. */
-  rule: '#2E2A29',
-  /** Under a table header, round a panel, and the tab strip's own line. */
-  ruleStrong: '#46413F',
-  /** The fill of a control that is off — a disabled button, an empty step. */
-  off: '#2E2A29',
-  /**
-   * The one colour here that is not lime, ink or cream.
-   *
-   * Red on this surface means the same as red anywhere in Epic — danger, not
-   * decoration (owner, 7 Sep 2026) — and it is what a never-opened mapping, a
-   * district below its minimum fill and a provisional threshold are drawn in.
-   *
-   * It is its own value rather than `colors.overrun` because `colors` follows
-   * the app's light-or-dark setting and this surface is pinned dark: a screen
-   * reading `colors.overrun` in light mode would draw the desk's warnings in
-   * the light red, which is four shades too dark to read on `ground`. The
-   * value is the handoff's own `oklch(0.72 0.19 25)` converted to sRGB.
-   */
-  warn: '#FF6A65',
-  /**
-   * "Watch this" — a rising backlog, a slow source, a default its places
-   * contradict (back-office handover v2, 28 Sep 2026). Not danger, so not red;
-   * the handoff's `oklch(0.82 0.15 75)` in sRGB.
-   */
-  amber: '#FCB442',
-} as const;
+export const desk: { readonly [K in DeskToken]: string } = isWeb
+  ? (Object.fromEntries(Object.keys(DESK.dark).map((k) => [k, `var(--epic-desk-${k})`])) as { [K in DeskToken]: string })
+  : DESK.dark;
 
 /**
  * The household surface, as the back office previews it.

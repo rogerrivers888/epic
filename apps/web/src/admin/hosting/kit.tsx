@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
-import { AMBER_DARK, colors, desk, fonts, getAdminThemePref, INK, LIME } from '../../theme';
+import { colors, desk, fonts, INK, LIME } from '../../theme';
 import { api, ApiError } from '../../api';
 import { useRouter } from '../../router';
 
@@ -64,11 +64,11 @@ export function Opens({ to, children, strong }: { to: string | null | undefined;
   );
 }
 
-/** Amber, "attention" (handoff §6): the desk's own on the dark back office, the app's darker one on a light back office. */
-export const amberTone = () => (getAdminThemePref() === 'light' ? AMBER_DARK : desk.amber);
+/** Amber, "attention" (handoff §6): the theme's own — oklch(0.80 0.15 75) on dark, #8A5A00 on light. */
+export const amberTone = () => desk.amber;
 
-/** Lime, "live" (handoff §1.10): flat lime on the dark back office; on a light one the moss, because lime type never sits on cream. */
-export const liveTone = () => (getAdminThemePref() === 'light' ? colors.accent : LIME);
+/** Lime, "live" (handoff §1.10): lime on dark; moss on light, because lime type never sits on cream. */
+export const liveTone = () => desk.link;
 
 /** Load once, reload on demand; errors in plain words. */
 export function useLoad<T>(load: () => Promise<T>, deps: unknown[]) {

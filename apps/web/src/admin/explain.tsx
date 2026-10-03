@@ -88,13 +88,45 @@ export function Explains({ children }: { children: React.ReactNode }) {
   const hide = useCallback(() => setShown(null), []);
   const value = useMemo(() => ({ show, hide, on: true }), [show, hide]);
 
+  /**
+   * "…" plus the full text on hover, every table (design handover §1 rule 9;
+   * register K17, Roger, 3 Oct 2026). A value cut short by `CUT_CSS` — or by
+   * `numberOfLines` anywhere in the back office — shows its whole text in the
+   * same panel, 8px below it, when the pointer is over it. Only text that was
+   * actually cut: one that fits says nothing.
+   */
+  const cutEl = React.useRef<HTMLElement | null>(null);
+  const over = useCallback((e: any) => {
+    let el = e?.target as HTMLElement | null;
+    for (let i = 0; el && i < 4; i += 1, el = el.parentElement) {
+      if (isCut(el)) {
+        const text = (el.textContent ?? '').trim();
+        if (!text) return;
+        cutEl.current = el;
+        const r = el.getBoundingClientRect();
+        show(['', text], { left: r.left, top: r.top, bottom: r.bottom });
+        return;
+      }
+    }
+  }, [show]);
+  const out = useCallback((e: any) => {
+    const el = cutEl.current;
+    if (!el) return;
+    const to = e?.relatedTarget as Node | null;
+    if (to && el.contains(to)) return;
+    cutEl.current = null;
+    hide();
+  }, [hide]);
+  useEffect(() => { injectCutCss(); }, []);
+
   return (
     <Ctx.Provider value={value}>
-      <View ref={ref as any} style={{ flex: 1, position: 'relative' }}>
+      <View ref={ref as any} style={{ flex: 1, position: 'relative' }}
+            {...(Platform.OS === 'web' ? { onMouseOver: over, onMouseOut: out } as any : {})}>
         {children}
         {shown ? (
           <View style={[styles.panel, { left: shown.x, top: shown.y }]} pointerEvents="none">
-            <Text style={styles.title}>{shown.tip[0]}</Text>
+            {shown.tip[0] ? <Text style={styles.title}>{shown.tip[0]}</Text> : null}
             <Text style={styles.body}>{shown.tip[1]}</Text>
           </View>
         ) : null}
@@ -174,3 +206,36 @@ const styles = StyleSheet.create({
   title: { ...type.tiny, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, textTransform: 'uppercase', color: colors.accent },
   body: { ...type.small, fontSize: 12.5, lineHeight: 19, color: colors.ink },
 });
+
+/**
+ * A table cell's contents are one line each, cut with "…" when they would not
+ * fit (design handover §1 rule 9). `cutCell` marks a cell; this sheet does the
+ * cutting, because a cell holds whatever its column draws and the rule is for
+ * every one of them. react-native-web draws Text as an element with
+ * `dir="auto"`. Every box inside the cell is held to the cell's width, or a
+ * line that will not wrap would widen its parent instead of being cut.
+ */
+const CUT_CSS = `[data-cut] div{max-width:100%;min-width:0;}
+[data-cut] [dir="auto"]{white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;}
+[data-cut] [dir="auto"] [dir="auto"]{overflow:visible;}`;
+let cutCssIn = false;
+function injectCutCss() {
+  if (cutCssIn || Platform.OS !== 'web' || typeof document === 'undefined') return;
+  const tag = document.createElement('style');
+  tag.setAttribute('data-epic', 'cut');
+  tag.textContent = CUT_CSS;
+  document.head.appendChild(tag);
+  cutCssIn = true;
+}
+
+/** Was this element's text cut short — an ellipsis, or a clamp to fewer lines than it has? */
+function isCut(el: HTMLElement): boolean {
+  if (typeof window === 'undefined' || !el.getBoundingClientRect) return false;
+  const cs = window.getComputedStyle(el);
+  if (cs.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth + 1) return true;
+  const clamp = (cs as any).webkitLineClamp ?? cs.getPropertyValue('-webkit-line-clamp');
+  return !!clamp && clamp !== 'none' && el.scrollHeight > el.clientHeight + 1;
+}
+
+/** The props that mark a table cell for cutting: spread onto its View. */
+export const cutCell: Record<string, unknown> = Platform.OS === 'web' ? { dataSet: { cut: '1' } } : {};

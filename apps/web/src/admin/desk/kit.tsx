@@ -24,6 +24,7 @@ import { LIME, ON_LIME, desk, fonts } from '../../theme';
 import { api } from '../../api';
 import { useRouter } from '../../router';
 import { SIDE_KEY, SIDE_OPTIONS, asSide, type Side } from './side';
+import { cutCell } from '../explain';
 
 export { FOOD_CATEGORY, SIDE_KEY, SIDE_OPTIONS, SIDE_TABS, asSide, onSide, sideOfCategory, sideParam, type Side } from './side';
 
@@ -101,7 +102,7 @@ export function ToastLine({ toast, clear }: { toast: ToastState; clear: () => vo
   if (!toast) return null;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-      <Text style={{ fontSize: 12, color: LIME, fontWeight: '700', fontFamily: fonts.body }}>{toast.text}</Text>
+      <Text style={{ fontSize: 12, color: desk.link, fontWeight: '700', fontFamily: fonts.body }}>{toast.text}</Text>
       {toast.undo ? (
         <Press effect="none" onPress={() => { const u = toast.undo; clear(); u?.(); }}>
           <Text style={{ fontSize: 12, fontWeight: '700', color: desk.ink, borderBottomWidth: 1.5, borderBottomColor: desk.ink, fontFamily: fonts.body }}>Undo</Text>
@@ -184,7 +185,7 @@ export function HeadCount({ label, n, onPress, on, tone }: {
     <View style={{ alignItems: 'flex-start', gap: 2 }}>
       <Kicker>{label}</Kicker>
       <Text style={[{
-        fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', color: tone ?? (on ? LIME : desk.ink),
+        fontFamily: fonts.heading, fontSize: 15, fontWeight: '800', color: tone ?? (on ? desk.link : desk.ink),
         borderBottomWidth: onPress ? 1.5 : 0, borderBottomColor: on ? LIME : desk.ruleStrong,
       }, tabular]}>{n}</Text>
     </View>
@@ -272,7 +273,7 @@ export function Dropdown<T extends string>({ label, options, value, onChange, wi
             return (
               <Press key={o.key} effect="none" onPress={() => { setOpen(false); onChange(o.key); }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: on ? desk.picked : 'transparent' }}>
-                  {mark ? <View style={{ width: 14 }}>{on ? <Icon name="check" size={13} color={LIME} /> : null}</View> : null}
+                  {mark ? <View style={{ width: 14 }}>{on ? <Icon name="check" size={13} color={desk.link} /> : null}</View> : null}
                   <Text style={{
                     flex: 1, fontFamily: fonts.body, fontSize: 13, lineHeight: 20,
                     fontWeight: on ? '800' : '500', color: on ? desk.ink : desk.inkMuted,
@@ -354,7 +355,7 @@ export function Pills<T extends string>({ options, value, onChange }: { options:
           <Press key={o.key} effect="none" onPress={() => onChange(o.key)}>
             <Text style={{
               fontFamily: fonts.body, fontSize: 12, fontWeight: '700', borderWidth: 1.5,
-              borderColor: on ? LIME : desk.ruleStrong, color: on ? LIME : desk.inkMuted, paddingVertical: 3, paddingHorizontal: 8,
+              borderColor: on ? LIME : desk.ruleStrong, color: on ? desk.link : desk.inkMuted, paddingVertical: 3, paddingHorizontal: 8,
             }}>{o.name}</Text>
           </Press>
         );
@@ -485,7 +486,8 @@ export function TRow({ children, onPress, gap = 18, lifted, pad = 8, vpad = 10, 
 
 /** A cell of a fixed width — or, with `grow`, at least that wide and taking what is left. */
 export function TCell({ width, children, style, grow }: { width: number; children?: React.ReactNode; style?: ViewStyle; grow?: boolean }) {
-  return <View style={[grow ? { flexGrow: 1, flexShrink: 1, flexBasis: width, minWidth: width } : { width, minWidth: 0 }, style]}>{children}</View>;
+  // One line, cut with "…" and whole on hover (design handover §1 rule 9).
+  return <View {...cutCell} style={[grow ? { flexGrow: 1, flexShrink: 1, flexBasis: width, minWidth: width } : { width, minWidth: 0 }, style]}>{children}</View>;
 }
 
 /** A cell's text: 13.5px, ink unless told. */
@@ -677,7 +679,7 @@ export function LocationFilter() {
         <Press effect="none" onPress={() => { setText(''); setLoc({ ...loc, where: '' }); }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: LIME, paddingVertical: 6, paddingHorizontal: 10 }}>
             <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.ink }}>{answer.chip}</Text>
-            <Icon name="close" size={13} color={LIME} />
+            <Icon name="close" size={13} color={desk.link} />
           </View>
         </Press>
       ) : null}

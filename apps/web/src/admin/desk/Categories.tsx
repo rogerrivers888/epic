@@ -364,9 +364,9 @@ function RelatedAdder({ row, catalogue, categories, onClose, onLink, onUnlink }:
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7, paddingHorizontal: 14 }}>
           <View style={{ width: 14 }}>
-            {r ? <Icon name="check" size={13} color={LIME} /> : <Icon name="add" size={13} color={desk.ink} />}
+            {r ? <Icon name="check" size={13} color={desk.link} /> : <Icon name="add" size={13} color={desk.ink} />}
           </View>
-          <Text style={{ flex: withCat ? undefined : 1, width: withCat ? 220 : undefined, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, fontWeight: r ? '700' : '500', color: r ? LIME : desk.ink }}>{o.label}</Text>
+          <Text style={{ flex: withCat ? undefined : 1, width: withCat ? 220 : undefined, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, fontWeight: r ? '700' : '500', color: r ? desk.link : desk.ink }}>{o.label}</Text>
           {note ? <Text style={{ flex: withCat ? 1 : undefined, minWidth: 0, fontFamily: fonts.body, fontSize: withCat ? 12 : 11.5, color: desk.inkDim }}>{note}</Text> : null}
         </View>
       </Press>
@@ -591,7 +591,7 @@ function GapReport() {
                 <View style={{ width: 340, flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 4 }}>
                   {r.words.length ? r.words.map((w) => (
                     <Press key={w.word} effect="none" onPress={() => go('mapping', { word: w.word })}>
-                      <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: w.primary ? '700' : '500', color: w.primary ? LIME : desk.inkMuted }, tabular]}>
+                      <Text style={[{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: w.primary ? '700' : '500', color: w.primary ? desk.link : desk.inkMuted }, tabular]}>
                         {w.word} {n(w.brings)}
                       </Text>
                     </Press>

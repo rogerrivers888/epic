@@ -127,7 +127,7 @@ function CostBandEditor({ code, currency, bands, onSaved, toast }: {
         <TextInput value={t1} onChangeText={setT1} inputMode="decimal" placeholder="e.g. 15" placeholderTextColor={desk.inkFaint} onSubmitEditing={save} style={box} />
         <T tone={desk.inkDim} size={12.5}>{sym}{sym} up to</T>
         <TextInput value={t2} onChangeText={setT2} inputMode="decimal" placeholder="e.g. 40" placeholderTextColor={desk.inkFaint} onSubmitEditing={save} style={box} />
-        {valid ? <TextLink tone={LIME} onPress={save}>{busy ? 'Setting…' : seeded ? 'Change' : 'Set'}</TextLink> : null}
+        {valid ? <TextLink tone={desk.link} onPress={save}>{busy ? 'Setting…' : seeded ? 'Change' : 'Set'}</TextLink> : null}
       </View>
       <T tone={desk.inkFaint} size={12}>{preview}</T>
     </View>
@@ -206,7 +206,7 @@ function MarketsList() {
               <TCell width={190}><T weight="700">{m.name}</T></TCell>
               <TCell width={210}>
                 <View>
-                  <T tone={m.status === 'live' ? LIME : desk.ink}>{STATUS_NAME[m.status]}</T>
+                  <T tone={m.status === 'live' ? desk.link : desk.ink}>{STATUS_NAME[m.status]}</T>
                   <T size={12} tone={desk.inkDim}>{statusReason(m)}</T>
                 </View>
               </TCell>
@@ -271,7 +271,7 @@ function speaksRows(m: Market): { label: string; value: string; amber?: boolean 
 /** One go-live check: met, or a plain statement of what it needs (owner: never a
  *  disabled control — the check names what is missing). */
 function GoLiveRow({ ok, label, need }: { ok: boolean; label: string; need: string }) {
-  if (ok) return <T tone={LIME}>✓ {label}</T>;
+  if (ok) return <T tone={desk.link}>✓ {label}</T>;
   return <T tone={AMBER}>— {label} · {need}</T>;
 }
 
@@ -368,7 +368,7 @@ function MarketPage({ code, canManage }: { code: string; canManage: boolean }) {
           return (
             <View key={s.id} style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
               <T weight="700" tone={AMBER}>{label} — not connected yet{s.note ? ` (${s.note})` : ''}</T>
-              {canManage ? <TextLink tone={LIME} onPress={() => connect(s.id)}>Connect</TextLink> : null}
+              {canManage ? <TextLink tone={desk.link} onPress={() => connect(s.id)}>Connect</TextLink> : null}
             </View>
           );
         })}
@@ -384,7 +384,7 @@ function MarketPage({ code, canManage }: { code: string; canManage: boolean }) {
         <GoLiveRow ok={m.checklist.sources} label="Sources" need="a source that exists here is not connected — Connect it above" />
         <View style={{ marginTop: 6 }}>
           {m.ready
-            ? <T tone={LIME} weight="700">Go live in {m.name} →</T>
+            ? <T tone={desk.link} weight="700">Go live in {m.name} →</T>
             : <T tone={desk.inkFaint}>Go live in {m.name} — {missing.length} thing{missing.length === 1 ? '' : 's'} first</T>}
         </View>
       </View>

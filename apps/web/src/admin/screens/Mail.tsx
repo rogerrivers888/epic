@@ -23,7 +23,11 @@ const FILTERS: { key: string; label: string }[] = [
 ];
 const purposeLabel = (p: string) => { const w = (p || '').replace(/_/g, ' ').trim(); return w ? w[0].toUpperCase() + w.slice(1) : '—'; };
 
-export function Mail({ canSend = false }: { canSend?: boolean } = {}) {
+/**
+ * `embedded` draws it as Messages and emails › Sent (Roger, 3 Oct 2026): no
+ * heading of its own, the window picker on the right of its first row.
+ */
+export function Mail({ canSend = false, embedded = false }: { canSend?: boolean; embedded?: boolean } = {}) {
   const [days, setDays] = useState(30);
   const [status, setStatus] = useState('');
   const [data, setData] = useState<AdminMail | null>(null);
@@ -68,8 +72,10 @@ export function Mail({ canSend = false }: { canSend?: boolean } = {}) {
   ];
 
   return (
-    <AdminPage>
-      <PageHead title="Mail" sub="Every e-mail sent, and what Postmark said became of it — delivered, opened, bounced, marked as spam" right={<RangePicker days={days} onDays={setDays} />} />
+    <Page embedded={embedded}>
+      {embedded
+        ? <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}><RangePicker days={days} onDays={setDays} /></View>
+        : <PageHead title="Mail" sub="Every e-mail sent, and what Postmark said became of it — delivered, opened, bounced, marked as spam" right={<RangePicker days={days} onDays={setDays} />} />}
       {error ? <StatusLine tone="warn">{error}</StatusLine> : null}
       {data && !data.sender.configured ? <Banner tone="warn">{data.sender.message ?? 'No mail sender is configured.'}</Banner> : null}
       {data && data.sender.configured && !data.sender.events ? <Banner tone="warn">Sends go out, but nothing comes back: add POSTMARK_WEBHOOK_TOKEN in Doppler and give Postmark the webhook address, so deliveries, opens and bounces land here.</Banner> : null}
@@ -89,6 +95,10 @@ export function Mail({ canSend = false }: { canSend?: boolean } = {}) {
       </TileRow>
       <Dropdown label="Show" value={FILTERS.find((f) => f.key === status)?.label ?? 'Any outcome'} width={240} options={FILTERS.map((f) => ({ key: f.key, label: f.label, on: f.key === status, count: f.key ? (f.key === 'not_delivered' ? notDelivered : f.key === 'delivered' ? delivered : n(f.key)) : sentAll }))} onPick={setStatus} />
       <DataTable rows={data?.rows ?? []} columns={columns} initialSort={{ key: 'when', dir: 'desc' }} empty={<Text style={type.small}>{data ? 'Nothing sent in this window.' : 'Loading…'}</Text>} />
-    </AdminPage>
+    </Page>
   );
+}
+
+function Page({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  return embedded ? <>{children}</> : <AdminPage>{children}</AdminPage>;
 }

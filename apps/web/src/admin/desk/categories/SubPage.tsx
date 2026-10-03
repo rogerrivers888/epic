@@ -231,7 +231,7 @@ export function SubPage({ sub, canManage }: { sub: string; canManage: boolean })
                 <View style={{ width: dW[4], flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
                   {canManage && machine && d.value != null ? (
                     <Press effect="none" onPress={() => accept(d)}>
-                      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: LIME, borderBottomWidth: 1.5, borderBottomColor: LIME, paddingBottom: 1 }}>Accept</Text>
+                      <Text style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: '700', color: desk.link, borderBottomWidth: 1.5, borderBottomColor: LIME, paddingBottom: 1 }}>Accept</Text>
                     </Press>
                   ) : null}
                   {canManage ? (

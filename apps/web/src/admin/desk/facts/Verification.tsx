@@ -117,8 +117,8 @@ function Health({ period }: { period: Period }) {
         <PageTitle tipWidth={340} tip="Suggestions from searches are checked against our own sources automatically. This page shows it’s running and flowing. If something’s wrong, it goes red.">Verification</PageTitle>
         {st?.state === 'running' ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-            <Dot color={LIME} size={9} />
-            <Text style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: '800', color: LIME }}>{line}</Text>
+            <Dot color={desk.link} size={9} />
+            <Text style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: '800', color: desk.link }}>{line}</Text>
           </View>
         ) : st?.state === 'idle' ? (
           // Nothing waiting and nothing checked lately: quiet, not broken —
@@ -233,7 +233,7 @@ function Card({ label, big, sub, warn, series, unit, period, onBig }: {
         </View>
       </Press>
       <DeskLineChart
-        series={series} labels={labels} color={warn ? AMBER : LIME} lo={scale.lo} hi={scale.hi}
+        series={series} labels={labels} color={warn ? AMBER : desk.link} lo={scale.lo} hi={scale.hi}
         tip={(i) => `${series[i]} ${unit} · ${when(i)}`} height={96} axisWidth={24} gap={10}
       />
     </View>
@@ -257,7 +257,7 @@ function SourcesTable({ rows, onOpen }: { rows: Source[]; onOpen: (source: strin
   const phone = useViewport().width < 600;
   const cols = phone ? SRC_COLS_PHONE : SRC_COLS;
   const w = (key: string) => cols.find((x) => x.key === key)!.width;
-  const tone = (s: string) => (s === 'Healthy' ? LIME : s === 'Slow' ? AMBER : s === 'Failing' ? RED : desk.inkDim);
+  const tone = (s: string) => (s === 'Healthy' ? desk.link : s === 'Slow' ? AMBER : s === 'Failing' ? RED : desk.inkDim);
   return (
     <Table width={tableWidth(cols, 24)}>
       <THead cols={cols} gap={24} />
@@ -324,7 +324,7 @@ function Drill({ view, src, period }: { view: string; src: string; period: Drill
   });
   const d = load.data;
   const words = drillWords(view, src, period);
-  const tone = (o: string) => (o === 'Confirmed' ? LIME : o === 'Nothing found' ? desk.inkDim : o === 'Backlog' ? desk.inkMuted : o === 'Dropped at 30 days' ? AMBER : desk.ink);
+  const tone = (o: string) => (o === 'Confirmed' ? desk.link : o === 'Nothing found' ? desk.inkDim : o === 'Backlog' ? desk.inkMuted : o === 'Dropped at 30 days' ? AMBER : desk.ink);
   return (
     <>
       <View style={{ gap: 8, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingBottom: 18 }}>

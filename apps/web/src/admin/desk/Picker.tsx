@@ -40,7 +40,7 @@ export type Catalogue = {
 function Mark({ on }: { on: boolean }) {
   return (
     <View style={{ width: 14, alignItems: 'center' }}>
-      <Icon name={on ? 'check' : 'add'} size={13} color={on ? LIME : desk.ink} />
+      <Icon name={on ? 'check' : 'add'} size={13} color={on ? desk.link : desk.ink} />
     </View>
   );
 }
@@ -101,7 +101,7 @@ function TickGrid({ items, isOn, onToggle, narrow }: {
           <Press key={o.key} effect="none" onPress={() => onToggle(o.key)} style={{ width: narrow ? '50%' : '33%' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, paddingHorizontal: 14 }}>
               <Mark on={on} />
-              <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? LIME : desk.ink }}>{o.label}</Text>
+              <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 13, fontWeight: on ? '700' : '500', color: on ? desk.link : desk.ink }}>{o.label}</Text>
             </View>
           </Press>
         );
@@ -116,7 +116,7 @@ function ResultRow({ on, name, kind, onPress, nameWidth }: { on: boolean; name: 
     <Press effect="none" onPress={onPress}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9, paddingHorizontal: 14 }}>
         <Mark on={on} />
-        <Text style={{ width: nameWidth, fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: on ? LIME : desk.ink }}>{name}</Text>
+        <Text style={{ width: nameWidth, fontFamily: fonts.body, fontSize: 13.5, fontWeight: '600', color: on ? desk.link : desk.ink }}>{name}</Text>
         <Text style={{ fontFamily: fonts.body, fontSize: 12, color: desk.inkDim }}>{kind}</Text>
       </View>
     </Press>
@@ -272,7 +272,7 @@ export function WordPicker(p: WordPickerProps) {
                           <Press effect="none" style={{ flex: 1, minWidth: 0 }} onPress={isPrimary ? undefined : () => p.onToggleSub(key)}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                               <Mark on={on} />
-                              <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, lineHeight: LH(13.5), fontWeight: on ? '800' : '500', color: on ? LIME : desk.ink }}>{s.label}</Text>
+                              <Text style={{ flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 13.5, lineHeight: LH(13.5), fontWeight: on ? '800' : '500', color: on ? desk.link : desk.ink }}>{s.label}</Text>
                             </View>
                           </Press>
                           {isPrimary ? <PrimaryTag /> : null}
@@ -370,7 +370,7 @@ function ListFact({ label, options, value, open, onOpen, onPick, onAdd, narrow }
       <Press effect="none" onPress={onOpen} accessibilityLabel={`${label}: ${open ? 'close' : 'open'} its values`}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 20 }}>
           <Mark on={Boolean(value)} />
-          <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: value ? '700' : '500', color: value ? LIME : desk.ink }}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: value ? '700' : '500', color: value ? desk.link : desk.ink }}>
             {value ? `${label}: ${value}` : label}
           </Text>
           <Text style={{ fontFamily: fonts.body, fontSize: 11.5, color: desk.inkDim }}>{options.length} values</Text>

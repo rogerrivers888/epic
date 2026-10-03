@@ -150,7 +150,7 @@ function BeforeAfter({ c }: { c: Change }) {
       <Text style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: LH(12.5), color: desk.inkMuted }}>
         <Text style={{ color: desk.inkDim }}>{c.before ?? '—'}</Text>
         {' → '}
-        <Text style={{ fontWeight: '700', color: LIME }}>{c.after ?? '—'}</Text>
+        <Text style={{ fontWeight: '700', color: desk.link }}>{c.after ?? '—'}</Text>
       </Text>
       {c.why ? (
         <Text style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: LH(12), color: desk.inkDim, marginTop: 2 }}>{c.why}</Text>

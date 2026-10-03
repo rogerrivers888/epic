@@ -120,7 +120,7 @@ export function AllFacts() {
         <PageTitle tip="Every fact Epic looks for, once each. Active means our sources confirmed it at 2 or more places in a subcategory; Gathering evidence means confirmed at 1; Not found yet means no subcategory has it yet, though we still look for it; Ignored means it tells a family nothing.">All facts</PageTitle>
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 26, flexWrap: 'wrap' }}>
           <HeadCount label="Facts" n={n(counts?.facts)} />
-          <HeadCount label="Active" n={n(counts?.active)} tone={LIME} />
+          <HeadCount label="Active" n={n(counts?.active)} tone={desk.link} />
           <HeadCount label="Gathering evidence" n={n(counts?.gathering)} tone={desk.inkMuted} />
           <HeadCount label="Ignored" n={n(counts?.ignored)} tone={desk.inkDim} />
           <HeadCount label="Not found yet" n={n(counts?.unattached)} tone={desk.inkDim} />
@@ -406,7 +406,7 @@ export function PlacesDrill({ fact, sub, canManage, crumbs }: {
     <>
       <View style={{ gap: 6, borderBottomWidth: 2, borderBottomColor: desk.ruleStrong, paddingBottom: 18 }}>
         <Title>{d.label}</Title>
-        <Text style={[{ fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: LIME }, tabular]}>{found}</Text>
+        <Text style={[{ fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: desk.link }, tabular]}>{found}</Text>
         {where ? <Text style={{ fontFamily: fonts.body, fontSize: 12.5, color: desk.inkDim }}>{where}</Text> : null}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap', zIndex: 15 }}>

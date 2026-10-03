@@ -133,7 +133,7 @@ export function Runs({
                 }}>
                   <Text style={{
                     fontFamily: fonts.body, fontSize: 13, fontWeight: '700',
-                    color: t.cost === '£0.00' ? ON_LIME : LIME,
+                    color: t.cost === '£0.00' ? ON_LIME : desk.link,
                   }}>
                     {t.action}
                   </Text>
@@ -162,7 +162,7 @@ export function Runs({
               <View key={s.name} style={{ minWidth: 96, gap: 5 }}>
                 <Text style={{
                   fontFamily: fonts.heading, fontSize: 17, fontWeight: '800',
-                  color: s.done ? LIME : desk.inkDim, ...tabular,
+                  color: s.done ? desk.link : desk.inkDim, ...tabular,
                 }}>
                   {s.done && s.count != null ? s.count.toLocaleString() : '\u2014'}
                 </Text>
@@ -211,7 +211,7 @@ export function Runs({
                             fontSize: s.bad ? 19 : 14,
                             fontWeight: '800',
                             lineHeight: s.bad ? 21 : 16,
-                            color: s.bad ? WARN : s.key === 'waiting' ? LIME : desk.ink,
+                            color: s.bad ? WARN : s.key === 'waiting' ? desk.link : desk.ink,
                             ...tabular,
                           }}>
                             {/*
@@ -420,7 +420,7 @@ export function Runs({
                   <View style={{ width: 64, flexGrow: 0, flexShrink: 0, alignItems: 'flex-end' }}>
                     <Text style={{
                       fontFamily: fonts.heading, fontSize: 15, fontWeight: '800',
-                      color: s.tone === 'settled' ? desk.inkDim : LIME, ...tabular,
+                      color: s.tone === 'settled' ? desk.inkDim : desk.link, ...tabular,
                     }}>
                       {s.rate.toFixed(1)}
                     </Text>

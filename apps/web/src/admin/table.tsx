@@ -23,7 +23,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Press } from '../components/press';
 import { colors, spacing, type, BORDER } from '../theme';
 import { Icon } from '../components/Icon';
-import { Explain, type Tip, type TipKey } from './explain';
+import { Explain, cutCell, type Tip, type TipKey } from './explain';
 import { useViewport } from '../hooks/useViewport';
 
 /** The frame's width. Under it a board draws BO2l's stacked row, not columns. */
@@ -205,7 +205,7 @@ export function Ladder<T>({
           <Explain key={c.key} tip={c.cellTip?.(row) ?? c.tip}
                    style={[cellStyle(c), { alignItems: alignOf(c.align), justifyContent: 'center' }]}
                    cursor={onRow && !c.stops ? 'pointer' : 'help'}>
-            {c.cell(row, i)}
+            <View {...cutCell} style={{ maxWidth: '100%', minWidth: 0 }}>{c.cell(row, i)}</View>
           </Explain>
         );
         const on = highlight?.(row);

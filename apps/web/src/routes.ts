@@ -291,6 +291,15 @@ export type AdminScreen =
    * action waiting on a person rather than a number to read.
    */
   | 'approvals'
+  /**
+   * The back-office redesign (design handover, 3 Oct 2026). `actions` is the
+   * one place for decisions, top of the rail; until its own queue lands it
+   * opens the approvals, which become its Approvals area (`/admin/approvals`
+   * redirects to `?area=approvals`). `billing` holds the money values, and the
+   * plans screen is its Membership tab (`/admin/plans` redirects). `messages`
+   * is Messages and emails; Mail is its Sent tab (`/admin/mail` redirects).
+   */
+  | 'actions' | 'billing' | 'messages'
   | 'overview' | 'accounts' | 'households' | 'activity' | 'reporting'
   /**
    * The reporting suite (handoff "Reporting & overview", 20 Sep 2026): six
@@ -359,8 +368,18 @@ export const howAnchorOf = (raw: string | null | undefined): HowAnchor | null =>
   return HOW_ANCHOR_WAS[raw] ?? null;
 };
 
+/** Actions' area filter (design handover §3), as the address spells it. */
+export const ACTION_AREAS = ['all', 'appeals', 'safety', 'money', 'hosting_review', 'approvals', 'landing_pages', 'system'] as const;
+export type ActionArea = typeof ACTION_AREAS[number];
+/** Billing's tabs (§9). Only Membership is built; the others join as they are. */
+export const BILLING_TABS = ['membership', 'hosting', 'recovery'] as const;
+export type BillingTab = typeof BILLING_TABS[number];
+/** Messages and emails' tabs (§7). Sent is the old Mail screen (Roger, 3 Oct 2026). */
+export const MESSAGES_TABS = ['templates', 'sent'] as const;
+export type MessagesTab = typeof MESSAGES_TABS[number];
+
 export const ADMIN_SCREENS: AdminScreen[] = [
-  'approvals',
+  'approvals', 'actions', 'billing', 'messages',
   'overview', 'accounts', 'households', 'activity', 'reporting',
   'money', 'subscriptions', 'customers', 'waitlist', 'suppliers', 'behaviour', 'engagement',
   'places', 'demand', 'runs', 'queue', 'review',
@@ -1067,6 +1086,13 @@ export const paths = {
   settings: (section?: SettingsSection) => (section && section !== 'preferences' ? buildHref(['settings', section]) : '/settings'),
   prototypes: (section?: PrototypeSection | null) => buildHref(['prototypes', section]),
   admin: (screen: AdminScreen) => buildHref(['admin', screen]),
+  /** Actions, narrowed to one area; All is the default and is not written down. */
+  actions: (area?: ActionArea | null) => buildHref(['admin', 'actions'], area && area !== 'all' ? { area } : undefined),
+  /** Billing at one tab; Membership is the default and is not written down. */
+  billing: (tab?: BillingTab | null) => buildHref(['admin', 'billing'], tab && tab !== 'membership' ? { tab } : undefined),
+  /** Messages and emails at one tab; Templates is the default and is not written down. */
+  adminMessages: (tab?: MessagesTab | null, query?: Record<string, string | null | undefined>) =>
+    buildHref(['admin', 'messages'], { ...(query ?? {}), tab: tab && tab !== 'templates' ? tab : null }),
   /** How it works, at one section — or the top when none is named. */
   /**
    * How it works, at a section of Business mechanics, or on its second
@@ -1476,6 +1502,20 @@ export function legacyHref(path: string, query: URLSearchParams): string | null 
    * phones, in old notifications and shared links — lands on its `/plans…` twin,
    * query and all.
    */
+  /**
+   * Three back-office screens moved inside others (design handover, 3 Oct
+   * 2026; Roger's answers the same day): Approvals is an area of Actions, the
+   * plans screen is Billing › Membership, and Mail is Messages and emails ›
+   * Sent. Each old address lands on its new home, query and all.
+   */
+  const moved = path.match(/^\/admin\/(approvals|plans|mail)\/?$/);
+  if (moved) {
+    const q = new URLSearchParams(query);
+    if (moved[1] === 'approvals') { q.set('area', 'approvals'); return `/admin/actions?${q.toString()}`; }
+    if (moved[1] === 'mail') { q.set('tab', 'sent'); return `/admin/messages?${q.toString()}`; }
+    const rest = q.toString();
+    return `/admin/billing${rest ? `?${rest}` : ''}`;
+  }
   const trips = path.match(/^\/trips(\/.*)?$/);
   if (trips) { const q = query.toString(); return `/plans${trips[1] ?? ''}${q ? `?${q}` : ''}`; }
   if (path !== '/' && path !== '') return null;

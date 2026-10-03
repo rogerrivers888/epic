@@ -515,7 +515,7 @@ function PersonView({ cur, roles, isOwner, canManage, onChangeRole, onSendLink, 
                 {({ hovered }: any) => (
                   <>
                     <Text style={[styles.actionLabel, hovered && styles.actionLabelOn]}>{a.label}</Text>
-                    <Icon name="more" size={14} color={hovered ? LIME : desk.ink} strokeWidth={2.2} />
+                    <Icon name="more" size={14} color={hovered ? desk.link : desk.ink} strokeWidth={2.2} />
                   </>
                 )}
               </Press>
@@ -619,7 +619,7 @@ const styles = StyleSheet.create({
   cellName: { flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: desk.ink },
   cellMuted: { flex: 1, minWidth: 0, fontFamily: fonts.body, fontSize: 14, color: desk.inkMuted },
   stActive: { color: desk.ink },
-  stInvited: { color: LIME, fontWeight: '700' },
+  stInvited: { color: desk.link, fontWeight: '700' },
   stSuspended: { color: desk.inkDim },
   empty: { fontFamily: fonts.body, fontSize: 14, color: desk.inkDim, paddingVertical: 16 },
 
@@ -640,7 +640,7 @@ const styles = StyleSheet.create({
   fieldLabel: { fontFamily: fonts.body, fontSize: 12.5, fontWeight: '600', color: desk.inkDim },
   input: { height: 42, borderWidth: 1, borderColor: desk.ruleStrong, color: desk.ink, paddingHorizontal: 12, fontFamily: fonts.body, fontSize: 14, backgroundColor: 'transparent' },
   inputFocus: { borderColor: LIME },
-  fieldErr: { fontFamily: fonts.body, fontSize: 12.5, color: LIME },
+  fieldErr: { fontFamily: fonts.body, fontSize: 12.5, color: desk.link },
 
   roleBox: { flexDirection: 'row', gap: 12, paddingVertical: 11, paddingHorizontal: 12, borderWidth: 1 },
   roleBoxHover: { backgroundColor: desk.picked },
@@ -682,7 +682,7 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: desk.rule },
   actionRowOn: {},
   actionLabel: { fontFamily: fonts.body, fontSize: 14, fontWeight: '700', color: desk.ink },
-  actionLabelOn: { color: LIME },
+  actionLabelOn: { color: desk.link },
 
   toast: { backgroundColor: LIME, paddingVertical: 11, paddingHorizontal: 16, zIndex: 5 },
   toastText: { fontFamily: fonts.body, fontSize: 13.5, fontWeight: '700', color: ON_LIME },

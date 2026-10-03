@@ -188,7 +188,7 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
                 <View style={{ alignItems: 'center', gap: 2 }}>
                   <Text style={{ fontFamily: fonts.heading, fontSize: 10, fontWeight: '700', letterSpacing: 0.7, color: desk.inkDim }}>{r.head}</Text>
                   <Text style={[{
-                    fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: r.lit ? LIME : desk.ink,
+                    fontFamily: fonts.body, fontSize: 15, fontWeight: '800', color: r.lit ? desk.link : desk.ink,
                     borderBottomWidth: 1.5, borderBottomColor: r.lit ? LIME : desk.ruleStrong,
                   }, tabular]}>{month ? n(month[r.key]) : '—'}</Text>
                 </View>
@@ -223,7 +223,7 @@ export function Automations({ canManage = false }: { canManage?: boolean }) {
                   <View style={{ width: narrow ? undefined : 190, flexDirection: 'row', alignItems: 'baseline', gap: 8, display: narrow && i > 0 ? 'none' : 'flex' }}>
                     {i === 0 ? (
                       <>
-                        <Text style={{ fontFamily: fonts.heading, fontSize: 13, fontWeight: '800', color: LIME }}>{step.no}</Text>
+                        <Text style={{ fontFamily: fonts.heading, fontSize: 13, fontWeight: '800', color: desk.link }}>{step.no}</Text>
                         <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 13, fontWeight: '800', lineHeight: 17, color: desk.ink }}>{step.name}</Text>
                       </>
                     ) : null}
@@ -310,10 +310,10 @@ function NumberBox({ value, percent, min, max, step, editable, onCommit }: {
         accessibilityLabel="Setting"
         style={[{
           width: String(text).length > 2 ? 36 : 26, padding: 0, textAlign: percent ? 'right' : 'center',
-          fontFamily: fonts.heading, fontSize: 14, fontWeight: '800', color: LIME,
+          fontFamily: fonts.heading, fontSize: 14, fontWeight: '800', color: desk.link,
         }, tabular, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
       />
-      {percent ? <Text style={[{ fontFamily: fonts.heading, fontSize: 14, fontWeight: '800', color: LIME }, tabular]}>%</Text> : null}
+      {percent ? <Text style={[{ fontFamily: fonts.heading, fontSize: 14, fontWeight: '800', color: desk.link }, tabular]}>%</Text> : null}
     </View>
   );
 }
@@ -326,7 +326,7 @@ function Switch({ on, disabled, onFlip }: { on: boolean; disabled?: boolean; onF
         <View style={{ width: 40, height: 22, backgroundColor: on ? LIME : desk.ruleStrong }}>
           <View style={{ position: 'absolute', top: 2, left: on ? 20 : 2, width: 18, height: 18, backgroundColor: on ? ON_LIME : desk.inkDim }} />
         </View>
-        <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: on ? LIME : desk.inkDim }}>{on ? 'On' : 'Off'}</Text>
+        <Text style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: on ? desk.link : desk.inkDim }}>{on ? 'On' : 'Off'}</Text>
       </View>
     </Press>
   );
