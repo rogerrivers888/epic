@@ -277,7 +277,8 @@ export async function changeDate({ offerId, hostId, sessionId, toDate, toTime = 
  * refund").
  */
 export function movedSinceBooking(booking, sessions) {
-  const at = new Date(booking.created_at).getTime();
+  // Since they booked — or since they last said Keep my place, which accepts the move (Codex, 2 Oct 2026).
+  const at = Math.max(new Date(booking.created_at).getTime(), booking.change_seen_at ? new Date(booking.change_seen_at).getTime() : 0);
   return sessions.some((x) => x.changed_from?.at && new Date(x.changed_from.at).getTime() > at);
 }
 

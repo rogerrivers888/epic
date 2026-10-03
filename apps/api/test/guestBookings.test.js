@@ -250,6 +250,10 @@ test('cancelling: the policy agreed at booking, a full refund after a date chang
     await query(`update offer_sessions set changed_from = $2::jsonb where offer_id = $1`, [flex.o.id, JSON.stringify({ onDate: '2026-01-01', at: new Date().toISOString() })]);
     const moved = await srv.get(`/api/booked/${id}/cancel-quote`);
     assert.deepEqual([moved.body.pence, moved.body.cause], [4000, 'date_changed']);
+    // Keep my place accepts the move: the policy applies again (Codex, 2 Oct 2026).
+    await srv.send('POST', `/api/booked/${id}/keep`, {});
+    assert.equal((await srv.get(`/api/booked/${id}/cancel-quote`)).body.pence, 0);
+    await query(`update experience_bookings set change_seen_at = null where id = $1`, [id]);
     const c = await srv.send('POST', `/api/booked/${id}/cancel`, {});
     assert.equal(c.body.refundPence, 4000);
     assert.equal((await query(`select cause from hosting_payments where booking_id = $1 and kind = 'refund'`, [id])).rows[0].cause, 'date_changed');
