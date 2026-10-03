@@ -524,14 +524,16 @@ router.get('/host/desk/events/:id', async (req, res, next) => {
     let money = null;
     if (view.money) {
       const { rows: [m] } = await query(
+        // "You get" booking by booking, each at its own rate (Codex, 2 Oct 2026).
         `select coalesce(sum(b.value_pence), 0)::int as booked, coalesce(sum(b.fee_pence), 0)::int as fee,
-                coalesce(sum(b.refunded_pence), 0)::int as refunds, coalesce(sum(b.host_pence), 0)::int as host
+                coalesce(sum(b.refunded_pence), 0)::int as refunds, coalesce(sum(b.host_pence), 0)::int as host,
+                coalesce(sum(floor(b.host_pence::numeric * greatest(0, b.charged_pence - b.refunded_pence) / nullif(b.charged_pence, 0))), 0)::int as you_get
            from experience_bookings b where b.offer_id = $1 and b.payment_state in ('charged', 'partially_refunded', 'refunded')`, [o.id],
       );
       const { rows: payouts } = await query(`select amount_pence, tips_pence, release_at, state from host_payouts where offer_id = $1 order by release_at`, [o.id]);
       money = o.visibility !== 'public'
         ? { private: true, eventFee: o.private_fee_state, ...m }
-        : { ...m, youGetPence: Math.max(0, m.host - Math.floor(m.refunds * (m.host / Math.max(1, m.booked)))), payouts: payouts.map((p) => ({ pence: p.amount_pence + p.tips_pence, on: ymd(p.release_at), state: p.state })) };
+        : { ...m, youGetPence: m.you_get, payouts: payouts.map((p) => ({ pence: p.amount_pence + p.tips_pence, on: ymd(p.release_at), state: p.state })) };
     }
     const first = o.sessionsList.find((x) => x.state === 'scheduled') ?? o.sessionsList[0];
     res.json({
@@ -754,7 +756,8 @@ router.get('/host/desk/statements/:period.csv', async (req, res, next) => {
     for (const t of tips) lines.push([ymd(t.created_at), t.title, 'tip', pounds(t.amount_pence), '0.00', pounds(t.amount_pence), ''].map(csvCell).join(','));
     const charged = rows.filter((r) => r.kind === 'charge').reduce((n, r) => n + r.amount_pence, 0);
     const refunded = rows.filter((r) => r.kind === 'refund').reduce((n, r) => n + r.amount_pence, 0);
-    const fees = rows.filter((r) => r.kind === 'charge').reduce((n, r) => n + (r.epic_pence ?? 0), 0);
+    // Epic's fees net of what went back with refunds, as the back office's DAC7 counts them (Codex, 2 Oct 2026).
+    const fees = rows.reduce((n, r) => n + (r.kind === 'charge' ? (r.epic_pence ?? 0) : r.kind === 'refund' ? -(r.epic_pence ?? 0) : 0), 0);
     const paid = rows.filter((r) => r.kind === 'payout').reduce((n, r) => n + r.amount_pence, 0);
     const tipSum = tips.reduce((n, t) => n + t.amount_pence, 0);
     lines.push('');

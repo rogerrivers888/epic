@@ -431,6 +431,8 @@ export async function applyPaymentIntent(pi) {
     await query(`update hosting_payments set state = 'failed', updated_at = now() where stripe_ref = $1`, [pi.id]).catch(() => null);
     // An invitation answered with a card that then failed is open again, so they can answer once more (Codex, 2 Oct 2026).
     await query(`update offer_invites set rsvp = null, rsvp_heads = null, booking_id = null where booking_id = $1`, [b.id]);
+    // …and so is a waiting-list place it took, while the offer lasts.
+    await query(`update offer_waitlist set state = 'offered' where offer_id = $1 and household_id = $2 and state = 'taken' and offer_expires_at > now()`, [b.offer_id, b.household_id]);
   }
   return b.id;
 }
@@ -550,7 +552,7 @@ export async function offerFreedPlaces({ now = new Date() } = {}) {
     );
     if (!rowCount) continue;
     offered += 1;
-    await notifications.notify({ householdId: first.household_id, kind: 'waitlist_offered', title: `Your place is ready: ${e.offer.title ?? 'an event'}`, body: `Book within ${hours} hours`, link: `/experiences/${e.offer.id}`, dedupeKey: `waitlist_offered:${first.id}` }).catch(() => null);
+    await notifications.notify({ householdId: first.household_id, kind: 'waitlist_offered', title: `Your place is ready: ${e.offer.title ?? 'an event'}`, body: `Book within ${hours} hours`, link: `/experiences/${e.offer.id}${e.offer.visibility !== 'public' && e.offer.link_token ? `?l=${e.offer.link_token}` : ''}`, dedupeKey: `waitlist_offered:${first.id}` }).catch(() => null);
   }
   return offered;
 }
@@ -726,11 +728,12 @@ router.post('/booked/:id/cancel', async (req, res, next) => {
         await c.query(`update experience_bookings set request_state = 'declined', state = 'cancelled', cancelled_by = 'guest', cancel_cause = 'guest_cancelled' where id = $1`, [b.id]);
       } else {
         if (q.pence == null) throw refuse(409, 'needs_a_person', q.words);
-        if (q.pence > 0) await owe(c, b, { amountPence: q.pence, cause: q.cause, key: `guest_cancel:${b.id}:${[...q.losing].sort().join(',')}`, wholeBooking: whole });
         // Money the policy keeps is still the host's: those sessions are forfeited, not cancelled, so their
-        // payout counts it; the place itself is free again either way (Codex, 2 Oct 2026).
+        // payout counts it; the place itself is free again either way (Codex, 2 Oct 2026). What was due is
+        // read before the refund is written, so a part refund still leaves the rest forfeited.
         const { rows: [{ n: allN }] } = await c.query('select count(*)::int as n from booking_sessions where booking_id = $1', [b.id]);
         const due = whole ? Math.max(0, Number(b.charged_pence ?? 0) - Number(b.refunded_pence ?? 0)) : Math.floor((Number(b.charged_pence ?? 0) * q.losing.length) / Math.max(1, allN));
+        if (q.pence > 0) await owe(c, b, { amountPence: q.pence, cause: q.cause, key: `guest_cancel:${b.id}:${[...q.losing].sort().join(',')}`, wholeBooking: whole });
         const kept = ['charged', 'partially_refunded'].includes(b.payment_state) && q.pence < due;
         await c.query(`update booking_sessions set state = $3 where booking_id = $1 and session_id = any($2::uuid[])`, [b.id, q.losing, kept ? 'forfeited' : 'cancelled']);
         if (whole) await c.query(`update experience_bookings set state = 'cancelled', cancelled_by = 'guest', cancel_cause = $2 where id = $1`, [b.id, q.cause]);
