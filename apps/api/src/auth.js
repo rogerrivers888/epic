@@ -291,7 +291,7 @@ const PUBLIC = [
    * for the same reason the page is.
    */
   (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+$/.test(req.path) && !/^\/api\/experiences\/(near|passions)$/.test(req.path),
-  (req) => req.method === 'GET' && /^\/api\/hosts\/[^/]+$/.test(req.path),
+  (req) => req.method === 'GET' && /^\/api\/hosts\/[^/]+(\/reviews)?$/.test(req.path),
   // The FAQ on a listing: the host's answers to what people asked, before anyone books (Chat screens, C7).
   (req) => req.method === 'GET' && /^\/api\/experiences\/[^/]+\/faq$/.test(req.path),
   // Hosting v4: what booking an event asks, so a public event page can show its button logged-out.
@@ -355,6 +355,19 @@ export async function liveSessionFor(req) {
  * the public. Pure HMAC, no database. (The owned image library carries no
  * signature on its approved rows and is handled by the gate as its own open path.)
  */
+/**
+ * Whose household is asking, on a public path: `requireSession` lets those through without resolving the session,
+ * so `currentAccount()` is empty there. A page that a held booking unlocks (a private event, booked before) asks
+ * this (Codex, 3 Oct 2026). Null signed out, suspended, or on a lookup error — the public view is the safe one.
+ */
+export async function householdOnPublicPath(req) {
+  try {
+    const session = req.siteGateSession ?? await liveSessionFor(req);
+    const account = session?.account_id ? await accountById(session.account_id) : null;
+    return account && account.status !== 'suspended' ? account.household_id : null;
+  } catch { return null; }
+}
+
 export function signedMediaOk(req) {
   return req.method === 'GET' && req.path === '/api/photos/google' && photoLinkValid(req.query);
 }

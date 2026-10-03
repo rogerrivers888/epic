@@ -3026,6 +3026,7 @@ export const api = {
   experiencesNear: (q: { lat: number; lng: number; km?: number; love?: string | null }) => request<ExperiencesNear>(`/api/experiences/near${qs(q)}`),
   bookExperience: (id: string, body: BookingInput) => post<{ booking: Booking; payments: PaymentsConfig }>(`/api/experiences/${id}/book`, body),
   hostProfile: (id: string) => request<HostProfile>(`/api/hosts/${id}`),
+  hostReviews: (id: string, offset: number) => request<{ reviews: HostProfile['reviews'] }>(`/api/hosts/${encodeURIComponent(id)}/reviews?offset=${offset}`),
 
   // --- host skills: the open vocabulary both ends of the app share ----------
   /** The tag step's whole answer: the prompt for this host's kind, the lists, the cap. */

@@ -35,6 +35,7 @@ import * as notifications from '../repositories/notifications.js';
 import * as stripe from '../sources/stripe.js';
 import { logChange } from '../repositories/hostingSettings.js';
 import { currentAccount } from '../context.js';
+import { householdOnPublicPath } from '../auth.js';
 import { currentHousehold } from './household.js';
 import { owe, shareOf, movedSinceBooking } from '../sources/bookingMoney.js';
 import { feeFor, priceBooking, tipFee, numbersSettlement } from '../domain/money.js';
@@ -177,7 +178,7 @@ publicRouter.get('/experiences/:id/booking/options', async (req, res, next) => {
     // A private event opens only with its link or an invitation, as its page does (Codex, 2 Oct 2026).
     if (e.offer.visibility !== 'public') {
       const invite = typeof req.query.i === 'string' ? await repo.inviteByToken(req.query.i.slice(0, 64)) : null;
-      if (!opensPrivately(e.offer, { linkToken: typeof req.query.l === 'string' ? req.query.l.slice(0, 64) : null, invite, hasBooking: await repo.holdsBooking(e.offer.id, currentAccount()?.household_id) })) throw refuse(404, 'not_found', 'This one is invitation only.');
+      if (!opensPrivately(e.offer, { linkToken: typeof req.query.l === 'string' ? req.query.l.slice(0, 64) : null, invite, hasBooking: await repo.holdsBooking(e.offer.id, await householdOnPublicPath(req)) })) throw refuse(404, 'not_found', 'This one is invitation only.');
     }
     const { offer: o, sessions, host } = e;
     const now = new Date();

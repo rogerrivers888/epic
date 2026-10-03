@@ -48,11 +48,12 @@ const ageOf = (w: Who, onDay: string | null): number | null => {
 };
 
 function fromMember(m: Member, me: string | null): Who {
-  const adult = !m.isMinor;
-  return {
-    key: m.id, name: m.name, adult, age: m.age ?? null, dob: m.birthDate ?? null, memberId: m.id,
-    line: m.id === me ? 'You' : adult ? 'Adult' : m.age != null ? `Age ${m.age} · from your household` : 'Child · from your household',
-  };
+  // Grown up is 18, from the age or birthday the household gave: isMinor means under 13, so a 15-year-old is not
+  // an adult here (Codex, 3 Oct 2026). With neither, the household's own word stands.
+  const w: Who = { key: m.id, name: m.name, adult: true, age: m.age ?? null, dob: m.birthDate ?? null, memberId: m.id, line: '' };
+  const age = ageOf(w, null);
+  const adult = age != null ? age >= 18 : !m.isMinor;
+  return { ...w, adult, line: m.id === me ? 'You' : adult ? 'Adult' : age != null ? `Age ${age} · from your household` : 'Child · from your household' };
 }
 
 export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: string; webPage: boolean; linkToken?: string | null; inviteToken?: string | null; initial?: Experience | null }) {
@@ -86,7 +87,9 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   const [plusOne, setPlusOne] = useState(false);
   const [stay, setStay] = useState<string | null>(null);
   const [method, setMethod] = useState<'wallet' | 'card'>('card');
-  const [sheet, setSheet] = useState<null | { kind: 'add' } | { kind: 'contact'; key: string } | { kind: 'declined' | 'failed'; message: string } | { kind: 'bank' }>(null);
+  // A household child with no age on record: the birthday is asked here, for this booking (Codex, 3 Oct 2026).
+  const [dobs, setDobs] = useState<Record<string, string>>({});
+  const [sheet, setSheet] = useState<null | { kind: 'add' } | { kind: 'contact'; key: string } | { kind: 'dob'; key: string } | { kind: 'declined' | 'failed'; message: string } | { kind: 'bank' }>(null);
   const [busy, setBusy] = useState(false);
   // An unpaid booking already made: paying again confirms the same one, never books twice (G26).
   const [pending, setPending] = useState<{ bookingId: string; clientSecret: string } | null>(null);
@@ -108,9 +111,9 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
   const people: Who[] = useMemo(() => {
     // You first, then the other grown-ups, then the children — as the household reads.
     const rank = (w: Who) => (w.line === 'You' ? 0 : w.adult ? 1 : 2);
-    const base: Who[] = hh?.members?.length ? hh.members.map((m) => fromMember(m, hh.me)).sort((x, y) => rank(x) - rank(y)) : [{ key: 'you', name: 'You', adult: true, age: null, dob: null, memberId: null, line: 'You' }];
+    const base: Who[] = hh?.members?.length ? hh.members.map((m) => fromMember(dobs[m.id] ? { ...m, birthDate: dobs[m.id] } : m, hh.me)).sort((x, y) => rank(x) - rank(y)) : [{ key: 'you', name: 'You', adult: true, age: null, dob: null, memberId: null, line: 'You' }];
     return [...base, ...extra];
-  }, [hh, extra]);
+  }, [hh, extra, dobs]);
   // You start ticked, once who can go is known — after the household has loaded, when there is one —
   // unless this is a drop off (children only) or for children alone.
   const started = useRef(false);
@@ -258,6 +261,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
     if (!ok || busy) return;
     if (!signedIn()) { toast.show('Make your free account first'); return; }
     if (!contactsOk) { toast.show('Add an emergency contact for each child'); return; }
+    if (chosen.some((p) => !p.adult && ageOf(p, onDay) == null)) { toast.show('Add each child’s birthday'); return; }
     if (!adultOk) { toast.show('Tick to say you’re 18 or over'); return; }
     setBusy(true);
     try {
@@ -319,7 +323,10 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
       const phone = contacts[pp.key];
       return {
         key: pp.key, name: pp.name, line: w ?? pp.line, on, disabled: Boolean(w), onPress: () => flip(pp),
-        extra: on && who.dropOff && !pp.adult ? [{ label: phone ? `Emergency contact · ${phone}` : 'Add an emergency contact', color: phone ? undefined : MOSS, onPress: () => setSheet({ kind: 'contact', key: pp.key }) }] : null,
+        extra: !on || pp.adult ? null : [
+          ...(ageOf(pp, onDay) == null ? [{ label: 'Add their birthday', color: MOSS, onPress: () => setSheet({ kind: 'dob', key: pp.key }) }] : []),
+          ...(who.dropOff ? [{ label: phone ? `Emergency contact · ${phone}` : 'Add an emergency contact', color: phone ? undefined : MOSS, onPress: () => setSheet({ kind: 'contact', key: pp.key }) }] : []),
+        ],
       };
     })} />,
     <Rows key="add" items={[{ title: '+ Add someone', sub: 'Someone outside your household', weight: '700', onPress: () => setSheet({ kind: 'add' }) }]} />,
@@ -360,6 +367,7 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
 
   // ---- sheets
   const sheets = sheet?.kind === 'add' ? <AddSomeone onClose={() => setSheet(null)} onAdd={(w) => { setExtra((x) => [...x, w]); setTicked((t) => new Set([...t, w.key])); setSheet(null); }} />
+    : sheet?.kind === 'dob' ? <BirthdaySheet onClose={() => setSheet(null)} onSave={(v) => { setDobs((d) => ({ ...d, [sheet.key]: v })); setSheet(null); }} />
     : sheet?.kind === 'contact' ? <ContactSheet initial={contacts[sheet.key] ?? (hh?.members.find((m) => m.id === hh.me)?.mobile ?? '')} onClose={() => setSheet(null)} onSave={(v) => { setContacts((c) => ({ ...c, [sheet.key]: v })); setSheet(null); }} />
       : sheet?.kind === 'bank' ? (
         <GuestSheet title="Confirm with your bank" onClose={() => setSheet(null)}>
@@ -393,6 +401,16 @@ export function Book({ id, webPage, linkToken, inviteToken, initial }: { id: str
 }
 
 /** + Add someone: a name, Adult or Child, and for a child their age or date of birth — their choice. */
+function BirthdaySheet({ onClose, onSave }: { onClose: () => void; onSave: (dob: string) => void }) {
+  const [dob, setDob] = useState('');
+  return (
+    <GuestSheet title="Their birthday" onClose={onClose}>
+      <BirthdayPicker value={dob || null} onChange={(v) => setDob(v ?? '')} label="Date of birth" maxAge={17} clearable={false} />
+      <Buttons items={[{ label: 'Save', tone: 'ink', onPress: () => { if (/^\d{4}-\d{2}-\d{2}$/.test(dob)) onSave(dob); } }]} />
+    </GuestSheet>
+  );
+}
+
 function AddSomeone({ onClose, onAdd }: { onClose: () => void; onAdd: (w: Who) => void }) {
   const [name, setName] = useState('');
   const [child, setChild] = useState(false);

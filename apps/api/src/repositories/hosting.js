@@ -572,7 +572,7 @@ export async function insertReview(r) {
 }
 
 /** Published guest reviews of a host, newest first, and the figures a profile shows. */
-export async function publishedReviews(hostId) {
+export async function publishedReviews(hostId, { offset = 0 } = {}) {
   // The reviewer by first name only, and the host's reply (guest handoff G25: "reviews with the host's replies").
   const { rows } = await query(
     `select r.stars, r.chips, r.text, r.publish_on, r.reply, o.title,
@@ -581,8 +581,8 @@ export async function publishedReviews(hostId) {
        left join households hh on hh.id = r.household_id
        left join lateral (select name from accounts where household_id = r.household_id order by created_at limit 1) a on true
       where r.host_id = $1 and r.side = 'guest' and r.publish_on <= current_date and not r.hidden
-      order by r.publish_on desc limit 50`,
-    [hostId],
+      order by r.publish_on desc, r.id desc limit 50 offset $2`,
+    [hostId, offset],
   );
   return rows;
 }

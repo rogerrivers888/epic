@@ -86,7 +86,7 @@ async function server(account) {
   const out = (r) => r.json().catch(() => null).then((body) => ({ status: r.status, body }));
   return {
     close: () => new Promise((r) => s.close(r)),
-    get: (p) => fetch(base + p).then(out),
+    get: (p, headers = {}) => fetch(base + p, { headers }).then(out),
     send: (method, p, body) => fetch(base + p, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) }).then(out),
   };
 }
@@ -666,7 +666,35 @@ test('Codex: a lane booking is booked — the host’s notice reaches its inbox,
   try {
     const inbox = await srv.get('/api/messages');
     assert.equal(inbox.body.threads.find((x) => x.offerId === o.id)?.last, 'Bring wellies');
-    const opt = await srv.get(`/api/experiences/${o.id}/booking/options`);
+    // A public path: the household is known from the token itself, as in production.
+    const { openSession } = await import('../src/auth.js');
+    const { token } = await openSession('phone', a.account.id, 'device', 'link');
+    const opt = await srv.get(`/api/experiences/${o.id}/booking/options`, { authorization: `Bearer ${token}` });
     assert.equal(opt.status, 200, JSON.stringify(opt.body));
+    assert.equal((await srv.get(`/api/experiences/${o.id}/booking/options`)).status, 404, 'and still shut to the public');
   } finally { await srv.close(); }
+});
+
+test('Codex: a public page knows a signed-in household by its token, and nobody without one', async () => {
+  const { openSession, householdOnPublicPath } = await import('../src/auth.js');
+  const a = await aPerson();
+  const { token } = await openSession('phone', a.account.id, 'device', 'link');
+  const req = (h) => ({ method: 'GET', path: '/api/experiences/x/booking/options', headers: h });
+  assert.equal(await householdOnPublicPath(req({ authorization: `Bearer ${token}` })), a.household.id);
+  assert.equal(await householdOnPublicPath(req({})), null);
+  assert.equal(await householdOnPublicPath(req({ authorization: 'Bearer not-a-token' })), null);
+});
+
+test('Codex: a host’s reviews past the first fifty come fifty at a time', async () => {
+  const repo = await import('../src/repositories/hosting.js');
+  const { o, h } = await anEvent();
+  for (let i = 0; i < 52; i += 1) {
+    const p = await aPerson(`Guest ${i}`);
+    const { rows: [b] } = await query(`insert into experience_bookings (offer_id, host_id, household_id, state) values ($1, $2, $3, 'attended') returning id`, [o.id, h.id, p.household.id]);
+    await query(`insert into host_reviews (booking_id, offer_id, host_id, household_id, stars, text, publish_on) values ($1, $2, $3, $4, 5, $5, current_date - 1)`, [b.id, o.id, h.id, p.household.id, `Review ${i}`]);
+  }
+  const first = await repo.publishedReviews(h.id);
+  const rest = await repo.publishedReviews(h.id, { offset: first.length });
+  assert.deepEqual([first.length, rest.length], [50, 2]);
+  assert.equal(new Set([...first, ...rest].map((r) => r.text)).size, 52, 'none twice, none missed');
 });

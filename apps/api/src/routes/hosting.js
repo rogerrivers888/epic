@@ -33,6 +33,7 @@ import { query, withTransaction } from '../db.js';
 import { runOutsideRequest } from '../context.js';
 import { currentHousehold, loadMembers } from './household.js';
 import { currentAccount } from '../context.js';
+import { householdOnPublicPath } from '../auth.js';
 import { requires } from '../access.js';
 import { mailConfigured, sendMail } from '../sources/mail.js';
 import { sendSms, smsConfigured } from '../sources/sms.js';
@@ -1441,6 +1442,8 @@ async function tellBooked(bookings, text) {
 // the guest's side
 // ---------------------------------------------------------------------------
 
+const publicReview = (r) => ({ stars: r.stars, chips: r.chips ?? [], text: r.text, on: ymd(r.publish_on), title: r.title, who: r.who || null, reply: r.reply ?? null });
+
 /** A public host with its rating and its offer menu. */
 async function hostPage(h) {
   const [rating, offers, reviews, reviewTotal, replyMin] = await Promise.all([repo.ratingOf(h.id), repo.offersOfHost(h.id), repo.publishedReviews(h.id), repo.publishedReviewCount(h.id), repo.replyMinutesOf(h.id)]);
@@ -1456,7 +1459,7 @@ async function hostPage(h) {
      */
     tags: (await skills.tagsForHost(h.id)).map((t) => ({ key: t.key, label: t.label, offers: t.offers })),
     offers: shown.map((o) => publicOffer(o, bookings.filter((b) => b.offer_id === o.id))),
-    reviews: reviews.map((r) => ({ stars: r.stars, chips: r.chips ?? [], text: r.text, on: ymd(r.publish_on), title: r.title, who: r.who || null, reply: r.reply ?? null })),
+    reviews: reviews.map(publicReview),
     reviewTotal,
   };
 }
@@ -1476,6 +1479,16 @@ publicRouter.get('/hosts/:id', async (req, res, next) => {
     const h = await repo.hostById(req.params.id);
     if (!h) return res.status(404).json({ error: 'not_found', message: 'There is no host at that address.' });
     res.json(await hostPage(h));
+  } catch (err) { next(err); }
+});
+
+/** GET /api/hosts/:id/reviews?offset= — the next fifty, for "All 73" past the first fifty (Codex, 3 Oct 2026). Public. */
+publicRouter.get('/hosts/:id/reviews', async (req, res, next) => {
+  try {
+    const h = await repo.hostById(req.params.id);
+    if (!h) return res.status(404).json({ error: 'not_found', message: 'There is no host at that address.' });
+    const offset = Math.max(0, Math.min(10_000, Math.floor(Number(req.query.offset) || 0)));
+    res.json({ reviews: (await repo.publishedReviews(h.id, { offset })).map(publicReview) });
   } catch (err) { next(err); }
 });
 
@@ -1505,7 +1518,7 @@ publicRouter.get('/experiences/:id', async (req, res, next) => {
     // token, or the host's own invitation link, which they pass round themselves.
     if (o.visibility === 'invite') {
       const invite = req.query.i ? await repo.inviteByToken(String(req.query.i)) : null;
-      if (!opensPrivately(o, { linkToken: str(req.query.l, 64), invite, hasBooking: await repo.holdsBooking(o.id, currentAccount()?.household_id) })) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
+      if (!opensPrivately(o, { linkToken: str(req.query.l, 64), invite, hasBooking: await repo.holdsBooking(o.id, await householdOnPublicPath(req)) })) return res.status(404).json({ error: 'not_found', message: 'This one is invitation only.' });
     }
     const h = await repo.hostById(o.host_id);
     await attachSkills([o]);

@@ -35,6 +35,11 @@ export function HostPage({ id, webPage }: { id: string; webPage: boolean }) {
   const first = firstName(h.name);
   const total = d.reviewTotal ?? h.reviewCount ?? d.reviews.length;
   const shown = all ? d.reviews : d.reviews.slice(0, 3);
+  // The profile carries fifty; the rest come fifty at a time (Codex, 3 Oct 2026).
+  const more = async () => {
+    const r = await api.hostReviews(id, d.reviews.length).catch(() => null);
+    if (r?.reviews.length) setD({ ...d, reviews: [...d.reviews, ...r.reviews] });
+  };
   const head = d.offers.find((o) => o.photos.length)?.photos[0] ?? h.photo;
 
   const report = async () => {
@@ -70,6 +75,7 @@ export function HostPage({ id, webPage }: { id: string; webPage: boolean }) {
         sub: [r.who, `${r.stars} out of 5`, r.reply ? `${first} replied: “${r.reply}”` : r.title].filter(Boolean).join(' · '),
       }))} />,
     );
+    if (all && d.reviews.length < total) blocks.push(<Rows key="rv-more" items={[{ title: 'More reviews', weight: '700', onPress: () => { void more(); } }]} />);
   }
   blocks.push(<Rows key="report" items={[{ title: 'Report this host', weight: '700', onPress: () => setReporting(true) }]} />);
 
