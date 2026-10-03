@@ -70,8 +70,7 @@ export async function placeOf(typed, { fetchImpl = fetch } = {}) {
   const raw = String(typed ?? '').trim();
   if (!raw) return null;
   const key = keyOf(raw);
-  const alias = COUNTY_ALIASES.get(key);
-  const county = alias !== undefined ? alias : COUNTY_BY_KEY.get(key) ?? COUNTY_BY_KEY.get(key.replace(/^county /, '')) ?? null;
+  const county = countyOf(raw);
   if (county) return { name: county, county, region: null, country: null, lat: null, lng: null, source: 'county' };
   try {
     const upper = raw.toUpperCase().replace(/\s+/g, '');
@@ -92,7 +91,7 @@ export async function placeOf(typed, { fetchImpl = fetch } = {}) {
       .sort((a, b) => rank(a.local_type) - rank(b.local_type));
     const p = exact[0];
     if (!p) return null;
-    return { id: p.code ?? null, name: p.name_1, county: p.county_unitary ?? null, region: p.region ?? null, country: p.country ?? null, lat: p.latitude ?? null, lng: p.longitude ?? null, source: 'os-open-names' };
+    return { name: p.name_1, county: p.county_unitary ?? null, region: p.region ?? null, country: p.country ?? null, lat: p.latitude ?? null, lng: p.longitude ?? null, source: 'os-open-names' };
   } catch (err) {
     console.error(`epic-api: guide alert — place not looked up: ${err.message}`);
     return null;
@@ -102,18 +101,28 @@ export async function placeOf(typed, { fetchImpl = fetch } = {}) {
 const rank = (t) => { const i = KIND_RANK.indexOf(t); return i < 0 ? KIND_RANK.length : i; };
 
 /**
- * One spelling for one place, so an ask is one ask however it was typed: a
- * postcode is `pc:RG1 1AA` whether or not it had a space (and whether or not
- * the lookup answered), an outward code `oc:RG1`, a county `county:Dorset`, an
- * Open Names place its OS id; only what could not be told falls back to the
- * words, lowercased with the spaces closed up.
+ * One spelling for one place, so an ask is one ask however it was typed — and
+ * the same key whether or not the lookup answered, so a lookup that failed once
+ * and worked the next time enriches the first ask rather than adding a second
+ * (Codex, 3 Oct 2026). Read from the words alone: a postcode is `pc:RG1 1AA`
+ * with or without its space, an outward code `oc:RG1`, a county (the fixed list)
+ * `county:Dorset`, and anything else `name:` and the words lowercased, with
+ * stops, commas and doubled spaces taken out ("St. Ives" is "st ives").
  */
-export function placeKeyOf(typed, place) {
+export function placeKeyOf(typed) {
   const compact = String(typed ?? '').toUpperCase().replace(/\s+/g, '');
   const full = FULL_POSTCODE.exec(compact);
   if (full) return `pc:${full[1]} ${full[2]}`;
   if (OUTCODE.test(compact)) return `oc:${compact}`;
-  if (place?.source === 'county') return `county:${place.county}`;
-  if (place?.source === 'os-open-names' && place.id) return `os:${place.id}`;
-  return `typed:${keyOf(typed)}`;
+  const county = countyOf(typed);
+  if (county) return `county:${county}`;
+  return `name:${keyOf(typed)}`;
+}
+
+/** The county the words name, from the fixed list and its aliases, or null. */
+function countyOf(typed) {
+  const key = keyOf(typed);
+  const alias = COUNTY_ALIASES.get(key);
+  if (alias !== undefined) return alias;
+  return COUNTY_BY_KEY.get(key) ?? COUNTY_BY_KEY.get(key.replace(/^county /, '')) ?? null;
 }

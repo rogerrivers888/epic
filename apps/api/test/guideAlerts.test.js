@@ -121,10 +121,21 @@ test('one postcode however it is written is one ask', async () => {
   const rows = await rowsFor('postcode@example.com');
   assert.equal(rows.length, 1);
   assert.equal(rows[0].place_key, 'pc:RG1 1AA');
-  assert.equal(placeKeyOf('rg1', null), 'oc:RG1');
-  assert.equal(placeKeyOf('Dorset', { source: 'county', county: 'Dorset' }), 'county:Dorset');
-  assert.equal(placeKeyOf('Bath', { source: 'os-open-names', id: 'osgb400' }), 'os:osgb400');
-  assert.equal(placeKeyOf('  Lyme   Regis ', null), 'typed:lyme regis');
+  assert.equal(placeKeyOf('rg1'), 'oc:RG1');
+  assert.equal(placeKeyOf('Dorset'), 'county:Dorset');
+  assert.equal(placeKeyOf('Co. Durham'), 'county:County Durham');
+  assert.equal(placeKeyOf('  Lyme   Regis '), 'name:lyme regis');
+  assert.equal(placeKeyOf('St. Ives'), placeKeyOf('st ives'));
+});
+
+test('a place whose lookup failed and then worked is one ask, enriched', async () => {
+  await post({ ...POTTERY, email: 'flaky@example.com', where: 'Wells' });
+  PLACES.wells = { name: 'Wells', county: 'Somerset', region: 'South West', country: 'England', lat: 51.2, lng: -2.6, source: 'os-open-names' };
+  try { await post({ ...POTTERY, email: 'flaky@example.com', where: 'wells' }); } finally { delete PLACES.wells; }
+  const rows = await rowsFor('flaky@example.com');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].place_name, 'Wells');
+  assert.equal(rows[0].county, 'Somerset');
 });
 
 test('the honeypot is thanked, and nothing is stored or looked up', async () => {
@@ -174,11 +185,16 @@ test('the demand counts people, not rows, and leaves out anybody who unsubscribe
   await post({ ...POTTERY, email: 'gone@example.com' });
   await query(`update guide_alerts set unsubscribed_at = now() where email = 'gone@example.com'`);
   await post({ ...POTTERY, email: 'one@example.com', where: 'narnia' });
+  // Two spellings of one unresolved place are one place.
+  await post({ ...POTTERY, email: 'three@example.com', where: 'St. Ives' });
+  await post({ ...POTTERY, email: 'four@example.com', where: 'st ives' });
   const rows = await demandByPlace();
-  assert.deepEqual(rows.map((r) => [r.subcategory, r.place, r.resolved, r.people]), [
-    ['pottery', 'Reading', true, 2],
-    ['pottery', 'Narnia', false, 1],
+  assert.deepEqual(rows.map((r) => [r.subcategory, r.place_key, r.resolved, r.people]), [
+    ['pottery', 'name:reading', true, 2],
+    ['pottery', 'name:st ives', false, 2],
+    ['pottery', 'name:narnia', false, 1],
   ]);
+  assert.equal(rows[0].place, 'Reading');
 });
 
 test('the place lookup: counties from the list, postcodes from ONS, names only on an exact match', async () => {

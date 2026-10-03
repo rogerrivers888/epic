@@ -73,7 +73,7 @@ export function guideAlertsRouter({ lookup = placeOf } = {}) {
       if (refusal) return res.status(400).json(refusal);
 
       const place = await lookup(alert.placeTyped);
-      await addAlert({ ...alert, place, placeKey: placeKeyOf(alert.placeTyped, place) });
+      await addAlert({ ...alert, place, placeKey: placeKeyOf(alert.placeTyped) });
       // Where it was filed, so the page can say it back; the same whether or not this was a repeat.
       return res.json({ ok: true, place: place?.name ?? null });
     } catch (err) {

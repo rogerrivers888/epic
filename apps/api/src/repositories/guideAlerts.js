@@ -48,20 +48,23 @@ export async function addAlert(a) {
 /**
  * The demand, for the back office: how many people want each subcategory near
  * each place ("38 people want pottery near Reading"), counted in people, not
- * rows, and never counting anybody who has unsubscribed. A place that could not
- * be looked up is counted under the words as typed and says so (`resolved`
- * false), rather than being folded into somewhere it may not be.
+ * rows, and never counting anybody who has unsubscribed. A place is its
+ * `place_key`, the one identity the asks are kept by; the label is the name it
+ * was filed under, or the words as typed where no ask for it could be looked up
+ * — and then `resolved` is false, rather than folding it into somewhere it may
+ * not be.
  */
 export async function demandByPlace() {
   const { rows } = await query(
     `select subcategory,
-            coalesce(place_name, initcap(trim(place_typed))) as place,
-            county,
-            place_name is not null as resolved,
+            place_key,
+            coalesce(min(place_name), min(initcap(trim(place_typed)))) as place,
+            min(county) as county,
+            bool_or(place_name is not null) as resolved,
             count(distinct lower(email))::int as people
        from guide_alerts
       where unsubscribed_at is null
-      group by 1, 2, 3, 4
+      group by subcategory, place_key
       order by people desc, subcategory, place`,
   );
   return rows;
