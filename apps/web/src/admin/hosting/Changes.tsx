@@ -14,7 +14,8 @@ import { asOneOf, asText, useQueryState } from '../../router';
 import { BORDER, colors, fonts, spacing, type } from '../../theme';
 import { Icon } from '../../components/Icon';
 import { Press } from '../../components/press';
-import { Banner, Dropdown, FilterRow, PageHead } from '../kit';
+import { Banner, Dropdown, FilterRow, PageHead, TextAction } from '../kit';
+import { useSession } from '../../hooks/useSession';
 import { Blank, Ladder, Stat, Word, type Col } from '../table';
 import { useLoad, useSorted, when } from './kit';
 
@@ -42,7 +43,7 @@ const KIND_WORDS: Record<Kind, string> = {
 const SORTS = ['at', 'what', 'change', 'why', 'who'] as const;
 
 /** A value on one line: words as they are, objects as `key: value` pairs, nothing as a dash. */
-function compact(v: unknown): string {
+export function compact(v: unknown): string {
   if (v == null) return '—';
   if (typeof v === 'string') return v;
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
@@ -74,10 +75,31 @@ export function ChangesTab() {
     return () => clearTimeout(t);
   }, [typed, subject, setSubject]);
 
-  const { data, error } = useLoad<Changes>(
+  const { data, error, reload } = useLoad<Changes>(
     () => api.hostingAdmin<Changes>('/changes', { kind: kind === 'all' ? null : kind, subject: subject || null }),
     [kind, subject],
   );
+
+  // Undo (Roger, 3 Oct 2026): a setting's newest change, for the owner signed in personally — an older one would
+  // overwrite whatever came after it, so it is never offered.
+  const { access } = useSession();
+  const direct = Boolean(access?.elevated);
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [undoSaid, setUndoSaid] = useState<string | null>(null);
+  const latest = new Set<string>();
+  {
+    const seen = new Set<string>();
+    for (const c of [...(data?.changes ?? [])].sort((a, b) => String(b.at).localeCompare(String(a.at)))) {
+      if (c.subjectKind !== 'setting' || seen.has(c.subjectId)) continue;
+      seen.add(c.subjectId); latest.add(c.id);
+    }
+  }
+  const undo = async (c: Change) => {
+    setUndoing(c.id); setUndoSaid(null);
+    try { await api.hostingAdminPost(`/changes/${encodeURIComponent(c.id)}/undo`, {}); setUndoSaid('Undone, and logged here.'); reload(); }
+    catch (e: any) { setUndoSaid(e?.message ?? 'That didn’t undo.'); }
+    finally { setUndoing(null); }
+  };
 
   // Text columns read A→Z on the first press; When reads newest first.
   const desc = sort === 'at' ? !asc : asc;
@@ -112,6 +134,9 @@ export function ChangesTab() {
       tip: ['Who', 'The person who made it, or Epic when a rule made it on its own.'],
       cellTip: (c) => (c.approvalId ? ['Who', `${c.by ?? '—'}, under approval ${c.approvalId}.`] : null),
       cell: (c) => (c.by ? <Word>{c.by === 'epic' ? 'Epic' : c.by}</Word> : <Blank />) },
+    ...(direct ? [{ key: 'undo', label: '', width: 70,
+      tip: ['Undo', 'Puts a setting back as it was before its latest change, and logs that here too.'] as [string, string],
+      cell: (c: Change) => (latest.has(c.id) ? <TextAction label={undoing === c.id ? '…' : 'Undo'} onPress={() => { void undo(c); }} disabled={Boolean(undoing)} /> : <Blank />) }] : []),
   ];
 
   return (
@@ -124,6 +149,7 @@ export function ChangesTab() {
           </View>
         )} />
 
+      {undoSaid ? <Banner tone="accent">{undoSaid}</Banner> : null}
       <FilterRow>
         <Dropdown label="Kind" value={KIND_WORDS[kind]} width={200}
           options={([...KINDS.slice(1), 'all'] as Kind[]).map((k) => ({ key: k, label: KIND_WORDS[k], on: kind === k }))}

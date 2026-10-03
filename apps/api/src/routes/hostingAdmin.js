@@ -356,6 +356,34 @@ router.post('/hosts/:id/pause', requires('manage_hosting'), async (req, res, nex
 });
 
 /** Override a host's fee: the owner, personally, with a reason. Bookings made after it only. */
+/**
+ * POST /api/admin/hosting/changes/:id/undo — put a setting back to what it was before one change (Roger, 3 Oct 2026:
+ * an edit applies directly, with a confirm and an Undo entry in Changes). Only a setting, only by the owner signed in
+ * personally, and only while that change is still the latest word on it: undoing an older one would quietly
+ * overwrite whatever came after. The undo is itself a change, with its own reason, so it can be undone too.
+ */
+router.post('/changes/:id/undo', requireOwnerSignedIn('undo a setting change'), async (req, res, next) => {
+  try {
+    const { rows: [c] } = await query(`select * from hosting_changes where id::text = $1`, [String(req.params.id)]);
+    if (!c || c.subject_kind !== 'setting') return res.status(404).json({ error: 'not_found', message: 'There is no setting change to undo.' });
+    const { rows: [later] } = await query(
+      // Compared in the database: a timestamp through JavaScript loses its microseconds and would find the change itself.
+      `select 1 from hosting_changes x where x.subject_kind = 'setting' and x.subject_id = $1 and x.id <> $2
+          and x.at > (select at from hosting_changes where id = $2) limit 1`, [c.subject_id, c.id],
+    );
+    if (later) return res.status(409).json({ error: 'changed_since', message: 'It has been changed since. Undo the latest change first.' });
+    const before = c.before ?? {};
+    const out = await settingsRepo.change(c.subject_id, { value: before.value, isOn: before.is_on }, {
+      by: currentAccount()?.id ?? null, why: `Undo: ${String(c.why ?? '').slice(0, 480)}`,
+    });
+    if (out.error) return res.status(out.status).json({ error: 'not_undone', message: out.error });
+    const { rows: [undone] } = await query(
+      `select id from hosting_changes where subject_kind = 'setting' and subject_id = $1 order by at desc limit 1`, [c.subject_id],
+    );
+    res.json({ undone: true, changeId: undone?.id ?? null });
+  } catch (err) { next(err); }
+});
+
 router.post('/hosts/:id/fee-override', requireOwnerSignedIn('override a host’s fee'), async (req, res, next) => {
   try {
     const pct = req.body?.pct == null ? null : Number(req.body.pct);

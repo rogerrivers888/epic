@@ -18,6 +18,8 @@ import { Banner, Choice, PageHead, TextAction } from '../kit';
 import { Act, Blank, Footer, Kicker, Ladder, Stat, Word, type Col } from '../table';
 import { ownerAct, useLoad, useSorted, when } from './kit';
 import { Explain } from '../explain';
+import { compact } from './Changes';
+import { useSession } from '../../hooks/useSession';
 
 // ---------------------------------------------------------------------------
 // payloads (routes/hostingMoney.js `settingPayload`)
@@ -204,6 +206,12 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
   const [why, setWhy] = useState('');
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ tone: 'accent' | 'crit'; words: string; detail?: string } | null>(null);
+  // The owner signed in personally applies a change directly: Before → After to confirm, then an Undo (Roger, 3 Oct 2026).
+  // Anyone else's press is proposed, and goes to Approvals. Read from the session itself, never assumed.
+  const { access } = useSession();
+  const direct = Boolean(access?.elevated);
+  const [confirming, setConfirming] = useState(false);
+  const [undoId, setUndoId] = useState<string | null>(null);
 
   const parsed: Parsed = useMemo(() => {
     const bad = (why: string): Parsed => ({ ok: false, why });
@@ -267,6 +275,48 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
   const valueChanged = parsed.ok && JSON.stringify(parsed.value) !== JSON.stringify(setting.value);
   const onChanged = setting.switchable && isOn !== (setting.isOn !== false);
   const ready = parsed.ok && (valueChanged || onChanged) && why.trim().length > 0 && !busy;
+
+  const beforeAfter = () => {
+    const before = compact({ value: setting.value, ...(setting.switchable ? { on: setting.isOn !== false } : {}) });
+    const after = compact({ value: valueChanged && parsed.ok ? parsed.value : setting.value, ...(setting.switchable ? { on: isOn } : {}) });
+    return `${before} → ${after}`;
+  };
+
+  const apply = async () => {
+    if (!parsed.ok) return;
+    setBusy(true); setSaid(null); setUndoId(null);
+    try {
+      const body: Record<string, unknown> = { why: why.trim() };
+      if (valueChanged) body.value = parsed.value;
+      if (onChanged) body.isOn = isOn;
+      await api.hostingAdminPut(`/settings/${encodeURIComponent(setting.key)}`, body);
+      // The change it just made, for its Undo: the newest on this setting.
+      const log = await api.hostingAdmin<{ changes: { id: string }[] }>('/changes', { kind: 'setting', subject: setting.key, limit: 1 }).catch(() => null);
+      setUndoId(log?.changes?.[0]?.id ?? null);
+      setConfirming(false);
+      setSaid({ tone: 'accent', words: 'Applied', detail: 'Logged in Changes. A fee change applies to bookings made after it.' });
+      onSaved();
+    } catch (e: any) {
+      setSaid({ tone: 'crit', words: e instanceof ApiError ? e.message : e?.message ?? 'That didn’t apply.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const undo = async () => {
+    if (!undoId) return;
+    setBusy(true);
+    try {
+      await api.hostingAdminPost(`/changes/${encodeURIComponent(undoId)}/undo`, {});
+      setUndoId(null);
+      setSaid({ tone: 'accent', words: 'Undone', detail: 'Put back as it was, and logged in Changes.' });
+      onSaved();
+    } catch (e: any) {
+      setSaid({ tone: 'crit', words: e instanceof ApiError ? e.message : e?.message ?? 'That didn’t undo.' });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const save = async () => {
     if (!parsed.ok) return;
@@ -365,7 +415,7 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
 
   return (
     <View style={s.editor}>
-      <Kicker tip={['Change', 'Saved changes need the owner signed in personally, and appear in Changes with the reason.']}>{setting.label}</Kicker>
+      <Kicker tip={['Change', direct ? 'Signed in personally: a change applies when you confirm it, and appears in Changes with the reason and an Undo.' : 'A change needs the owner signed in personally; from here it is proposed to Approvals. Every change appears in Changes with the reason.']}>{setting.label}</Kicker>
       {fields}
       {setting.switchable ? (
         <Line>
@@ -379,10 +429,25 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
         style={[s.input, { alignSelf: 'stretch' }]} maxLength={500} accessibilityLabel="Why this is changing" />
       {said ? <Banner tone={said.tone}>{said.words}</Banner> : null}
       {said?.detail ? <Text style={[s.word, { color: colors.inkMuted }]}>{said.detail}</Text> : null}
+      {confirming ? <Banner tone="accent">{`Before → After: ${beforeAfter()}`}</Banner> : null}
       <Footer>
-        <Explain tip={['Propose a change', 'Needs the owner signed in personally: it saves at once for the owner, and anyone else’s goes to Approvals. Logged in Changes; a fee change applies to bookings made after it.']} cursor="pointer">
-          <Act tone="solid" label={busy ? '…' : 'Propose a change'} icon="locked" onPress={save} disabled={!ready} />
-        </Explain>
+        {direct ? (
+          confirming ? (
+            <>
+              <Act tone="solid" label={busy ? '…' : 'Confirm'} onPress={apply} disabled={!ready} />
+              <Act tone="secondary" label="Back" onPress={() => setConfirming(false)} />
+            </>
+          ) : (
+            <Explain tip={['Apply change', 'You are signed in personally: it applies as soon as you confirm, and is logged in Changes with an Undo. A fee change applies to bookings made after it.']} cursor="pointer">
+              <Act tone="solid" label="Apply change" onPress={() => setConfirming(true)} disabled={!ready} />
+            </Explain>
+          )
+        ) : (
+          <Explain tip={['Propose a change', 'Needs the owner signed in personally to apply: from here it goes to Approvals. Logged in Changes; a fee change applies to bookings made after it.']} cursor="pointer">
+            <Act tone="solid" label={busy ? '…' : 'Propose a change'} icon="locked" onPress={save} disabled={!ready} />
+          </Explain>
+        )}
+        {undoId ? <Act tone="secondary" label={busy ? '…' : 'Undo'} onPress={undo} /> : null}
         <Act tone="secondary" label="Close" onPress={onClose} />
       </Footer>
     </View>

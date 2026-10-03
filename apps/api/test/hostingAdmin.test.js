@@ -325,3 +325,26 @@ test('voiding the old model: the owner only, test rows kept and marked, a v2 hos
     assert.deepEqual([again.body.voided.hosts, again.body.voided.bookings], [0, 0]);
   } finally { await staff.close(); await owner.close(); }
 });
+
+test('a setting change is undone by the owner signed in personally, only while it is the latest word (Roger, 3 Oct 2026)', async () => {
+  const repo = await import('../src/repositories/hostingSettings.js');
+  const { rows: [row] } = await query(`select key, value from hosting_settings where key = 'review_window'`);
+  const was = row.value;
+  const next = Number(was) === 24 ? 36 : 24;
+  const made = await repo.change('review_window', { value: next }, { why: 'Faster reviews' });
+  assert.ok(made.row, JSON.stringify(made));
+  const { rows: [c] } = await query(`select id from hosting_changes where subject_kind = 'setting' and subject_id = 'review_window' order by at desc limit 1`);
+  const staff = await server(STAFF);
+  const owner = await server(OWNER);
+  try {
+    assert.equal((await staff.send('POST', `/api/admin/hosting/changes/${c.id}/undo`)).body.error, 'needs_personal_sign_in', 'not from a shared or staff session');
+    const out = await owner.send('POST', `/api/admin/hosting/changes/${c.id}/undo`);
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const { rows: [now] } = await query(`select value from hosting_settings where key = 'review_window'`);
+    assert.deepEqual(now.value, was, 'put back as it was');
+    const { rows: [log] } = await query(`select why, before, after from hosting_changes where subject_kind = 'setting' and subject_id = 'review_window' order by at desc limit 1`);
+    assert.match(log.why, /^Undo: Faster reviews/);
+    // The original change is no longer the latest: undoing it again would overwrite the undo.
+    assert.equal((await owner.send('POST', `/api/admin/hosting/changes/${c.id}/undo`)).status, 409);
+  } finally { await staff.close(); await owner.close(); }
+});
