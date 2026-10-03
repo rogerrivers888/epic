@@ -37,6 +37,10 @@ const fake = http.createServer((req, res) => {
     if (req.url === '/v1/prices' && req.method === 'POST') { priceMade += 1; return json({ id: 'price_solo_599', product: 'epic_membership_solo' }); }
     if (req.url === '/v1/checkout/sessions' && req.method === 'POST') return json({ id: 'cs_m_1', url: 'https://checkout.stripe.test/m' });
     if (req.url === '/v1/billing_portal/sessions' && req.method === 'POST') return json({ url: 'https://billing.stripe.test/p' });
+    if (req.url.endsWith('/expire')) return json({ id: req.url.split('/')[4], status: 'expired' });
+    if (req.url.startsWith('/v1/checkout/sessions/')) return json({ id: req.url.split('/')[4], status: 'open' });
+    if (req.url.startsWith('/v1/subscriptions/') && req.method === 'DELETE') { const s = subs.get(req.url.split('/')[3].split('?')[0]); return json({ ...s, status: 'canceled', latest_invoice: null }); }
+    if (req.url.startsWith('/v1/subscriptions/') && req.method === 'POST') return json(subs.get(req.url.split('/')[3]) ?? {});
     if (req.url.startsWith('/v1/subscriptions/')) { const s = subs.get(req.url.split('/')[3]); return s ? json(s) : json({ error: { code: 'resource_missing' } }, 404); }
     return json({ error: { code: 'not_found' } }, 404);
   });
@@ -296,4 +300,89 @@ test('a Pro membership is Pro for hosting: the £10 private fee is waived; pause
   sub.status = 'past_due';
   await applyStripeEvent(event('customer.subscription.updated', sub));
   assert.equal(await lanes.hostingProFor(household.id), false);
+});
+
+test('a plan switched in the portal is the new plan: the price says so, not what Checkout wrote', async () => {
+  const { household } = await aMember();
+  const sub = aSub(household.id, { plan: 'solo' });
+  sub.items.data[0].price.metadata.epic_plan = 'pro';
+  sub.items.data[0].price.unit_amount = 1299;
+  await applyStripeEvent(event('customer.subscription.updated', sub));
+  const m = await billing.membershipBySubscription(sub.id);
+  assert.deepEqual([m.plan_key, m.monthly_pence], ['pro', 1299]);
+});
+
+test('an older read finishing late never puts an older state back', async () => {
+  const { household } = await aMember();
+  const sub = aSub(household.id);
+  const { membershipFromSubscription } = await import('../src/sources/stripe.js');
+  const older = await billing.readStamp();
+  const newer = await billing.readStamp();
+  await billing.upsertFromSubscription({ householdId: household.id, subscriptionId: sub.id, facts: membershipFromSubscription({ ...sub, status: 'canceled', ended_at: secs(new Date()) }), stamp: newer });
+  const after = await billing.upsertFromSubscription({ householdId: household.id, subscriptionId: sub.id, facts: membershipFromSubscription({ ...sub, status: 'active' }), stamp: older });
+  assert.equal(after.status, 'cancelled');
+  assert.ok(after.ended_at);
+});
+
+test('a full batch of reminders already sent never starves the rest', async () => {
+  const made = [];
+  for (let i = 0; i < 3; i += 1) {
+    const { household } = await aMember();
+    const sub = aSub(household.id, { trialEnd: new Date(Date.now() + (2 + i) * day) });
+    await applyStripeEvent(event('customer.subscription.created', sub));
+    made.push(sub.id);
+  }
+  const got = new Set();
+  for (let i = 0; i < 6; i += 1) for (const m of await billing.claimRemindersDue({ days: 7, limit: 1 })) got.add(m.stripe_subscription_id);
+  for (const id of made) assert.ok(got.has(id), 'every one reminded');
+});
+
+test('one Checkout at a time: a second press at once is refused; a later one closes the first', async () => {
+  const { household, account } = await aMember();
+  const srv = await server(account);
+  try {
+    const [a, b] = await Promise.all([srv.send('POST', '/api/membership/checkout', { plan: 'solo' }), srv.send('POST', '/api/membership/checkout', { plan: 'solo' })]);
+    assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+    await query("update households set membership_checkout_at = now() - interval '1 minute' where id = $1", [household.id]);
+    calls.length = 0;
+    const third = await srv.send('POST', '/api/membership/checkout', { plan: 'household' });
+    assert.equal(third.status, 200, JSON.stringify(third.body));
+    assert.ok(calls.some((c) => c.url === '/v1/checkout/sessions/cs_m_1/expire'), 'the first session closed');
+  } finally { await srv.close(); }
+});
+
+test('a second subscription for a household already a member is cancelled, and never a row', async () => {
+  const { household } = await aMember();
+  const first = aSub(household.id);
+  await applyStripeEvent(event('customer.subscription.created', first));
+  const second = aSub(household.id);
+  calls.length = 0;
+  await applyStripeEvent(event('customer.subscription.created', second));
+  assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.startsWith(`/v1/subscriptions/${second.id}`)));
+  assert.equal(await billing.membershipBySubscription(second.id), null);
+  assert.equal((await billing.runningMembership(household.id)).stripe_subscription_id, first.id);
+  // Its own cancellation event, marked as a duplicate, writes nothing either.
+  second.metadata.epic_duplicate = 'true'; second.status = 'canceled';
+  await applyStripeEvent(event('customer.subscription.deleted', second));
+  assert.equal(await billing.membershipBySubscription(second.id), null);
+});
+
+test('revenue counts the paid months only — never the trial, and still after a cancellation', async () => {
+  const { membershipRevenue } = await import('../src/repositories/memberships.js');
+  const { household } = await aMember();
+  const sub = aSub(household.id, { trialEnd: new Date('2026-03-01T00:00:00Z') });
+  sub.start_date = secs(new Date('2026-01-31T00:00:00Z'));
+  sub.status = 'active';
+  await applyStripeEvent(event('customer.subscription.updated', sub));
+  sub.status = 'canceled'; sub.ended_at = secs(new Date('2026-05-15T00:00:00Z'));
+  await applyStripeEvent(event('customer.subscription.deleted', sub));
+  const m = await billing.membershipBySubscription(sub.id);
+  assert.equal(m.status, 'cancelled');
+  assert.equal(new Date(m.paid_from).toISOString(), '2026-03-01T00:00:00.000Z');
+  // January and February were the trial; March, April and May were paid.
+  const before = await membershipRevenue('2025-12-01', '2026-03-01');
+  const during = await membershipRevenue('2026-03-01', '2026-06-01');
+  // Nothing else in this file runs before October 2026, so these windows hold this membership alone.
+  assert.equal(before.pence, 0, 'the trial is not revenue');
+  assert.equal(during.pence, 3 * 599, 'March, April and May, though it is cancelled now');
 });

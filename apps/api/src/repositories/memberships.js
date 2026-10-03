@@ -60,13 +60,16 @@ export const NOT_BILLED = 'Not billed yet';
  *
  * One entry per Stripe subscription (repositories/membershipBilling.js, written
  * only from Stripe's events):
- *   `{ householdId, state: 'paid' | 'trialling' | 'cancelled', planKey, monthlyPence, startedAt, endedAt, channel, paused, mode }`
+ *   `{ householdId, state: 'paid' | 'trialling' | 'cancelled', planKey, monthlyPence, startedAt, endedAt, paidFrom, channel, paused, mode }`
  * where `monthlyPence` is what Stripe's own price bills a month (an annual price
  * divided by twelve), `endedAt` is null while it runs and set once cancelled,
  * and `channel` is 'website' (the app stores come later). A membership whose
  * payment failed after the trial is **paused**, not cancelled, while Stripe
  * retries (owner, 3 Oct 2026): it stays `paid` with `paused: true`, and a £0
- * trial is `trialling`.
+ * trial is `trialling`. `paidFrom` is when it first became paid (its trial
+ * over), kept through a pause or a cancellation, so revenue counts the paid
+ * months — `paidFrom` to `endedAt` — and never the trial, whatever the state is
+ * now (Codex, 3 Oct 2026).
  */
 // Two things follow from Stripe being plugged in (Codex, 3 Oct 2026): lifetime spend must be summed over each
 // membership's billing periods (startedAt → endedAt), not today's price × the account's age; and a closed period's
@@ -80,6 +83,7 @@ export async function billedMemberships() {
     monthlyPence: Number(m.monthly_pence) || 0,
     startedAt: m.started_at,
     endedAt: m.status === 'cancelled' ? (m.ended_at ?? m.updated_at) : null,
+    paidFrom: m.paid_from ?? null,
     channel: m.channel,
     paused: m.status === 'paused',
     mode: m.mode,
@@ -199,10 +203,10 @@ export async function readMemberships() {
  */
 export async function membershipRevenue(from, to) {
   const months = monthStarts(from, to);
-  const billed = (await billedMemberships()).filter((b) => b.state === 'paid');
+  const billed = await billedMemberships();
   let pence = 0;
   for (const m of months) {
-    for (const b of billed) if (runsIn(b, m)) pence += Number(b.monthlyPence) || 0;
+    for (const b of billed) if (paidIn(b, m)) pence += Number(b.monthlyPence) || 0;
   }
   return { pence, estimated: false };
 }
@@ -216,7 +220,7 @@ export async function membershipMonths(keys) {
   return keys.map((key) => {
     const m = new Date(`${key}-01T00:00:00Z`);
     const running = billed.filter((b) => runsIn(b, m));
-    const paid = running.filter((b) => b.state === 'paid');
+    const paid = running.filter((b) => paidIn(b, m));
     return {
       month: key,
       members: running.length,
@@ -262,6 +266,12 @@ function monthStarts(from, to) {
     m = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1));
   }
   return out;
+}
+
+/** Paid in that month: from when it first became paid to its end — a cancelled membership's paid months included. */
+function paidIn(b, monthStart) {
+  if (!b.paidFrom) return false;
+  return runsIn({ startedAt: b.paidFrom, endedAt: b.endedAt }, monthStart);
 }
 
 function runsIn(b, monthStart) {

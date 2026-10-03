@@ -14,7 +14,11 @@
 
 -- The household as a Stripe customer: one, whatever it subscribes to.
 alter table households
-  add column if not exists stripe_customer_id text;
+  add column if not exists stripe_customer_id text,
+  -- The Checkout this household has open, so a second press closes the first rather than opening a second
+  -- subscription beside it.
+  add column if not exists membership_checkout_id text,
+  add column if not exists membership_checkout_at timestamptz;
 create unique index if not exists households_stripe_customer_idx on households (stripe_customer_id) where stripe_customer_id is not null;
 
 create table if not exists memberships (
@@ -32,6 +36,9 @@ create table if not exists memberships (
   current_period_end     timestamptz,
   cancel_at_period_end   boolean not null default false,
   started_at             timestamptz not null default now(),
+  -- When it first became paid (the trial over and paid for), kept through a pause or a cancellation: the reports
+  -- count paid months from here to its end, never the trial and never by what it is today.
+  paid_from              timestamptz,
   ended_at               timestamptz,
   paused_at              timestamptz,
   pause_reason           text,
@@ -41,12 +48,16 @@ create table if not exists memberships (
   -- membership and nothing else. A new one with every reminder.
   cancel_token           text unique,
   mode                   text not null default 'test',
+  -- When the Stripe read written here began, from the database's clock: an older read finishing later is dropped.
+  read_stamp             text,
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now(),
   constraint memberships_status_check check (status in ('trialling', 'active', 'paused', 'cancelled')),
   constraint memberships_channel_check check (channel in ('website', 'app_store', 'google_play')),
   constraint memberships_mode_check check (mode in ('test', 'live'))
 );
+-- One running membership a household: a second subscription Stripe makes for it is refused here and cancelled.
+create unique index if not exists memberships_one_running_idx on memberships (household_id) where status <> 'cancelled';
 create index if not exists memberships_household_idx on memberships (household_id, started_at desc);
 create index if not exists memberships_trial_idx on memberships (trial_end) where status = 'trialling';
 
@@ -56,7 +67,8 @@ create table if not exists stripe_plan_prices (
   plan_price_id   uuid not null references plan_prices(id) on delete cascade,
   mode            text not null,
   stripe_product_id text not null,
-  stripe_price_id   text not null unique,
+  -- Not unique: a price changed and changed back is the same Stripe Price (it is named by its amount).
+  stripe_price_id   text not null,
   created_at      timestamptz not null default now(),
   primary key (plan_price_id, mode),
   constraint stripe_plan_prices_mode_check check (mode in ('test', 'live'))

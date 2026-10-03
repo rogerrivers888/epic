@@ -53,36 +53,70 @@ export async function membershipBySubscription(subscriptionId) {
 }
 
 /**
- * Write what Stripe says a subscription is now. Called with a subscription read
- * back from Stripe, never an event's snapshot, so the order events arrive in
- * does not matter. A pause is dated the first time it is seen and cleared when
- * Stripe says it is paid again; a cancelled membership keeps its end.
+ * A stamp for when a Stripe read began, from the database's clock — the one every API instance shares — as
+ * fixed-width text that compares in order, with a random tail so two reads in one microsecond still differ.
  */
-export async function upsertFromSubscription({ householdId, subscriptionId, facts, mode = 'test', pauseReason = null }) {
+export async function readStamp() {
+  const { rows: [r] } = await query(`select lpad((extract(epoch from clock_timestamp()) * 1000000)::bigint::text, 17, '0') as us`);
+  return `${r.us}-${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`;
+}
+
+/** Raised when a household already has a running membership and Stripe has made it a second one. */
+export class SecondMembership extends Error {
+  constructor(running) { super('second membership'); this.code = 'second_membership'; this.running = running; }
+}
+
+/**
+ * Write what Stripe says a subscription is now. Called with a subscription read
+ * back from Stripe, never an event's snapshot, and stamped with when that read
+ * began: a read that began before the one already stored is dropped, so
+ * deliveries finishing out of order can't put an older state back (Codex,
+ * 3 Oct 2026). A pause is dated the first time it is seen and cleared when
+ * Stripe says it is paid again; a cancelled membership keeps its end; and when
+ * it first became paid is kept for good, whatever it is now.
+ */
+export async function upsertFromSubscription({ householdId, subscriptionId, facts, mode = 'test', pauseReason = null, stamp = null }) {
   if (!facts.status) return null;
-  const { rows: [r] } = await query(
-    `insert into memberships (household_id, plan_key, status, stripe_subscription_id, stripe_price_id, monthly_pence, interval,
-                              trial_end, current_period_end, cancel_at_period_end, started_at, ended_at, paused_at, pause_reason, mode)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, now()), $12,
-             case when $3 = 'paused' then now() end, case when $3 = 'paused' then $13 end, $14)
-     on conflict (stripe_subscription_id) do update set
-       plan_key = excluded.plan_key,
-       status = excluded.status,
-       stripe_price_id = excluded.stripe_price_id,
-       monthly_pence = excluded.monthly_pence,
-       interval = excluded.interval,
-       trial_end = excluded.trial_end,
-       current_period_end = excluded.current_period_end,
-       cancel_at_period_end = excluded.cancel_at_period_end,
-       ended_at = case when excluded.status = 'cancelled' then coalesce(memberships.ended_at, excluded.ended_at, now()) else null end,
-       paused_at = case when excluded.status = 'paused' then coalesce(memberships.paused_at, now()) else null end,
-       pause_reason = case when excluded.status = 'paused' then coalesce($13, memberships.pause_reason) else null end,
-       updated_at = now()
-     returning *`,
-    [householdId, facts.planKey ?? 'unknown', facts.status, subscriptionId, facts.priceId, facts.monthlyPence ?? 0, facts.interval ?? 'month',
-      facts.trialEnd, facts.currentPeriodEnd, facts.cancelAtPeriodEnd ?? false, facts.startedAt, facts.endedAt, pauseReason, mode],
-  );
-  return r;
+  // First paid: the trial's end, or the start when there was none — once it is active or paused (a payment due).
+  const paidFrom = ['active', 'paused'].includes(facts.status) ? (facts.trialEnd ?? facts.startedAt ?? new Date()) : null;
+  let r;
+  try {
+    ({ rows: [r] } = await query(
+      `insert into memberships (household_id, plan_key, status, stripe_subscription_id, stripe_price_id, monthly_pence, interval,
+                                trial_end, current_period_end, cancel_at_period_end, started_at, ended_at, paused_at, pause_reason, mode,
+                                paid_from, read_stamp)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, now()), case when $3 = 'cancelled' then coalesce($12::timestamptz, now()) end,
+               case when $3 = 'paused' then now() end, case when $3 = 'paused' then $13 end, $14, $15, $16)
+       on conflict (stripe_subscription_id) do update set
+         plan_key = excluded.plan_key,
+         status = excluded.status,
+         stripe_price_id = excluded.stripe_price_id,
+         monthly_pence = excluded.monthly_pence,
+         interval = excluded.interval,
+         trial_end = excluded.trial_end,
+         current_period_end = excluded.current_period_end,
+         cancel_at_period_end = excluded.cancel_at_period_end,
+         ended_at = case when excluded.status = 'cancelled' then coalesce(memberships.ended_at, excluded.ended_at, now()) else null end,
+         paused_at = case when excluded.status = 'paused' then coalesce(memberships.paused_at, now()) else null end,
+         pause_reason = case when excluded.status = 'paused' then coalesce($13, memberships.pause_reason) else null end,
+         paid_from = coalesce(memberships.paid_from, excluded.paid_from),
+         read_stamp = excluded.read_stamp,
+         updated_at = now()
+       where memberships.read_stamp is null or memberships.read_stamp < excluded.read_stamp
+       returning *`,
+      [householdId, facts.planKey ?? 'unknown', facts.status, subscriptionId, facts.priceId, facts.monthlyPence ?? 0, facts.interval ?? 'month',
+        facts.trialEnd, facts.currentPeriodEnd, facts.cancelAtPeriodEnd ?? false, facts.startedAt, facts.endedAt, pauseReason, mode,
+        paidFrom, stamp ?? await readStamp()],
+    ));
+  } catch (err) {
+    // The household is a member already under another subscription: Stripe has made a second (two Checkouts finished).
+    if (err.code === '23505' && err.constraint === 'memberships_one_running_idx') throw new SecondMembership(await runningMembership(householdId));
+    throw err;
+  }
+  if (r) return r;
+  // A stale read: nothing written — but a failed payment's reason is still kept on a membership that is paused.
+  if (pauseReason) await query("update memberships set pause_reason = coalesce(pause_reason, $2) where stripe_subscription_id = $1 and status = 'paused'", [subscriptionId, pauseReason]);
+  return membershipBySubscription(subscriptionId);
 }
 
 /** A plan's current website price, with the Stripe Price already made for it in this mode, if any. */
@@ -102,7 +136,7 @@ export async function webPrice(planKey, mode = 'test') {
 export async function rememberPrice({ planPriceId, mode = 'test', productId, priceId }) {
   await query(
     `insert into stripe_plan_prices (plan_price_id, mode, stripe_product_id, stripe_price_id) values ($1, $2, $3, $4)
-     on conflict (plan_price_id, mode) do nothing`,
+     on conflict do nothing`,
     [planPriceId, mode, productId, priceId],
   );
 }
@@ -116,12 +150,17 @@ export async function rememberPrice({ planPriceId, mode = 'test', productId, pri
 export async function claimRemindersDue({ days = 7, limit = 50 } = {}) {
   const { rows } = await query(
     `with due as (
-       select id, case when status = 'trialling' then trial_end else current_period_end end as on_date
-         from memberships
-        where not cancel_at_period_end
-          and ((status = 'trialling' and trial_end > now() and trial_end <= now() + make_interval(days => $1))
-            or (status = 'active' and interval = 'year' and current_period_end > now() and current_period_end <= now() + make_interval(days => $1)))
-        order by 2 limit $2
+       select id, on_date from (
+         select id, reminded_for, case when status = 'trialling' then trial_end else current_period_end end as on_date
+           from memberships
+          where not cancel_at_period_end
+            and ((status = 'trialling' and trial_end > now() and trial_end <= now() + make_interval(days => $1))
+              or (status = 'active' and interval = 'year' and current_period_end > now() and current_period_end <= now() + make_interval(days => $1)))
+       ) d
+        -- Already reminded for that date: left out before the limit, so a full batch of them never starves the rest
+        -- (Codex, 3 Oct 2026).
+        where d.reminded_for is distinct from d.on_date
+        order by on_date limit $2
      )
      update memberships m set reminded_for = due.on_date, cancel_token = replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', ''), updated_at = now()
        from due
@@ -174,4 +213,30 @@ export async function leadOf(householdId) {
 export async function allMemberships() {
   const { rows } = await query('select * from memberships order by started_at');
   return rows;
+}
+
+/**
+ * One Checkout at a time a household (Codex, 3 Oct 2026). Claims the household's checkout slot — refused while
+ * another press is in its first half-minute — and hands back the session the last press opened, for the caller to
+ * close at Stripe before opening a new one.
+ */
+export async function claimCheckout(householdId) {
+  const { rows: [r] } = await query(
+    `with was as (select id, membership_checkout_id from households where id = $1 for update)
+     update households h set membership_checkout_at = now()
+       from was
+      where h.id = was.id and (h.membership_checkout_at is null or h.membership_checkout_at < now() - interval '30 seconds')
+     returning was.membership_checkout_id as previous`,
+    [householdId],
+  );
+  return r ? { claimed: true, previous: r.previous ?? null } : { claimed: false };
+}
+
+export async function recordCheckout(householdId, sessionId) {
+  await query('update households set membership_checkout_id = $2 where id = $1', [householdId, sessionId]);
+}
+
+/** A press that failed gives the slot back at once. */
+export async function releaseCheckout(householdId) {
+  await query('update households set membership_checkout_at = null where id = $1', [householdId]);
 }

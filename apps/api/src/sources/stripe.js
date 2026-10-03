@@ -472,6 +472,27 @@ export function retrieveSubscription(id, { householdId = null } = {}) {
 }
 
 /**
+ * A second membership Stripe made for a household that already had one (two Checkouts finished): cancelled at
+ * once, and anything it took refunded in full. Keyed on the subscription, so a retry never refunds twice.
+ */
+export async function cancelSecondMembership(subscriptionId, { householdId = null } = {}) {
+  // Marked first, so its own cancellation event is recognised and never written down as a membership.
+  await call('POST', `/subscriptions/${encodeURIComponent(subscriptionId)}`, { metadata: { epic_duplicate: 'true' } },
+    { householdId, purpose: 'membership.duplicate.mark' }).catch(() => null);
+  const sub = await call('DELETE', `/subscriptions/${encodeURIComponent(subscriptionId)}`, { prorate: 'false', invoice_now: 'false' },
+    { householdId, purpose: 'membership.duplicate.cancel', idempotencyKey: `dup-cancel-${subscriptionId}` })
+    .catch(async (err) => { if (err.httpStatus === 404 || err.detail === 'resource_missing') return retrieveSubscription(subscriptionId, { householdId }); throw err; });
+  const invoiceId = typeof sub?.latest_invoice === 'string' ? sub.latest_invoice : sub?.latest_invoice?.id;
+  if (!invoiceId) return { cancelled: true, refunded: 0 };
+  const inv = await call('GET', `/invoices/${encodeURIComponent(invoiceId)}`, null, { householdId, purpose: 'membership.duplicate.read' });
+  const pi = typeof inv?.payment_intent === 'string' ? inv.payment_intent : inv?.payment_intent?.id;
+  if (inv?.status !== 'paid' || !(inv.amount_paid > 0) || !pi) return { cancelled: true, refunded: 0 };
+  await call('POST', '/refunds', { payment_intent: pi, reason: 'duplicate', metadata: { epic_kind: 'membership_duplicate', epic_subscription: subscriptionId } },
+    { householdId, purpose: 'membership.duplicate.refund', idempotencyKey: `dup-refund-${subscriptionId}` });
+  return { cancelled: true, refunded: inv.amount_paid };
+}
+
+/**
  * A Stripe subscription in Epic's words. `past_due` and `unpaid` are **paused**,
  * never cancelled (owner, 3 Oct 2026): a payment failed and Smart Retries are
  * trying again; it comes back on its own when one succeeds. `incomplete` (the
@@ -498,7 +519,9 @@ export function membershipFromSubscription(sub) {
   const ts = (s) => (s ? new Date(s * 1000) : null);
   return {
     status: membershipStatus(sub),
-    planKey: sub?.metadata?.epic_plan ?? price?.metadata?.epic_plan ?? null,
+    // The price's own plan first: the portal changes the price on a plan switch and leaves the subscription's
+    // metadata as Checkout wrote it.
+    planKey: price?.metadata?.epic_plan ?? sub?.metadata?.epic_plan ?? null,
     priceId: price?.id ?? null,
     monthlyPence: monthly,
     interval,

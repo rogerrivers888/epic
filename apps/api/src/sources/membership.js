@@ -56,17 +56,32 @@ export async function startCheckout({ householdId, email, name, planKey }) {
   if (!MEMBERSHIP_PLANS.includes(planKey)) throw refuse(400, 'bad_plan', 'Choose Solo, Household or Pro.');
   const running = await billing.runningMembership(householdId);
   if (running) throw refuse(409, 'already_a_member', running.status === 'paused' ? 'Your membership is paused while a payment is retried. Update your card instead.' : 'You’re a member already. Change plan from Membership and billing.');
-  const customerId = await ensureCustomer({ householdId, email, name });
-  const { priceId } = await priceFor(planKey);
-  // One trial a household: a household that has had a membership before pays from the first day.
-  const before = await billing.latestMembership(householdId);
-  const session = await stripe.membershipCheckout({
-    customerId, priceId, householdId, planKey,
-    trialDays: before ? 0 : TRIAL_DAYS,
-    successUrl: `${appUrl()}/settings?membership=joined`,
-    cancelUrl: `${appUrl()}/settings?membership=not-yet`,
-  });
-  return { url: session.url, id: session.id, trialDays: before ? 0 : TRIAL_DAYS };
+  // One Checkout at a time (Codex, 3 Oct 2026): two presses at once would open two, and finishing both would make
+  // two subscriptions. The second press within half a minute is refused; a later one closes the earlier session first.
+  const slot = await billing.claimCheckout(householdId);
+  if (!slot.claimed) throw refuse(409, 'checkout_opening', 'Opening the payment page already — give it a moment.');
+  try {
+    if (slot.previous) {
+      const prev = await stripe.retrieveCheckout(slot.previous, { householdId }).catch(() => null);
+      if (prev?.status === 'complete') throw refuse(409, 'already_a_member', 'You’ve just joined — it can take a moment to show.');
+      if (prev?.status === 'open') await stripe.expireCheckout(slot.previous, { householdId });
+    }
+    const customerId = await ensureCustomer({ householdId, email, name });
+    const { priceId } = await priceFor(planKey);
+    // One trial a household: a household that has had a membership before pays from the first day.
+    const before = await billing.latestMembership(householdId);
+    const session = await stripe.membershipCheckout({
+      customerId, priceId, householdId, planKey,
+      trialDays: before ? 0 : TRIAL_DAYS,
+      successUrl: `${appUrl()}/settings?membership=joined`,
+      cancelUrl: `${appUrl()}/settings?membership=not-yet`,
+    });
+    await billing.recordCheckout(householdId, session.id);
+    return { url: session.url, id: session.id, trialDays: before ? 0 : TRIAL_DAYS };
+  } catch (err) {
+    await billing.releaseCheckout(householdId);
+    throw err;
+  }
 }
 
 /** Stripe's portal for the household's own customer: the card, the receipts, cancelling, switching plan. */
@@ -110,7 +125,8 @@ export function membershipPayload(m) {
 // Stripe's events
 // ---------------------------------------------------------------------------
 
-const isMembership = (o) => o?.metadata?.epic_kind === 'membership';
+// A second subscription cancelled as a duplicate is not a membership, and never becomes a row.
+const isMembership = (o) => o?.metadata?.epic_kind === 'membership' && o?.metadata?.epic_duplicate !== 'true';
 
 /** The subscription an invoice is for, across API versions. */
 const invoiceSubscription = (inv) => (typeof inv?.subscription === 'string' ? inv.subscription : inv?.subscription?.id)
@@ -118,6 +134,8 @@ const invoiceSubscription = (inv) => (typeof inv?.subscription === 'string' ? in
 
 /** Read the subscription back and write it down. Returns the stored row, or null when it is not one of ours. */
 async function sync(subscriptionId, { pauseReason = null } = {}) {
+  // Stamped before the read, so an older read finishing later is dropped rather than written over a newer one.
+  const stamp = await billing.readStamp();
   const sub = await stripe.retrieveSubscription(subscriptionId);
   if (!isMembership(sub)) return null;
   const customer = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
@@ -126,7 +144,16 @@ async function sync(subscriptionId, { pauseReason = null } = {}) {
   // The subscription's customer is the household's, however the household came to have it.
   if (customer) await billing.setCustomer(householdId, customer);
   const facts = stripe.membershipFromSubscription(sub);
-  return billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason });
+  try {
+    return await billing.upsertFromSubscription({ householdId, subscriptionId: sub.id, facts, mode: sub.livemode ? 'live' : 'test', pauseReason, stamp });
+  } catch (err) {
+    if (err.code !== 'second_membership') throw err;
+    // The backstop for two Checkouts finished at once: the household keeps the membership it had, and the second is
+    // cancelled and refunded in full. Nothing is written for it; its own cancellation event is then a cancelled row.
+    if (err.running?.stripe_subscription_id === sub.id) return err.running;
+    await stripe.cancelSecondMembership(sub.id, { householdId });
+    return null;
+  }
 }
 
 /**
