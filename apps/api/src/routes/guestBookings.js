@@ -899,12 +899,12 @@ router.post('/booked/:id/rate', async (req, res, next) => {
     const hostStars = req.body?.hostStars == null ? null : Number(req.body.hostStars);
     if (hostStars != null && (!Number.isInteger(hostStars) || hostStars < 1 || hostStars > 5)) throw refuse(400, 'stars', 'One to five stars for the host.');
     const s = await settingsRepo.current();
-    // Shown no sooner than the review window after it was written: the first midnight once the window has passed (Codex, 3 Oct 2026).
+    // Shown no sooner than the review window after it was written: the first midnight once the window has passed, or today with no window (Codex, 3 Oct 2026).
     const windowHours = typeof s.review_window === 'number' ? s.review_window : 48;
     const chips = Array.isArray(req.body?.chips) ? req.body.chips.filter((x) => typeof x === 'string').map((x) => x.slice(0, 40)).slice(0, 8) : [];
     const { rows: [r] } = await query(
       `insert into host_reviews (booking_id, offer_id, host_id, household_id, side, stars, host_stars, text, chips, publish_on, by_proxy)
-       values ($1, $2, $3, $4, 'guest', $5, $6, $7, $8::jsonb, (now() + make_interval(hours => $9::int))::date + 1, $10)
+       values ($1, $2, $3, $4, 'guest', $5, $6, $7, $8::jsonb, case when $9::int <= 0 then current_date else (now() + make_interval(hours => $9::int) - interval '1 microsecond')::date + 1 end, $10)
        on conflict (booking_id, side) do nothing returning id`,
       [b.id, b.offer_id, b.host_id, household.id, stars, hostStars, String(req.body?.text ?? '').trim().slice(0, 2000) || null, JSON.stringify(chips), windowHours, req.body?.byProxy === true],
     );

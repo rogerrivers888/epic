@@ -341,6 +341,16 @@ test('after the event: did it happen (a complaint holds the payout), rate once, 
     await guest.guestPrompts();
     await guest.guestPrompts();
     assert.equal(await told(), 1, 'told once when it shows');
+    // A window of nought shows it the same day.
+    await query(`update hosting_settings set value = '0'::jsonb where key = 'review_window'`);
+    settings.forget();
+    const { rows: [b2] } = await query(`select id from experience_bookings where id = $1`, [id]);
+    await query(`delete from host_reviews where booking_id = $1`, [b2.id]);
+    await query(`update experience_bookings set rated_at = null where id = $1`, [b2.id]);
+    assert.equal((await srv.send('POST', `/api/booked/${id}/rate`, { stars: 4 })).status, 201);
+    assert.equal((await query(`select publish_on = current_date as today from host_reviews where booking_id = $1`, [id])).rows[0].today, true);
+    await query(`update hosting_settings set value = '48'::jsonb where key = 'review_window'`);
+    settings.forget();
     const tip = await srv.send('POST', `/api/booked/${id}/tip`, { amountPence: 500 });
     assert.equal(tip.status, 201);
     assert.deepEqual([tip.body.tip.feePence, tip.body.tip.totalPence], [30, 530], '£5 tip + 30p fee');
