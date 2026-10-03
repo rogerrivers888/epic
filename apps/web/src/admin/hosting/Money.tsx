@@ -20,14 +20,15 @@
  */
 
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api } from '../../api';
 import { colors, desk, AMBER_DARK, getAdminThemePref, type, BORDER } from '../../theme';
 import { useQueryState, asOneOf, asText } from '../../router';
 import { Dropdown, FilterRow, Choice, TextAction } from '../kit';
 import { Explain, type Tip } from '../explain';
-import { Ladder, Num, Word, Blank, Kicker, Stat, type Col } from '../table';
-import { KIND_OPTIONS, useLoad, useSorted, gbp, when } from './kit';
+import { Act, Ladder, Num, Word, Blank, Kicker, Stat, type Col } from '../table';
+import { KIND_OPTIONS, amberTone, ownerAct, useLoad, useSorted, gbp, when } from './kit';
+import { SearchBox } from './Hosts';
 
 // ---------------------------------------------------------------------------
 // shared by the Money, Safety and Reports tabs
@@ -37,7 +38,7 @@ import { KIND_OPTIONS, useLoad, useSorted, gbp, when } from './kit';
 export const tip = (title: string, body: string): Tip => [title, body] as const;
 
 /** Attention. The back office is dark by default; the light amber is unreadable on cream, so light mode takes the dark one. */
-export const amber = () => (getAdminThemePref() === 'light' ? AMBER_DARK : desk.amber);
+export const amber = amberTone;
 /** Overdue, mismatch, refusal — and nothing else. */
 export const red = () => colors.overrun;
 
@@ -138,6 +139,8 @@ type Streams = {
   streams: Stream[];
   total: { epicPence: number; toHostsPence: number; count: number };
   guaranteePool: { pence: number } | null;
+  refunded?: { count: number; pence: number };
+  guaranteeClaims?: { count: number; pence: number };
   reconciliation: { ranAt: string; checked: number; mismatched: number } | null;
 };
 type Movement = {
@@ -146,8 +149,9 @@ type Movement = {
   stripe: 'matched' | 'mismatch' | 'pending' | 'not_checked' | null;
 };
 type Ledger = { rows: Movement[]; capped: boolean };
-type Payout = { id: string; host: string; event: string | null; pence: number; releaseAt: string; state: string; holdReason: string | null };
+type Payout = { id: string; host: string; event: string | null; pence: number; releaseAt: string; tookPlace: string | null; confirmedBy: number; state: string; holdReason: string | null; since: string | null; releasedBy: string | null };
 type Payouts = {
+  capped: boolean; paid30: { count: number; pence: number };
   waitingForConfirmation: Payout[]; held: Payout[]; failed: Payout[];
   refundsByCause: { cause: string | null; state: string; count: number; pence: number }[];
   cardHolds: { bookingId: string; event: string | null; host: string; household: string; pence: number | null; replyBy: string | null }[];
@@ -246,14 +250,15 @@ function StreamsView({ onLedger }: { onLedger: () => void }) {
   ];
 
   const pool = data?.guaranteePool ?? null;
+  const claims = data?.guaranteeClaims ?? null;
   const poolColumns: Col<{ key: string }>[] = [
     { key: 'stream', label: 'Stream', grow: true, tip: tip('Guarantee pool', 'Paid from Epic’s share, so it is a cost and sits under the total.'), cell: () => <Word>Guarantee pool</Word> },
     { key: 'value', label: 'Booking value', width: 140, align: 'right', tip: tip('Booking value', 'Not a booking.'), cell: () => <Blank /> },
     { key: 'rate', label: 'Rate', width: 200, align: 'right', tip: tip('Guarantee pool', 'Set in Settings. Anything that depends on it shows a dash until it is set.'),
       cell: () => (pool ? <Blank /> : <Said colour={amber()}>To set</Said>) },
-    { key: 'count', label: 'Count', width: 90, align: 'right', tip: tip('Count', 'Not counted here; claims are on Safety.'), cell: () => <Blank /> },
-    { key: 'epic', label: 'Epic took', width: 130, align: 'right', tip: tip('Guarantee pool', 'Set aside from Epic’s share for guarantee claims. A dash until it is set.'),
-      cell: () => <Pounds p={pool ? pool.pence : null} negative /> },
+    { key: 'count', label: 'Count', width: 90, align: 'right', tip: tip('Count', 'Guarantee claims paid in the period.'), cell: () => (claims?.count ? <Num n={claims.count} /> : <Blank />) },
+    { key: 'epic', label: 'Epic took', width: 130, align: 'right', tip: tip('Guarantee pool', 'Claims paid to guests in the period, from Epic’s share.'),
+      cell: () => <Pounds p={claims?.count ? claims.pence : null} negative /> },
     { key: 'hosts', label: 'To hosts', width: 130, align: 'right', tip: tip('To hosts', 'Claims are paid to guests, not hosts.'), cell: () => <Blank /> },
     ...(beforeName ? [{ key: 'last', label: beforeName, width: 120, align: 'right' as const, tip: tip(beforeName, 'Not recorded by month.'), cell: () => <Blank /> }] : []),
   ];
@@ -266,6 +271,7 @@ function StreamsView({ onLedger }: { onLedger: () => void }) {
         <Stat label="Epic took" value={data ? gbp(epic) : '—'} tip={tip('Epic took', 'Fees and commission Epic kept.')} />
         <Stat label="Take rate" value={total.ratePct == null || !data ? '—' : `${total.ratePct}%`} tip={tip('Take rate', 'Epic took divided by booking value.')} />
         <Stat label="To hosts" value={data ? gbp(hosts) : '—'} tip={tip('To hosts', 'What went to hosts from these bookings.')} />
+        <Stat label="Refunded" value={data?.refunded?.count ? gbp(data.refunded.pence) : '—'} tip={tip('Refunded', `${data?.refunded?.count ?? 0} refunds Stripe made in the period, every cause.`)} />
       </Band>
 
       <FilterRow>
@@ -316,8 +322,8 @@ function Reconciliation({ rec, loaded, onLedger }: { rec: Streams['reconciliatio
         <Explain tip={tip('Reconciliation', 'It has not run yet, so nothing has been checked.')}><Blank /></Explain>
       ) : (
         <>
-          <Explain tip={tip('Checked', 'Movements compared with Stripe in the last run.')}>
-            <Text style={s.stripWord}>{`Checked ${rec.checked.toLocaleString()}`}</Text>
+          <Explain tip={tip('Matched', 'Movements the last run found the same in Stripe.')}>
+            <Text style={s.stripWord}>{`Matched ${Math.max(0, rec.checked - rec.mismatched).toLocaleString()}`}</Text>
           </Explain>
           <Explain tip={tip('Mismatch', 'Different in Stripe. Stripe wins.')}>
             <Text style={[s.stripWord, bad && { color: red(), fontWeight: '700' }]}>{`Mismatch ${rec.mismatched.toLocaleString()}`}</Text>
@@ -350,8 +356,10 @@ const STRIPE_WORDS: Record<string, string> = { matched: 'Matched', mismatch: 'Mi
 function LedgerView() {
   const { months, month, setMonth, period, setPeriod } = usePeriod();
   const [typ, setTyp] = useQueryState<string>('mtype', 'all', asOneOf(TYPE_OPTIONS.map((t) => t.key), 'all'));
+  const [match, setMatch] = useQueryState<string>('mstripe', 'all', asOneOf(['all', 'mismatch', 'matched'], 'all'));
+  const [q, setQ] = useQueryState<string>('mq', '', asText);
   const { sort, desc, onSort } = useSortParam('lsort');
-  const { data, error, reload } = useLoad(() => api.hostingAdmin<Ledger>('/money/ledger', { month, period, type: typ === 'all' ? null : typ }), [month, period, typ]);
+  const { data, error, reload } = useLoad(() => api.hostingAdmin<Ledger>('/money/ledger', { month, period, type: typ === 'all' ? null : typ, stripe: match === 'all' ? null : match, q: q || null }), [month, period, typ, match, q]);
   const sorted = useSorted(data?.rows, sort, desc, (r, k) => (
     k === 'when' ? r.when : k === 'type' ? TYPE_WORDS[r.type] ?? r.type : k === 'event' ? r.event : k === 'booking' ? bookingOf(r) : k === 'rate' ? r.ratePct
       : k === 'epic' ? r.epicPence : k === 'host' ? hostOf(r) : k === 'reason' ? reasonWords(r.reason) : k === 'stripe' ? r.stripe : null));
@@ -390,12 +398,15 @@ function LedgerView() {
       <FilterRow>
         <Dropdown label="TYPE" value={TYPE_OPTIONS.find((t) => t.key === typ)?.label ?? 'All'} width={220}
                   options={TYPE_OPTIONS.map((t) => ({ key: t.key, label: t.label, on: t.key === typ }))} onPick={setTyp} />
+        <Dropdown label="STRIPE" value={match === 'all' ? 'All' : STRIPE_WORDS[match]} width={180}
+                  options={[{ key: 'all', label: 'All', on: match === 'all' }, { key: 'mismatch', label: 'Mismatch', on: match === 'mismatch' }, { key: 'matched', label: 'Matched', on: match === 'matched' }]} onPick={setMatch} />
         {period === 'month'
           ? <Dropdown label="MONTH" value={periodName} width={220} options={months.map((m) => ({ key: m.key, label: m.label, on: m.key === month }))} onPick={setMonth} />
           : null}
         <Dropdown label="PERIOD" value={period === '30d' ? '30 days' : 'Monthly'} width={180}
                   options={[{ key: 'month', label: 'Monthly', on: period === 'month' }, { key: '30d', label: '30 days', on: period === '30d' }]}
                   onPick={(k) => setPeriod(k as 'month' | '30d')} />
+        <SearchBox value={q} onCommit={(v) => setQ(v)} placeholder="Event, host or booking" />
       </FilterRow>
       {!data ? <Loading error={error} reload={reload} />
         : <Ladder columns={columns} rows={sorted} keyOf={(r) => r.id} sort={sort} desc={desc} onSort={onSort} dense empty={<Blank />} />}
@@ -429,13 +440,23 @@ const REFUND_STATE: Record<string, string> = { succeeded: 'Refunded', pending: '
 
 function PayoutsView() {
   const { data, error, reload } = useLoad(() => api.hostingAdmin<Payouts>('/money/payouts'), []);
-  const [retryError, setRetryError] = React.useState<string | null>(null);
+  const [said, setSaid] = React.useState<{ ok: boolean; words: string } | null>(null);
+  const [releasing, setReleasing] = React.useState<Payout | null>(null);
+  const [why, setWhy] = React.useState('');
+  const n = useSortParam('nsort');
+  type Stuck = NonNullable<Payouts['refundsNeedingAPerson']>[number];
+  const stuck = useSorted<Stuck>(data?.refundsNeedingAPerson, n.sort, n.desc, (x, k) => (k === 'event' ? x.event : k === 'amount' ? x.pence : k === 'stripe' ? x.stripe : k === 'when' ? x.at : null));
+  const act = (p: Promise<'done' | 'filed'>, done: string) => {
+    setSaid(null);
+    p.then((out) => { setSaid({ ok: true, words: out === 'filed' ? 'Sent to Approvals' : done }); setReleasing(null); setWhy(''); reload(); })
+      .catch((e) => setSaid({ ok: false, words: e?.message ?? 'That didn’t go through.' }));
+  };
   const w = useSortParam('wsort');
   const h = useSortParam('hsort');
   const f = useSortParam('fsort');
   const r = useSortParam('rsort');
   const c = useSortParam('csort');
-  const payVal = (p: Payout, k: string) => (k === 'host' ? p.host : k === 'event' ? p.event : k === 'amount' ? p.pence : k === 'pays' ? p.releaseAt : k === 'reason' ? HOLD_WORDS[p.holdReason ?? ''] ?? p.holdReason : null);
+  const payVal = (p: Payout, k: string) => (k === 'host' ? p.host : k === 'event' ? p.event : k === 'amount' ? p.pence : k === 'pays' ? p.releaseAt : k === 'took' ? p.tookPlace : k === 'since' ? p.since : k === 'confirmed' ? p.confirmedBy : k === 'reason' ? HOLD_WORDS[p.holdReason ?? ''] ?? p.holdReason : null);
   const waiting = useSorted(data?.waitingForConfirmation, w.sort, w.desc, payVal);
   const held = useSorted(data?.held, h.sort, h.desc, payVal);
   const failed = useSorted(data?.failed, f.sort, f.desc, payVal);
@@ -452,7 +473,8 @@ function PayoutsView() {
 
   const waitingCols: Col<Payout>[] = [
     host, event,
-    { key: 'confirmed', label: 'Confirmed by', width: 130, tip: tip('Confirmed by', 'Guests who said it happened or left a review. One is enough, and none has yet.'), cell: () => <Blank /> },
+    { key: 'took', label: 'Took place', sort: 'took', width: 140, tip: tip('Took place', 'When the session ended.'), cell: (p) => (p.tookPlace ? <Word>{when(p.tookPlace, true)}</Word> : <Blank />) },
+    { key: 'confirmed', label: 'Confirmed by', sort: 'confirmed', width: 130, align: 'right', tip: tip('Confirmed by', 'Guests who said it happened. One is enough to release it early; a dash is nobody yet.'), cell: (p) => (p.confirmedBy ? <Num n={p.confirmedBy} /> : <Blank />) },
     { key: 'pays', label: 'Pays', sort: 'pays', width: 220, tip: tip('Pays', PAYOUT_RULE),
       cell: (p) => <Word>{`${when(p.releaseAt, true)}, if no complaint`}</Word> },
     amount('Due to the host, tips included.'),
@@ -461,8 +483,12 @@ function PayoutsView() {
     host, event,
     { key: 'reason', label: 'Reason', sort: 'reason', width: 220, tip: tip('Reason', 'Why it is held. A complaint holds it until resolved; missing tax details or an incomplete Stripe set-up hold it until the host adds them.'),
       cell: (p) => (p.holdReason ? <Said colour={amber()}>{HOLD_WORDS[p.holdReason] ?? reasonWords(p.holdReason)}</Said> : <Blank />) },
+    { key: 'since', label: 'Since', sort: 'since', width: 130, tip: tip('Since', 'When the hold began: the complaint, or the payout falling due.'), cell: (p) => (p.since ? <Word>{when(p.since, true)}</Word> : <Blank />) },
     { key: 'pays', label: 'Was due', sort: 'pays', width: 130, tip: tip('Was due', 'When it would have been released.'), cell: (p) => <Word>{when(p.releaseAt, true)}</Word> },
     amount('Held, tips included.'),
+    { key: 'release', label: '', width: 120, tip: tip('Release', 'Pays it now, over a complaint’s hold. Money moves, so it needs the owner signed in; anyone else’s press goes to Approvals. Missing tax details or Stripe set-up still hold it.'),
+      cell: (p) => (p.holdReason === 'tax_details' || p.holdReason === 'stripe_incomplete' ? <Blank />
+        : <Act label="Release" icon="locked" tone="secondary" small onPress={() => { setReleasing(p); setWhy(''); setSaid(null); }} />) },
   ];
   const failedCols: Col<Payout>[] = [
     host, event,
@@ -470,7 +496,7 @@ function PayoutsView() {
     { key: 'pays', label: 'Was due', sort: 'pays', width: 130, tip: tip('Was due', 'When it was released.'), cell: (p) => <Word>{when(p.releaseAt, true)}</Word> },
     amount('Not paid, tips included.'),
     { key: 'retry', label: '', width: 110, tip: tip('Retry', 'Back into the queue once the reason is fixed. Money moves, so it needs the owner signed in; anyone else is told to file it for approval.'),
-      cell: (p) => <TextAction label="Retry" onPress={() => { void api.hostingAdminPost(`/money/payouts/${p.id}/retry`, {}).then(reload).catch((e) => setRetryError(e?.message ?? 'That didn’t go.')); }} /> },
+      cell: (p) => <TextAction label="Retry" onPress={() => act(ownerAct('POST', `/money/payouts/${p.id}/retry`, {}, { change: `Send ${p.host}’s ${gbp(p.pence)} payout to Stripe again`, why: 'Stripe refused the transfer; the reason has been fixed.', affected: { count: 1, unit: 'payouts' } }), 'Back in the queue')} /> },
   ];
   const refundCols: Col<RefundRow>[] = [
     { key: 'cause', label: 'Cause', sort: 'cause', grow: true, tip: tip('Cause', 'Why the money went back.'), cell: (x) => <Word strong={x.total}>{x.total ? 'Total' : reasonWords(x.cause) ?? '—'}</Word> },
@@ -497,9 +523,11 @@ function PayoutsView() {
   const heldPence = data.held.reduce((t, p) => t + p.pence, 0);
   return (
     <View style={{ gap: 26 }}>
+      {said ? <Text style={[s.word, { color: said.ok ? colors.ink : red() }]}>{said.words}</Text> : null}
       <Band kicker="Hosting · Money" title="Payouts, refunds and holds">
         <Stat label="Waiting to confirm" value={data.waitingForConfirmation.length.toLocaleString()} tip={tip('Waiting to confirm', PAYOUT_RULE)} />
         <Stat label="Held" value={data.held.length ? gbp(heldPence) : '—'} tip={tip('Held', `${data.held.length} payouts held, each with its reason.`)} />
+        <Stat label="Paid · 30 days" value={data.paid30.count ? gbp(data.paid30.pence) : '—'} tip={tip('Paid · 30 days', `${data.paid30.count} payouts paid in the last 30 days, tips included.`)} />
         <Stat label="Failed" value={<Text style={data.failed.length ? { color: red() } : null}>{data.failed.length.toLocaleString()}</Text>} tip={tip('Failed', 'Transfers Stripe refused.')} />
         <Stat label="Open holds" value={data.cardHolds.length.toLocaleString()} tip={tip('Open holds', 'Card holds waiting for the host to accept.')} />
       </Band>
@@ -511,10 +539,18 @@ function PayoutsView() {
       <View>
         <TableHead tip={tip('Held payouts', 'Each with its reason. Releasing one by hand needs the owner signed in and goes to Approvals.')}>Held payouts</TableHead>
         <Ladder columns={heldCols} rows={held} keyOf={(p) => p.id} sort={h.sort} desc={h.desc} onSort={h.onSort} empty={<Blank />} />
+        {releasing ? (
+          <View style={s.form}>
+            <Text style={s.word}>{`Release ${gbp(releasing.pence)} to ${releasing.host}`}</Text>
+            <TextInput value={why} onChangeText={setWhy} placeholder="Why" placeholderTextColor={colors.inkMuted} accessibilityLabel="Why" maxLength={500} style={s.input} />
+            <Act label="Release" tone="solid" small disabled={!why.trim()}
+                 onPress={() => act(ownerAct('POST', `/money/payouts/${releasing.id}/release`, { why: why.trim() }, { change: `Release ${releasing.host}’s held payout of ${gbp(releasing.pence)} now`, why: why.trim(), affected: { count: 1, unit: 'payouts' } }), 'Released')} />
+            <TextAction label="Cancel" tone="muted" onPress={() => setReleasing(null)} />
+          </View>
+        ) : null}
       </View>
       <View>
         <TableHead tip={tip('Failed', 'Released, and the transfer did not go through.')}>Failed payouts</TableHead>
-        {retryError ? <Text style={{ color: red(), fontSize: 13 }}>{retryError}</Text> : null}
         <Ladder columns={failedCols} rows={failed} keyOf={(p) => p.id} sort={f.sort} desc={f.desc} onSort={f.onSort} empty={<Blank />} />
       </View>
       <View>
@@ -525,15 +561,16 @@ function PayoutsView() {
       {data.refundsNeedingAPerson?.length ? (
         <View>
           <TableHead tip={tip('Refunds needing a person', 'Stripe refused these. The money stays owed to the guest until someone retries or settles it.')}>Refunds needing a person</TableHead>
-          <Ladder<NonNullable<Payouts['refundsNeedingAPerson']>[number]>
+          <Ladder<Stuck>
             columns={[
-              { key: 'event', label: 'Event', grow: true, tip: tip('Event', 'Whose booking the refund is for.'), cell: (x) => <Word>{x.event ?? '—'}</Word> },
-              { key: 'amount', label: 'Amount', align: 'right', tip: tip('Amount', 'Owed back to the guest.'), cell: (x) => <Word>{gbp(x.pence)}</Word> },
-              { key: 'stripe', label: 'Stripe said', tip: tip('Stripe said', 'Stripe’s own code for the refusal.'), cell: (x) => <Word>{x.stripe ?? '—'}</Word> },
-              { key: 'when', label: 'When', tip: tip('When', 'When the refund was owed.'), cell: (x) => <Word>{when(x.at)}</Word> },
-              { key: 'retry', label: '', cell: (x) => <TextAction label="Retry" onPress={() => { void api.hostingAdminPost(`/money/refunds/${x.id}/retry`, {}).then(reload).catch(() => null); }} /> },
+              { key: 'event', label: 'Event', sort: 'event', grow: true, tip: tip('Event', 'Whose booking the refund is for.'), cell: (x) => (x.event ? <Word>{x.event}</Word> : <Blank />) },
+              { key: 'amount', label: 'Amount', sort: 'amount', width: 120, align: 'right', tip: tip('Amount', 'Owed back to the guest.'), cell: (x) => <Pounds p={x.pence} /> },
+              { key: 'stripe', label: 'Stripe said', sort: 'stripe', width: 220, tip: tip('Stripe said', 'Stripe’s own code for the refusal.'), cell: (x) => (x.stripe ? <Word>{x.stripe}</Word> : <Blank />) },
+              { key: 'when', label: 'When', sort: 'when', width: 110, tip: tip('When', 'When the refund was owed.'), cell: (x) => <Word>{when(x.at)}</Word> },
+              { key: 'retry', label: '', width: 90, tip: tip('Retry', 'Sends it to Stripe again with the same key, so it can never be paid twice.'),
+                cell: (x) => <TextAction label="Retry" onPress={() => act(api.hostingAdminPost(`/money/refunds/${x.id}/retry`, {}).then(() => 'done' as const), 'Sent again')} /> },
             ]}
-            rows={data.refundsNeedingAPerson} keyOf={(x) => x.id} />
+            rows={stuck} keyOf={(x) => x.id} sort={n.sort} desc={n.desc} onSort={n.onSort} />
         </View>
       ) : null}
       <View>
@@ -557,4 +594,6 @@ const s = StyleSheet.create({
   strip: { flexDirection: 'row', alignItems: 'center', gap: 22, flexWrap: 'wrap', paddingVertical: 10, borderTopWidth: 1, borderBottomWidth: 1, borderTopColor: colors.lineSoft, borderBottomColor: colors.lineSoft },
   stripWord: { ...type.small, fontSize: 13, color: colors.ink, fontVariant: ['tabular-nums'] },
   error: { flexDirection: 'row', gap: 14, alignItems: 'center', paddingVertical: 16 },
+  form: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap', paddingTop: 12 },
+  input: { ...type.body, fontSize: 13.5, color: colors.ink, borderBottomWidth: 1, borderBottomColor: colors.lineSoft, paddingVertical: 6, minWidth: 260, flexGrow: 1 },
 });

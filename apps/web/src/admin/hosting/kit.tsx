@@ -11,7 +11,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { Press } from '../../components/press';
-import { colors, fonts } from '../../theme';
+import { AMBER_DARK, colors, desk, fonts, getAdminThemePref, INK, LIME } from '../../theme';
+import { api, ApiError } from '../../api';
 
 export const KIND_WORDS: Record<string, string> = { oneoff: 'One-off', weekly: 'Weekly', course: 'Course', onrequest: 'On request' };
 export const KIND_OPTIONS = [{ key: 'all', label: 'All' }, { key: 'oneoff', label: 'One-off' }, { key: 'weekly', label: 'Weekly' }, { key: 'course', label: 'Course' }, { key: 'onrequest', label: 'On request' }];
@@ -19,18 +20,31 @@ export const KIND_OPTIONS = [{ key: 'all', label: 'All' }, { key: 'oneoff', labe
 const TAB_WORDS: Record<string, string> = { review: 'Review', hosts: 'Hosts', events: 'Events', money: 'Money', safety: 'Safety', settings: 'Settings', reports: 'Reports', changes: 'Changes', older: 'Older offers' };
 
 /** The sub-tabs: words on one line, the chosen one lime-underlined. */
-export function HostingTabs<K extends string>({ value, onPick }: { value: K; onPick: (k: K) => void }) {
+export function HostingTabs<K extends string>({ value, onPick, counts = null }: { value: K; onPick: (k: K) => void; counts?: Partial<Record<K, number>> | null }) {
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 22, borderBottomWidth: 2, borderBottomColor: colors.line, marginBottom: 18 }}>
       {(Object.keys(TAB_WORDS) as K[]).map((k) => (
         <Press key={k} onPress={() => onPick(k)} accessibilityRole="tab" accessibilityState={{ selected: value === k }}
           style={{ paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: value === k ? colors.lime : 'transparent', marginBottom: -2 }}>
-          <Text style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: value === k ? '800' : '600', color: value === k ? colors.ink : colors.inkMuted }}>{TAB_WORDS[k]}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: value === k ? '800' : '600', color: value === k ? colors.ink : colors.inkMuted }}>{TAB_WORDS[k]}</Text>
+            {counts?.[k] ? (
+              <Text style={{ fontFamily: fonts.body, fontSize: 11, fontWeight: '800', color: INK, backgroundColor: LIME, paddingHorizontal: 5, lineHeight: 16, fontVariant: ['tabular-nums'] }}>
+                {counts[k]!.toLocaleString()}
+              </Text>
+            ) : null}
+          </View>
         </Press>
       ))}
     </View>
   );
 }
+
+/** Amber, "attention" (handoff §6): the desk's own on the dark back office, the app's darker one on a light back office. */
+export const amberTone = () => (getAdminThemePref() === 'light' ? AMBER_DARK : desk.amber);
+
+/** Lime, "live" (handoff §1.10): flat lime on the dark back office; on a light one the moss, because lime type never sits on cream. */
+export const liveTone = () => (getAdminThemePref() === 'light' ? colors.accent : LIME);
 
 /** Load once, reload on demand; errors in plain words. */
 export function useLoad<T>(load: () => Promise<T>, deps: unknown[]) {
@@ -68,3 +82,23 @@ export const when = (iso: string | null | undefined, time = false) => {
   const day = `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`;
   return time && iso.length > 10 ? `${day} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' })}` : day;
 };
+
+/**
+ * An owner-only action (the key icon, handoff §7): run it, and if the server
+ * says it needs the owner personally signed in, file it to Approvals with the
+ * exact call and a plain-English brief instead. Says which happened.
+ */
+export async function ownerAct(method: 'POST' | 'PUT', path: string, body: Record<string, unknown>,
+  brief: { change: string; why: string; affected: { count: number; unit: string } }): Promise<'done' | 'filed'> {
+  try {
+    if (method === 'PUT') await api.hostingAdminPut(path, body); else await api.hostingAdminPost(path, body);
+    return 'done';
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.code !== 'needs_personal_sign_in') throw e;
+    await api.fileApproval({
+      request: `${method} /api/admin/hosting${path}`, description: brief.change, payload: body,
+      chat: 'Back office · Hosting', why: brief.why, change: brief.change, affected: brief.affected, costPence: 0,
+    });
+    return 'filed';
+  }
+}

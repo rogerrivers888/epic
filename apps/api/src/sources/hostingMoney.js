@@ -59,7 +59,11 @@ export async function releasePayouts({ now = new Date(), transfer = stripe.trans
       complaintOpen: p.complaint_open, guestConfirmed: p.guest_confirmed, reviewed: p.reviewed,
       taxMissing: !p.tax_reference, stripeReady: p.payouts_state === 'ready' && Boolean(p.stripe_account_id),
     }, s);
-    const d = p.state === 'released' && decided.state !== 'held' ? { state: 'release', by: p.released_by ?? 'time' } : decided;
+    // The owner released it by hand (hostingAdmin, Release): that overrides the clock and a complaint's hold, never a
+    // missing Stripe account or tax details — no transfer can be made without those.
+    const ownerSaid = p.released_by === 'owner' && (decided.state === 'wait' || ['complaint', 'not_set', 'no_end'].includes(decided.reason));
+    const d = ownerSaid ? { state: 'release', by: 'owner' }
+      : p.state === 'released' && decided.state !== 'held' ? { state: 'release', by: p.released_by ?? 'time' } : decided;
     if (d.state === 'wait') { out.waiting += 1; continue; }
     if (d.state === 'held') {
       const changed = await ledger.holdPayout(p.id, d.reason);

@@ -3,8 +3,8 @@
  *
  * The queue is the events a person has to read; `?event=<id>` opens one. The
  * handover's corrections apply (§3): "Host type" is **Kind** (One-off · Weekly
- * · Course · On request), and approving with Checked missing makes the event
- * "Approved · waiting on Checked" — live only once Checked is done. Approve is
+ * · Course · On request), and approving with anything missing makes the event
+ * "Approved · waiting on …" — live once the last of it is done. Approve is
  * never blocked by the screen; the server alone refuses the one thing approval
  * cannot fix (a date already gone), and that refusal is shown as it is said.
  */
@@ -38,6 +38,7 @@ type QueueRow = {
   kind: string | null;
   visibility: string | null;
   state: string;
+  waitingOn?: string[] | null;
   submittedAt: string | null;
   hoursLeft: number | null;
   ai: Ai;
@@ -109,7 +110,7 @@ function flagWords(r: QueueRow): string | null {
   const parts: string[] = [];
   const n = r.ai?.verdict === 'review' ? r.ai.reasons.length : 0;
   if (n) parts.push(String(n));
-  if (r.state === 'approved') parts.push('Waiting on Checked');
+  if (r.state === 'approved') parts.push(`Waiting on ${(r.waitingOn ?? []).join(', ') || 'Checked'}`);
   else if (r.state === 'draft' && r.changesRequested) parts.push('Changes asked');
   return parts.length ? parts.join(' · ') : null;
 }
@@ -183,7 +184,7 @@ function QueueView() {
         return <Text style={[s.cellWord, r.ai?.verdict === 'clear' ? { color: colors.accent, fontWeight: '700' } : r.ai?.verdict === 'review' ? { color: amber } : { color: colors.inkMuted }]}>{w}</Text>;
       } },
     { key: 'flags', label: 'Flags', width: 170, sort: 'flags',
-      tip: ['Flags', 'How many separate things the AI flagged, and whether the event is waiting on Checked or on the host’s changes.'],
+      tip: ['Flags', 'How many separate things the AI flagged, and what an approved event still waits on, or the host’s changes.'],
       cell: (r) => { const w = flagWords(r); return w ? <Word>{w}</Word> : <Blank />; } },
   ];
 
@@ -273,8 +274,8 @@ function OneEventView({ id, canManage }: { id: string; canManage: boolean }) {
     setBusy(what); setSaid(null);
     try {
       if (what === 'approve') {
-        const out = await api.hostingAdminPost<{ outcome: 'live' | 'approved' }>(`/review/${encodeURIComponent(id)}/approve`);
-        setSaid({ tone: 'ok', words: out.outcome === 'live' ? 'Live' : 'Approved · waiting on Checked' });
+        const out = await api.hostingAdminPost<{ outcome: 'live' | 'approved'; waitingOn?: string[] }>(`/review/${encodeURIComponent(id)}/approve`);
+        setSaid({ tone: 'ok', words: out.outcome === 'live' ? 'Live' : `Approved · waiting on ${(out.waitingOn ?? []).join(', ') || 'Checked'}` });
       } else if (what === 'changes') {
         // The newest reason typed here is the one saved to the list for next
         // time; the server adds it to the reasons itself, so it is not sent twice.
@@ -323,7 +324,7 @@ function OneEventView({ id, canManage }: { id: string; canManage: boolean }) {
                   value={<Text style={ev.ai?.verdict === 'review' ? { color: amber } : ev.ai?.verdict === 'clear' ? { color: colors.accent } : null}>{ev.ai?.verdict === 'review' ? 'Requires review' : verdict ?? '—'}</Text>} />
                 <Stat label="Flags" tip={['Flags', 'Separate things the AI flagged.']} value={ev.ai ? flags : '—'} />
                 <Stat label="Status" tip={['Status', 'Where the event is now: in review, live, approved and waiting on Checked, back with the host, or ended.']}
-                  value={stateWords(ev.state)} />
+                  value={stateWords(ev.state, ev.waitingOn)} />
               </View>
             )} />
 
@@ -443,10 +444,10 @@ function OneEventView({ id, canManage }: { id: string; canManage: boolean }) {
   }
 }
 
-function stateWords(state: string): string {
+function stateWords(state: string, waitingOn?: string[] | null): string {
   switch (state) {
     case 'in_review': return 'In review';
-    case 'approved': return 'Approved · waiting on Checked';
+    case 'approved': return `Approved · waiting on ${(waitingOn ?? []).join(', ') || 'Checked'}`;
     case 'live': return 'Live';
     case 'draft': return 'With the host';
     case 'ended': return 'Ended';

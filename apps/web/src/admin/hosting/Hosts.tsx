@@ -24,7 +24,7 @@ import { useViewport } from '../../hooks/useViewport';
 import { Ladder, Num, Word, Blank, Act, Stat, Kicker, Tick, Progress, type Col } from '../table';
 import { FilterRow, Dropdown, TextAction, type DropdownOption } from '../kit';
 import { Explain, type Tip } from '../explain';
-import { KIND_WORDS, KIND_OPTIONS, useLoad, useSorted, gbp, when } from './kit';
+import { KIND_WORDS, KIND_OPTIONS, amberTone, liveTone, ownerAct, useLoad, useSorted, gbp, when } from './kit';
 
 // ---------------------------------------------------------------------------
 // shared with Events.tsx
@@ -48,12 +48,11 @@ export function useSortState(prefix: string, keys: readonly string[], dflt: stri
 
 export type Tone = 'plain' | 'live' | 'attention' | 'refusal' | 'muted';
 /**
- * A state word in its colour role: lime-green for live, attention for waiting
- * or missing, red for refusal or mismatch. `colors` holds no amber of its own,
- * so attention is the back office's warn tone (kit's `Pill`), set heavier.
+ * A state word in its colour role (handoff §1.10): lime for live, amber for
+ * waiting or missing, red for refusal or mismatch only.
  */
 export function Said({ children, tone = 'plain' }: { children: React.ReactNode; tone?: Tone }) {
-  const c = tone === 'live' ? colors.accent : tone === 'attention' ? colors.dislike : tone === 'refusal' ? colors.overrun : tone === 'muted' ? colors.inkMuted : colors.ink;
+  const c = tone === 'live' ? liveTone() : tone === 'attention' ? amberTone() : tone === 'refusal' ? colors.overrun : tone === 'muted' ? colors.inkMuted : colors.ink;
   return <Text numberOfLines={1} style={[s.word, { color: c }, (tone === 'live' || tone === 'attention' || tone === 'refusal') && { fontWeight: '700' }]}>{children}</Text>;
 }
 
@@ -130,8 +129,8 @@ export const Waiting = () => <Text style={s.waiting}>Loading…</Text>;
 export const pct = (n: number | null | undefined) => (n == null ? '—' : `${Number.isInteger(n) ? n : n.toFixed(1)}%`);
 export const stars = (n: number | null | undefined) => (n == null ? '—' : n.toFixed(1));
 const cap = (w: string) => (w ? w.charAt(0).toUpperCase() + w.slice(1).replace(/_/g, ' ') : w);
-export const stateWord = (st: string | null | undefined) => (st ? ({
-  draft: 'Draft', in_review: 'In review', approved: 'Approved · waiting on Checked', live: 'Live', paused: 'Paused', ended: 'Ended',
+export const stateWord = (st: string | null | undefined, waitingOn?: string[] | null) => (st ? ({
+  draft: 'Draft', in_review: 'In review', approved: `Approved · waiting on ${(waitingOn ?? []).join(', ') || 'Checked'}`, live: 'Live', paused: 'Paused', ended: 'Ended',
   called_off: 'Called off', declined: 'Declined', changes_requested: 'Changes asked for',
 } as Record<string, string>)[st] ?? cap(st) : '—');
 export const stateTone = (st: string | null | undefined): Tone => (st === 'live' ? 'live' : st === 'approved' || st === 'in_review' ? 'attention' : st === 'called_off' ? 'refusal' : st === 'ended' ? 'muted' : 'plain');
@@ -302,7 +301,7 @@ function HostList({ onOpen }: { onOpen: (id: string) => void }) {
                     ...(r.rating != null ? [{ key: 'rating', word: `rated ${stars(r.rating)}`, tip: columns[3].tip }] : []),
                   ],
                 })}
-                empty={<Word muted>No hosts match.</Word>} />
+                empty={<Blank />} />
       )}
       {data?.capped ? <Explain tip={tip('The first 1,000', 'The list stops at 1,000 hosts, newest first. Narrow the filters to see the rest.')}><Word muted>First 1,000 only</Word></Explain> : null}
     </View>
@@ -497,11 +496,13 @@ function HostActions({ d, canManage, reload }: { d: HostDetail; canManage: boole
       } else if (acting === 'fee') {
         const v = feePct.trim() === '' ? null : Number(feePct.trim().replace('%', ''));
         if (v != null && !(Number.isFinite(v) && v >= 0 && v <= 100)) { setSaid({ ok: false, words: 'A percentage, 0 to 100, or blank for none.' }); setBusy(false); return; }
-        await api.hostingAdminPost(`/hosts/${h.id}/fee-override`, { pct: v, why: why.trim() });
-        setSaid({ ok: true, words: v == null ? 'Override cleared' : `Fee set to ${pct(v)}` });
+        const out = await ownerAct('POST', `/hosts/${h.id}/fee-override`, { pct: v, why: why.trim() },
+          { change: v == null ? `Clear ${h.name}’s fee override` : `Set ${h.name}’s fee to ${pct(v)} on bookings made after approval`, why: why.trim(), affected: { count: 1, unit: 'hosts' } });
+        setSaid({ ok: true, words: out === 'filed' ? 'Sent to Approvals' : v == null ? 'Override cleared' : `Fee set to ${pct(v)}` });
       } else {
-        await api.hostingAdminPost(`/hosts/${h.id}/remove`, { why: why.trim() });
-        setSaid({ ok: true, words: 'Host removed' });
+        const out = await ownerAct('POST', `/hosts/${h.id}/remove`, { why: why.trim() },
+          { change: `Remove ${h.name} as a host and end their events`, why: why.trim(), affected: { count: 1, unit: 'hosts' } });
+        setSaid({ ok: true, words: out === 'filed' ? 'Sent to Approvals' : 'Host removed' });
       }
       setActing(null);
       reload();
@@ -557,11 +558,11 @@ function EventsLadder({ events }: { events: HostEvent[] }) {
   const { setQuery } = useRouter();
   const [sort, setSort] = useState<string | null>(null);
   const [desc, setDesc] = useState(false);
-  const rows = useSorted(events, sort, desc, (e, k) => (k === 'title' ? e.title : k === 'kind' ? (e.visibility === 'public' ? KIND_WORDS[e.kind ?? ''] : null) : k === 'state' ? stateWord(e.state) : k === 'starts' ? e.startsOn : k === 'vis' ? e.visibility : null));
+  const rows = useSorted(events, sort, desc, (e, k) => (k === 'title' ? e.title : k === 'kind' ? (e.kind ? KIND_WORDS[e.kind] ?? e.kind : null) : k === 'state' ? stateWord(e.state) : k === 'starts' ? e.startsOn : k === 'vis' ? e.visibility : null));
   const columns: Col<HostEvent>[] = [
     { key: 'title', label: 'Event', sort: 'title', grow: true, tip: tip('Event', 'As titled by the host. Opens the event.'), cell: (e) => <Word strong>{e.title}</Word> },
-    { key: 'kind', label: 'Kind', sort: 'kind', width: 100, tip: tip('Kind', 'One-off, weekly, course or on request. Private events have no kind.'),
-      cell: (e) => (e.visibility === 'public' && e.kind ? <Word>{KIND_WORDS[e.kind] ?? e.kind}</Word> : <Blank />) },
+    { key: 'kind', label: 'Kind', sort: 'kind', width: 100, tip: tip('Kind', 'One-off, weekly, course or on request.'),
+      cell: (e) => (e.kind ? <Word>{KIND_WORDS[e.kind] ?? e.kind}</Word> : <Blank />) },
     { key: 'vis', label: 'Visibility', sort: 'vis', width: 100, tip: tip('Visibility', 'Public, or private.'), cell: (e) => <Word>{e.visibility === 'public' ? 'Public' : 'Private'}</Word> },
     { key: 'state', label: 'Status', sort: 'state', width: 210, tip: tip('Status', 'Draft, in review, approved and waiting on Checked, live, paused, called off or ended.'),
       cell: (e) => <Said tone={stateTone(e.state)}>{stateWord(e.state)}</Said> },
@@ -571,7 +572,7 @@ function EventsLadder({ events }: { events: HostEvent[] }) {
     <Ladder columns={columns} rows={rows} keyOf={(e) => e.id} dense label={(e) => `Open ${e.title}`}
             onRow={(e) => setQuery({ tab: 'events', event: e.id, host: null, htab: null }, { replace: false })}
             sort={sort} desc={desc} onSort={(k) => { if (sort === k) setDesc(!desc); else { setSort(k); setDesc(false); } }}
-            empty={<Word muted>No events yet.</Word>} />
+            empty={<Blank />} />
   );
 }
 
@@ -639,7 +640,7 @@ function ProfileAndVideos({ id }: { id: string }) {
         <Ladder columns={columns} rows={rows} keyOf={(v) => v.id} dense onRow={(v) => { setPicked(picked === v.id ? null : v.id); setTranscript(false); }}
                 highlight={(v) => v.id === picked} label={(v) => `Play ${v.where}`}
                 sort={sort} desc={desc} onSort={(k) => { if (sort === k) setDesc(!desc); else { setSort(k); setDesc(false); } }}
-                empty={<Word muted>No videos.</Word>} />
+                empty={<Blank />} />
         {sel ? (
           <View style={{ gap: 0, marginTop: 14 }}>
             <View style={s.blockHead}><Kicker>The one selected</Kicker></View>
@@ -774,7 +775,7 @@ function HostChanges({ id }: { id: string }) {
     <View style={{ gap: 10 }}>
       <Ladder columns={columns} rows={rows} keyOf={(c) => c.id} dense sort={sort} desc={desc}
               onSort={(k) => { if (sort === k) setDesc(!desc); else { setSort(k); setDesc(false); } }}
-              empty={<Word muted>No changes.</Word>} />
+              empty={<Blank />} />
       {data.capped ? <Explain tip={tip('Newest only', `The newest ${data.limit} changes. Older ones are not in this list.`)}><Word muted>{`Newest ${data.limit} only`}</Word></Explain> : null}
     </View>
   );

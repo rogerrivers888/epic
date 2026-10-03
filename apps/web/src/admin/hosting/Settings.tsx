@@ -16,7 +16,8 @@ import { asText, useQueryState } from '../../router';
 import { AMBER_DARK, BORDER, colors, desk, fonts, onThemeChange, spacing, type } from '../../theme';
 import { Banner, Choice, PageHead, TextAction } from '../kit';
 import { Act, Blank, Footer, Kicker, Ladder, Stat, Word, type Col } from '../table';
-import { useLoad, useSorted, when } from './kit';
+import { ownerAct, useLoad, useSorted, when } from './kit';
+import { Explain } from '../explain';
 
 // ---------------------------------------------------------------------------
 // payloads (routes/hostingMoney.js `settingPayload`)
@@ -36,12 +37,21 @@ type Setting = {
   changedAt: string | null;
   changedBy: string | null;
   approvalId: string | null;
+  pending?: { approvalId: string; value: unknown; isOn?: boolean; why: string | null; at: string } | null;
 };
 
 type LadderStep = { pct: number; ratedEvents?: number; avgAtLeast?: number };
 type RefundTier = { fullHoursBefore?: number; partHoursBefore?: number; partPct?: number };
 
 const SORTS = ['setting', 'value', 'on', 'changed', 'by'] as const;
+
+/** The rating thresholds, by the names Safety and Standing both read. Only the average is required. */
+const THRESHOLDS = [
+  { key: 'avgBelowAtRisk', label: 'At risk below an average of', max: 5 },
+  { key: 'minRated', label: 'Once rated events reach', max: 1000 },
+  { key: 'lateChangesAtRisk', label: 'At risk at late changes in 90 days', max: 1000 },
+  { key: 'complaintsUnderReview', label: 'Under review at open complaints', max: 1000 },
+] as const;
 
 function useAmber() {
   const [light, setLight] = useState(() => Platform.OS === 'web' && typeof document !== 'undefined'
@@ -59,7 +69,7 @@ export function SettingsTab() {
   const [sort, setSort] = useQueryState<string>('sort', '', { read: (r) => ((SORTS as readonly string[]).includes(r) ? r : null), write: (v) => v || null });
   const [desc, setDesc] = useQueryState<boolean>('desc', false, { read: (r) => r === '1', write: (v) => (v ? '1' : null) });
   const [edit, setEdit] = useQueryState<string>('edit', '', asText);
-  const { data, error, reload } = useLoad<{ settings: Setting[] }>(() => api.hostingAdmin<{ settings: Setting[] }>('/settings'), []);
+  const { data, error, reload } = useLoad<{ settings: Setting[]; waitingApproval?: number }>(() => api.hostingAdmin<{ settings: Setting[]; waitingApproval?: number }>('/settings'), []);
 
   const rows = useSorted(data?.settings, sort || null, desc, (r, k) => {
     switch (k) {
@@ -80,9 +90,18 @@ export function SettingsTab() {
     { key: 'value', label: 'Value', width: 440, sort: 'value',
       tip: ['Value', 'What is in force now. A fee change applies to bookings made after it, never to existing ones.'],
       cellTip: (r) => (r.toSet ? ['To set', 'No value yet. Anything depending on it shows a dash.'] : null),
-      cell: (r) => (r.toSet
-        ? <Text style={[s.word, { color: amber, fontWeight: '700' }]}>— To set</Text>
-        : <Text style={[s.word, r.isOn === false && { color: colors.inkMuted }]}>{r.words}</Text>) },
+      cell: (r) => (
+        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+          {r.toSet
+            ? <Text style={[s.word, { color: amber, fontWeight: '700' }]}>— To set</Text>
+            : <Text style={[s.word, r.isOn === false && { color: colors.inkMuted }]}>{r.words}</Text>}
+          {r.pending ? (
+            <Explain tip={['Waiting approval', `Filed ${when(r.pending.at)}${r.pending.why ? `: ${r.pending.why}` : ''}. It changes only when the owner approves it in Approvals.`]}>
+              <Text style={[s.word, { color: amber, fontWeight: '700' }]}>· Waiting approval</Text>
+            </Explain>
+          ) : null}
+        </View>
+      ) },
     { key: 'on', label: 'On', width: 60, align: 'centre', sort: 'on',
       tip: ['On', 'Some rules can be switched off without losing their value. A dash where a rule cannot be switched off.'],
       cell: (r) => (r.switchable ? <Word strong={r.isOn !== false} muted={r.isOn === false}>{r.isOn === false ? 'Off' : 'On'}</Word> : <Blank />) },
@@ -107,6 +126,7 @@ export function SettingsTab() {
           <View style={s.stats}>
             <Stat label="Settings" value={data ? data.settings.length : '—'} tip={['Settings', 'Each one is read when it is used, never copied into code.']} />
             <Stat label="To set" value={toSet ?? '—'} accent={false} tip={['To set', 'No value yet. Anything depending on them shows a dash.']} />
+            <Stat label="Waiting approval" value={data ? data.waitingApproval ?? 0 : '—'} accent={false} tip={['Waiting approval', 'Changes proposed and not yet decided by the owner in Approvals.']} />
           </View>
         )} />
 
@@ -163,6 +183,11 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
       case 'intro': return { days: str(v?.days), bookings: str(v?.bookings) };
       case 'tip': return { pct: str(v?.pct), min: pounds(v?.minPence) };
       case 'on_request': return { notice: str(v?.noticeHours), perWeek: str(v?.perWeek) };
+      // Older names are read into the ones Safety and Standing both use (hostingAdmin.ratingThresholds).
+      case 'thresholds': return {
+        avgBelowAtRisk: str(v?.avgBelowAtRisk ?? v?.avgBelow), minRated: str(v?.minRated ?? v?.minReviews),
+        lateChangesAtRisk: str(v?.lateChangesAtRisk), complaintsUnderReview: str(v?.complaintsUnderReview),
+      };
       default: return {};
     }
   });
@@ -175,10 +200,6 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
       : { part: false, hours: str(x?.fullHoursBefore), pct: '' });
     return { flexible: t(v?.flexible), moderate: t(v?.moderate), strict: t(v?.strict) };
   });
-  const [pairs, setPairs] = useState<{ name: string; n: string }[]>(() =>
-    (v && typeof v === 'object' && !Array.isArray(v) && setting.unit === 'thresholds'
-      ? Object.entries(v as Record<string, number>).map(([name, n]) => ({ name, n: String(n) }))
-      : [{ name: '', n: '' }]));
   const [isOn, setIsOn] = useState<boolean>(setting.isOn !== false);
   const [why, setWhy] = useState('');
   const [busy, setBusy] = useState(false);
@@ -230,17 +251,18 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
       }
       case 'thresholds': {
         const out: Record<string, number> = {};
-        for (const p of pairs) {
-          if (!p.name.trim() && !p.n.trim()) continue;
-          const n = Number(p.n.trim());
-          if (!p.name.trim() || p.n.trim() === '' || !Number.isFinite(n)) return bad('Each threshold needs a name and a number');
-          out[p.name.trim()] = n;
+        for (const t of THRESHOLDS) {
+          const raw = (f[t.key] ?? '').trim();
+          if (!raw) continue;
+          const n = Number(raw);
+          if (!Number.isFinite(n) || n < 0 || n > t.max) return bad(`${t.label}: a number from 0 to ${t.max}`);
+          out[t.key] = n;
         }
-        return Object.keys(out).length ? { ok: true, value: out } : bad('At least one threshold');
+        return out.avgBelowAtRisk == null ? bad('The average a host is at risk below') : { ok: true, value: out };
       }
       default: return bad(`Epic does not know how to edit ${setting.unit}`);
     }
-  }, [setting.unit, f, flag, steps, tiers, pairs]);
+  }, [setting.unit, f, flag, steps, tiers]);
 
   const valueChanged = parsed.ok && JSON.stringify(parsed.value) !== JSON.stringify(setting.value);
   const onChanged = setting.switchable && isOn !== (setting.isOn !== false);
@@ -253,17 +275,15 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
       const body: Record<string, unknown> = { why: why.trim() };
       if (valueChanged) body.value = parsed.value;
       if (onChanged) body.isOn = isOn;
-      await api.hostingAdminPut(`/settings/${encodeURIComponent(setting.key)}`, body);
-      setSaid({ tone: 'accent', words: 'Saved' });
+      // The owner signed in saves it; anyone else's press is filed to Approvals with the exact change (handoff §7).
+      const out = await ownerAct('PUT', `/settings/${encodeURIComponent(setting.key)}`, body, {
+        change: `${setting.label}: ${valueChanged ? 'a new value' : ''}${valueChanged && onChanged ? ', and ' : ''}${onChanged ? (isOn ? 'switched on' : 'switched off') : ''}. Bookings made after approval only.`,
+        why: why.trim(), affected: { count: 1, unit: 'settings' },
+      });
+      setSaid({ tone: 'accent', words: out === 'filed' ? 'Sent to Approvals' : 'Saved' });
       onSaved();
     } catch (e: any) {
-      if (e instanceof ApiError && e.code === 'needs_personal_sign_in') {
-        setSaid({
-          tone: 'crit',
-          words: 'This needs the owner signed in personally. An agent files it for approval instead.',
-          detail: typeof e.body?.message === 'string' ? e.body.message : undefined,
-        });
-      } else setSaid({ tone: 'crit', words: e?.message ?? 'That didn’t save.' });
+      setSaid({ tone: 'crit', words: e instanceof ApiError ? e.message : e?.message ?? 'That didn’t save.' });
     } finally {
       setBusy(false);
     }
@@ -332,15 +352,12 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
     ); break;
     case 'thresholds': fields = (
       <View style={{ gap: 8 }}>
-        {pairs.map((p, i) => (
-          <Line key={i}>
-            <TextInput value={p.name} onChangeText={(t) => setPairs((x) => x.map((y, j) => (j === i ? { ...y, name: t } : y)))}
-              placeholder="name" placeholderTextColor={colors.inkMuted} style={[s.input, { width: 200 }]} accessibilityLabel={`Threshold ${i + 1} name`} />
-            {small(p.n, (t) => setPairs((x) => x.map((y, j) => (j === i ? { ...y, n: t } : y))), `Threshold ${i + 1} value`, 80)}
-            {pairs.length > 1 ? <TextAction label="Remove" tone="muted" onPress={() => setPairs((x) => x.filter((_y, j) => j !== i))} /> : null}
+        {THRESHOLDS.map((t) => (
+          <Line key={t.key}>
+            <Unit>{t.label}</Unit>
+            {small(f[t.key] ?? '', (x) => setF((y) => ({ ...y, [t.key]: x })), t.label, 80)}
           </Line>
         ))}
-        {pairs.length < 12 ? <TextAction label="Add a threshold" onPress={() => setPairs((x) => [...x, { name: '', n: '' }])} /> : null}
       </View>
     ); break;
     default: fields = <Blank />;
@@ -363,7 +380,9 @@ function SettingEditor({ setting, onClose, onSaved }: { setting: Setting; onClos
       {said ? <Banner tone={said.tone}>{said.words}</Banner> : null}
       {said?.detail ? <Text style={[s.word, { color: colors.inkMuted }]}>{said.detail}</Text> : null}
       <Footer>
-        <Act tone="solid" label={busy ? '…' : 'Save'} icon="check" onPress={save} disabled={!ready} />
+        <Explain tip={['Propose a change', 'Needs the owner signed in personally: it saves at once for the owner, and anyone else’s goes to Approvals. Logged in Changes; a fee change applies to bookings made after it.']} cursor="pointer">
+          <Act tone="solid" label={busy ? '…' : 'Propose a change'} icon="locked" onPress={save} disabled={!ready} />
+        </Explain>
         <Act tone="secondary" label="Close" onPress={onClose} />
       </Footer>
     </View>

@@ -63,7 +63,7 @@ function reviewRow(o, s) {
   return {
     offerId: o.id, title: o.title, host: o.host_name, hostId: o.host_id, kind: o.lane, visibility: o.visibility, state: o.state,
     submittedAt: o.submitted_at, hoursLeft: leftH,
-    ai: !ai ? null : ai.state === 'done' ? { verdict: ai.needsPerson ? 'review' : 'clear', reasons: ai.reasons ?? [] } : ai.state === 'failed' ? { verdict: 'review', reasons: ['The check did not finish'] } : { verdict: ai.state, reasons: [] },
+    ai: !ai || ai.state === 'not_needed' ? null : ai.state === 'done' ? { verdict: ai.needsPerson ? 'review' : 'clear', reasons: ai.reasons ?? [] } : ai.state === 'failed' ? { verdict: 'review', reasons: ['The check did not finish'] } : { verdict: ai.state, reasons: [] },
     changesRequested: o.changes_requested ?? null,
   };
 }
@@ -84,7 +84,9 @@ router.get('/review', requires('view_hosting'), async (req, res, next) => {
     const { rows: [today] } = await query(
       `select count(*)::int as n from hosting_changes where subject_kind = 'event' and field = 'review' and at >= date_trunc('day', now()) and after->>'outcome' = 'live'`,
     );
-    res.json({ rows: rows.map((o) => reviewRow(o, s)), wentLiveToday: today.n, reviewHours: s.review_window ?? null, capped: rows.length === 500 });
+    const out = [];
+    for (const o of rows) out.push({ ...reviewRow(o, s), waitingOn: o.state === 'approved' ? waitingFor(o, await repo.hostById(o.host_id)) : null });
+    res.json({ rows: out, wentLiveToday: today.n, reviewHours: s.review_window ?? null, capped: rows.length === 500 });
   } catch (err) { next(err); }
 });
 
@@ -101,7 +103,7 @@ router.get('/review/:id', requires('view_hosting'), async (req, res, next) => {
     const { rows: reasons } = await query('select label from review_change_reasons order by label');
     res.json({
       event: {
-        ...reviewRow({ ...o, host_name: host?.name }, s),
+        ...reviewRow({ ...o, host_name: host?.name }, s), waitingOn: o.state === 'approved' ? waitingFor(o, host) : null,
         summary: o.summary, description: o.description, photo: mediaRef(o.photo_ids?.[0]), startsOn: ymd(o.starts_on), startsAt: hm(o.starts_at),
         pricePence: o.price_pence, priceMode: o.price_mode, ageMin: o.age_min, ageMax: o.age_max, parents: o.parents, venueArea: o.venue_area,
         video: o.video_id ? { url: mediaRef(o.video_id), transcript: o.transcript ?? null, flags: (o.review_ai?.reasons ?? []).map((r) => ({ at: o.review_ai?.at ?? null, reason: r })) } : null,
@@ -119,10 +121,10 @@ router.get('/review/:id', requires('view_hosting'), async (req, res, next) => {
 });
 
 /**
- * Approve. Never blocked by a missing Checked (BO8b): it records that the
- * reviewer has checked everything, and the event becomes "Approved · waiting
- * on Checked", live once Checked is done. A date already gone is the one thing
- * approval can't fix — that goes back to the host.
+ * Approve. Never blocked (BO8b): pressing it records that the reviewer has
+ * checked everything. Anything still missing — Checked, Verified, Payouts, a
+ * date gone — makes the event "Approved · waiting on …", and it goes live by
+ * itself once the last of them is done (`releaseApproved`).
  */
 router.post('/review/:id/approve', requires('manage_hosting'), async (req, res, next) => {
   try {
@@ -131,19 +133,14 @@ router.post('/review/:id/approve', requires('manage_hosting'), async (req, res, 
       const { rows: [o] } = await c.query('select * from host_offers where id = $1 for update', [req.params.id]);
       if (!o || o.state !== 'in_review') throw refuse(404, 'not_in_review', 'That event isn’t waiting to be read.');
       const host = await repo.hostById(o.host_id, c);
-      const blockers = laneBlockers(o, host, hostingConfig());
-      const items = checklist(o, { host, account: { email: 'x', mobile: 'x' } }, hostingConfig());
-      const checkedMissing = items.some((i) => i.key === 'checked' && !i.done);
-      // Checked is the one thing approval may wait on; anything else missing goes back to the host (Codex, 2 Oct 2026).
-      const other = blockers.find((b) => b !== CHECK_WORDS.checked);
-      if (other) throw refuse(409, 'not_ready', `${other} Ask for changes instead.`);
-      const outcome = checkedMissing ? 'approved' : 'live';
+      const waitingOn = waitingFor(o, host);
+      const outcome = waitingOn.length ? 'approved' : 'live';
       await c.query(
         `update host_offers set state = $2, approved_at = now(), reviewed_at = now(), published_at = case when $2 = 'live' then now() else published_at end, changes_requested = null where id = $1`,
         [o.id, outcome],
       );
-      await logChange({ subjectKind: 'event', subjectId: o.id, field: 'review', before: { state: 'in_review' }, after: { outcome }, why: checkedMissing ? 'Approved · waiting on Checked' : 'Approved', by: by(), byLabel: 'staff' }, c);
-      return { outcome };
+      await logChange({ subjectKind: 'event', subjectId: o.id, field: 'review', before: { state: 'in_review' }, after: { outcome }, why: waitingOn.length ? `Approved · waiting on ${waitingOn.join(', ')}` : 'Approved', by: by(), byLabel: 'staff' }, c);
+      return { outcome, waitingOn };
     });
     res.json(out);
   } catch (err) { next(err); }
@@ -182,7 +179,14 @@ router.post('/review/:id/decline', requires('manage_hosting'), async (req, res, 
   } catch (err) { next(err); }
 });
 
-/** Approved and waiting on Checked: live as soon as Checked holds. Run by the hosting money loop. */
+/** What an approved event still waits on, in the checklist's words: Checked, Verified, Payouts, Profile, a date. Empty when it can go live. */
+export function waitingFor(o, host) {
+  const blockers = laneBlockers(o, host, hostingConfig());
+  const words = { [CHECK_WORDS.checked]: 'Checked', [CHECK_WORDS.verified]: 'Verified', [CHECK_WORDS.payouts]: 'Payouts', [CHECK_WORDS.profile]: 'Profile', [CHECK_WORDS.tax]: 'Tax details', [CHECK_WORDS.video]: 'Video' };
+  return [...new Set(blockers.map((b) => words[b] ?? 'the host'))];
+}
+
+/** Approved and waiting: live as soon as nothing is missing. Run by the hosting money loop. */
 export async function releaseApproved() {
   const { rows } = await query(`select o.* from host_offers o where o.state = 'approved' and o.lane is not null`);
   let n = 0;
@@ -190,10 +194,10 @@ export async function releaseApproved() {
     const host = await repo.hostById(o.host_id);
     const items = checklist(o, { host, account: { email: 'x', mobile: 'x' } }, hostingConfig());
     if (items.some((i) => i.key === 'checked' && !i.done)) continue;
-    // Checked came after the date had gone: it stays out, for the host to pick a new date (Codex, 2 Oct 2026).
+    // Anything still missing — or a date gone while it waited — keeps it out, for the host to finish (Codex, 2 Oct 2026).
     if (laneBlockers(o, host, hostingConfig()).length) continue;
     const { rowCount } = await query(`update host_offers set state = 'live', published_at = now() where id = $1 and state = 'approved'`, [o.id]);
-    if (rowCount) { n += 1; await logChange({ subjectKind: 'event', subjectId: o.id, field: 'state', before: { state: 'approved' }, after: { state: 'live' }, why: 'Checked done', byLabel: 'epic' }); }
+    if (rowCount) { n += 1; await logChange({ subjectKind: 'event', subjectId: o.id, field: 'state', before: { state: 'approved' }, after: { state: 'live' }, why: 'Nothing left missing', byLabel: 'epic' }); }
   }
   return n;
 }
@@ -291,6 +295,8 @@ router.get('/hosts/:id', requires('view_hosting'), async (req, res, next) => {
     });
   } catch (err) { next(err); }
 });
+
+router.param('id', (req, _res, next, id) => (UUID.test(String(id)) ? next() : next(refuse(404, 'not_found', 'Not found.'))));
 
 router.get('/hosts/:id/videos', requires('view_hosting'), async (req, res, next) => {
   try {
@@ -411,8 +417,13 @@ router.get('/events', requires('view_hosting'), async (req, res, next) => {
     const { rows: drafts } = await query(`select lane, draft_step, count(*)::int as n from host_offers where state = 'draft' and lane is not null group by 1, 2`);
     const byStep = {};
     for (const k of KINDS) byStep[k] = (SEQ[k] ?? []).map((step) => ({ step, n: drafts.find((d) => d.lane === k && d.draft_step === step)?.n ?? 0 }));
+    const waiting = new Map();
+    for (const e of rows.filter((x) => x.state === 'approved')) {
+      const o = await repo.offerById(e.id);
+      waiting.set(e.id, waitingFor(o, await repo.hostById(o.host_id)));
+    }
     res.json({
-      rows: rows.map((e) => ({ id: e.id, title: e.title, host: e.host, kind: e.visibility === 'public' ? e.lane : null, lane: e.lane, state: e.called_off_at ? 'called_off' : e.state, visibility: e.visibility === 'public' ? 'Public' : 'Private', booked: e.booked, min: e.min_count, max: e.max_count, decidesBy: ymd(e.decides_at), next: ymd(e.next_date), priceMode: e.price_mode })),
+      rows: rows.map((e) => ({ id: e.id, title: e.title, host: e.host, kind: e.lane, lane: e.lane, waitingOn: waiting.get(e.id) ?? null, state: e.called_off_at ? 'called_off' : e.state, visibility: e.visibility === 'public' ? 'Public' : 'Private', booked: e.booked, min: e.min_count, max: e.max_count, decidesBy: ymd(e.decides_at), next: ymd(e.next_date), priceMode: e.price_mode })),
       draftsByStep: byStep, capped: rows.length === 1000,
     });
   } catch (err) { next(err); }
@@ -432,20 +443,20 @@ router.get('/events/:id', requires('view_hosting'), async (req, res, next) => {
          from offer_sessions s where s.offer_id = $1 order by s.on_date, s.starts_at`, [o.id],
     );
     const { rows: refunds } = await query(
-      `select p.amount_pence, p.cause, p.state, p.stripe_ref, p.stripe_match, p.created_at, hh.name as household, b.heads
+      `select p.amount_pence, p.cause, p.state, p.stripe_ref, p.stripe_match, p.created_at, hh.name as household, b.heads, b.id as booking_id
          from hosting_payments p join experience_bookings b on b.id = p.booking_id join households hh on hh.id = b.household_id
         where p.offer_id = $1 and p.kind in ('refund', 'release') order by p.created_at`, [o.id],
     );
     const { rows: [money] } = await query(`select coalesce(sum(charged_pence), 0)::int as held, count(*)::int as bookings from experience_bookings where offer_id = $1 and payment_state in ('charged', 'partially_refunded')`, [o.id]);
     const numbers = o.price_mode === 'by_numbers' && o.total_pence && o.min_count
-      ? (() => { const heads = sessions[0]?.booked ?? 0; const paidEach = Math.ceil(o.total_pence / o.min_count); const nowEach = Math.ceil(o.total_pence / Math.max(heads, o.min_count)); return { priceNowEach: nowEach, heldFromEach: paidEach, dueBackPence: (paidEach - nowEach) * heads }; })()
+      ? (() => { const ahead = sessions.find((x) => x.state === 'scheduled' && ymd(x.on_date) >= localDay(new Date())) ?? sessions[0]; const heads = ahead?.booked ?? 0; const paidEach = Math.ceil(o.total_pence / o.min_count); const nowEach = Math.ceil(o.total_pence / Math.max(heads, o.min_count)); return { priceNowEach: nowEach, heldFromEach: paidEach, dueBackPence: (paidEach - nowEach) * heads }; })()
       : null;
     res.json({
-      event: { id: o.id, title: o.title, host: host?.name, hostId: o.host_id, kind: o.lane, state: o.called_off_at ? 'called_off' : o.state, visibility: o.visibility, min: o.min_count, max: o.max_count, priceMode: o.price_mode, pricePence: o.price_pence, totalPence: o.total_pence, refundPolicy: o.refund_policy, heldPence: money.held, bookings: money.bookings },
+      event: { id: o.id, title: o.title, host: host?.name, hostId: o.host_id, kind: o.lane, state: o.called_off_at ? 'called_off' : o.state, waitingOn: o.state === 'approved' ? waitingFor(o, host) : null, visibility: o.visibility, min: o.min_count, max: o.max_count, priceMode: o.price_mode, pricePence: o.price_pence, totalPence: o.total_pence, refundPolicy: o.refund_policy, heldPence: money.held, bookings: money.bookings },
       numbers,
       hostIsPaid: typeof s.payout_release === 'number' ? { hours: s.payout_release, earlyOnConfirm: s.payout_early_on_confirm === true } : null,
       sessions: sessions.map((x) => ({ id: x.id, n: x.n, date: ymd(x.on_date), time: hm(x.starts_at), booked: x.booked, state: x.state, decided: x.decided_outcome, decidesAt: x.decides_at, confirmedBy: x.confirmed_by, payout: x.payout_state ?? null, late: x.late })),
-      refunds: refunds.map((r) => ({ household: r.household, heads: r.heads, pence: r.amount_pence, cause: r.cause, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null, at: r.created_at })),
+      refunds: refunds.map((r) => ({ booking: r.booking_id.slice(0, 8), bookingId: r.booking_id, household: r.household, heads: r.heads, pence: r.amount_pence, cause: r.cause, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null, at: r.created_at })),
     });
   } catch (err) { next(err); }
 });
@@ -486,20 +497,23 @@ router.get('/money/streams', requires('view_hosting'), async (req, res, next) =>
     );
     const pub = b.filter((x) => x.visibility === 'public');
     const sum = (rows, k) => rows.reduce((t, x) => t + x[k], 0);
+    const rateOf = (rows) => { const v = sum(rows, 'value'); return v ? Math.round((sum(rows, 'epic') / v) * 1000) / 10 : null; };
     const row = (key, name, rows, rate) => ({ key, stream: name, bookingValuePence: rows.length ? sum(rows, 'value') : null, ratePct: rate, count: sum(rows, 'n'), epicPence: sum(rows, 'epic'), toHostsPence: sum(rows, 'host') });
     const streams = [
-      (() => { const std = pub.filter((x) => ['standard', 'override', 'minimum'].includes(x.fee_reason)); const v = sum(std, 'value'); return row('public', 'Public commission', std, v ? Math.round((sum(std, 'epic') / v) * 1000) / 10 : null); })(),
-      row('host_link', 'Host-link bookings', pub.filter((x) => x.fee_reason === 'host_link'), typeof (await settingsRepo.current()).host_link_rate === 'number' ? (await settingsRepo.current()).host_link_rate : null),
+      (() => { const std = pub.filter((x) => ['standard', 'override', 'minimum'].includes(x.fee_reason)); return row('public', 'Public commission', std, rateOf(std)); })(),
+      (() => { const r = pub.filter((x) => x.fee_reason === 'host_link'); return row('host_link', 'Host-link bookings', r, rateOf(r)); })(),
       row('intro', 'Intro 0%', pub.filter((x) => x.fee_reason === 'intro'), 0),
-      row('private_payment', 'Private payment fee', b.filter((x) => x.fee_reason === 'private_payment'), (await settingsRepo.current()).private_payment_fee ?? null),
+      (() => { const r = b.filter((x) => x.fee_reason === 'private_payment'); return row('private_payment', 'Private payment fee', r, rateOf(r)); })(),
       { key: 'private_fee', stream: 'Private event fee', bookingValuePence: null, ratePct: null, count: p.find((x) => x.kind === 'private_fee')?.n ?? 0, epicPence: p.find((x) => x.kind === 'private_fee')?.epic ?? 0, toHostsPence: 0 },
       { key: 'pro', stream: 'Pro', bookingValuePence: null, ratePct: null, count: p.find((x) => x.kind === 'pro')?.n ?? 0, epicPence: p.find((x) => x.kind === 'pro')?.value ?? 0, toHostsPence: 0 },
       { key: 'tips', stream: 'Tip admin fees', bookingValuePence: p.find((x) => x.kind === 'tip')?.value ?? null, ratePct: null, count: p.find((x) => x.kind === 'tip')?.n ?? 0, epicPence: p.find((x) => x.kind === 'tip')?.epic ?? 0, toHostsPence: p.find((x) => x.kind === 'tip')?.host ?? 0 },
     ];
     const total = { epicPence: streams.reduce((t, x) => t + x.epicPence, 0), toHostsPence: streams.reduce((t, x) => t + x.toHostsPence, 0), count: streams.reduce((t, x) => t + x.count, 0) };
     const s = await settingsRepo.current();
+    const { rows: [back] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_payments where kind = 'refund' and state = 'succeeded' and created_at >= $1 and created_at < $2`, [from, to]);
+    const { rows: [claims] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_complaints where kind = 'guarantee_claim' and state = 'paid' and resolved_at >= $1 and resolved_at < $2`, [from, to]);
     const { rows: [rec] } = await query('select ran_at, checked, mismatched from stripe_reconciliations order by ran_at desc limit 1');
-    res.json({ period: label, streams, total, guaranteePool: s.guarantee_pool == null ? null : { pence: s.guarantee_pool }, reconciliation: rec ? { ranAt: rec.ran_at, checked: rec.checked, mismatched: rec.mismatched } : null });
+    res.json({ period: label, streams, total, refunded: { count: back.n, pence: back.pence }, guaranteeClaims: { count: claims.n, pence: claims.pence }, guaranteePool: s.guarantee_pool == null ? null : { pence: s.guarantee_pool }, reconciliation: rec ? { ranAt: rec.ran_at, checked: rec.checked, mismatched: rec.mismatched } : null });
   } catch (err) { next(err); }
 });
 
@@ -507,11 +521,15 @@ router.get('/money/ledger', requires('view_hosting'), async (req, res, next) => 
   try {
     const { from, to } = periodOf(req.query);
     const type = typeof req.query.type === 'string' && /^[a-z_]{2,20}$/.test(req.query.type) ? req.query.type : null;
+    const match = ['mismatch', 'matched'].includes(req.query.stripe) ? req.query.stripe : null;
+    const q = typeof req.query.q === 'string' && req.query.q.trim() ? `%${req.query.q.trim().toLowerCase().slice(0, 80)}%` : null;
     const { rows } = await query(
-      `select p.*, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id
+      `select p.*, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id left join hosts h on h.id = coalesce(p.host_id, o.host_id)
         where p.created_at >= $1 and p.created_at < $2 and ($3::text is null or p.kind = $3)
+          and ($4::text is null or p.stripe_match = $4)
+          and ($5::text is null or lower(coalesce(o.title, '') || ' ' || coalesce(h.name, '') || ' ' || coalesce(p.booking_id::text, '')) like $5)
         order by (p.stripe_match = 'mismatch') desc, p.created_at desc limit 1000`,
-      [from, to, type],
+      [from, to, type, match, q],
     );
     res.json({
       rows: rows.map((r) => ({ id: r.id, when: r.created_at, type: r.kind, event: r.title, bookingId: r.booking_id, ratePct: r.rate_pct == null ? null : Number(r.rate_pct), epicPence: r.epic_pence, toHostPence: r.host_pence, amountPence: r.amount_pence, reason: r.cause ?? r.reason, state: r.state, stripe: r.stripe_ref ? r.stripe_match : null })),
@@ -524,10 +542,13 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
   try {
     const { rows: payouts } = await query(
       `select p.*, h.name as host, o.title,
-              exists (select 1 from booking_sessions bs join experience_bookings b on b.id = bs.booking_id where bs.session_id = p.session_id and b.confirmed_happened = 'yes') as confirmed
-         from host_payouts p join hosts h on h.id = p.host_id left join host_offers o on o.id = p.offer_id
+              (select count(*) from booking_sessions bs join experience_bookings b on b.id = bs.booking_id where bs.session_id = p.session_id and b.confirmed_happened = 'yes')::int as confirmed_by,
+              ((coalesce(x.ends_on, x.on_date) + coalesce(x.ends_at, x.starts_at, time '23:59')) at time zone coalesce(o.time_zone, 'Europe/London')) as took_place,
+              (select min(k.created_at) from hosting_complaints k where k.session_id = p.session_id and k.state = 'open') as held_since
+         from host_payouts p join hosts h on h.id = p.host_id left join host_offers o on o.id = p.offer_id left join offer_sessions x on x.id = p.session_id
         where p.state in ('scheduled', 'held', 'failed') order by p.release_at limit 500`,
     );
+    const { rows: [paid] } = await query(`select count(*)::int as n, coalesce(sum(amount_pence + tips_pence), 0)::int as pence from host_payouts where state = 'paid' and updated_at > now() - interval '30 days'`);
     const { rows: refunds } = await query(`select cause, state, count(*)::int as n, coalesce(sum(amount_pence), 0)::int as pence from hosting_payments where kind = 'refund' and created_at > now() - interval '30 days' group by 1, 2 order by 1`);
     const { rows: stuck } = await query(
       `select p.id, p.amount_pence, p.cause, p.reason, p.created_at, o.title from hosting_payments p left join host_offers o on o.id = p.offer_id
@@ -538,9 +559,11 @@ router.get('/money/payouts', requires('view_hosting'), async (_req, res, next) =
          from experience_bookings b join host_offers o on o.id = b.offer_id join hosts h on h.id = b.host_id join households hh on hh.id = b.household_id
         where b.request_state = 'asked' and b.payment_state = 'held' order by b.respond_by`,
     );
-    const pay = (p) => ({ id: p.id, host: p.host, event: p.title, pence: p.amount_pence + p.tips_pence, releaseAt: p.release_at, state: p.state, holdReason: p.hold_reason });
+    const pay = (p) => ({ id: p.id, host: p.host, event: p.title, pence: p.amount_pence + p.tips_pence, releaseAt: p.release_at, tookPlace: p.took_place, confirmedBy: p.confirmed_by, state: p.state, holdReason: p.hold_reason, since: p.held_since ?? p.updated_at, releasedBy: p.released_by ?? null });
     res.json({
-      waitingForConfirmation: payouts.filter((p) => p.state === 'scheduled' && !p.confirmed).map(pay),
+      capped: payouts.length === 500,
+      paid30: { count: paid.n, pence: paid.pence },
+      waitingForConfirmation: payouts.filter((p) => p.state === 'scheduled' && !p.confirmed_by).map(pay),
       held: payouts.filter((p) => p.state === 'held').map(pay),
       failed: payouts.filter((p) => p.state === 'failed').map(pay),
       refundsByCause: refunds.map((r) => ({ cause: r.cause, state: r.state, count: r.n, pence: r.pence })),
@@ -564,6 +587,26 @@ router.post('/money/payouts/:id/retry', requireOwnerSignedIn('retry a payout'), 
   } catch (err) { next(err); }
 });
 
+/**
+ * Release a held payout now. Money moves, so it is the owner's, with a reason (G7/G11) — anyone else's press goes to
+ * Approvals. It overrides the time and a complaint's hold; a missing Stripe account or tax details still hold it,
+ * because no transfer can be made without them (hostingMoney.releasePayouts reads `released_by = 'owner'`).
+ */
+router.post('/money/payouts/:id/release', requireOwnerSignedIn('release a payout'), async (req, res, next) => {
+  try {
+    const why = typeof req.body?.why === 'string' ? req.body.why.trim().slice(0, 500) : '';
+    if (!why) throw refuse(400, 'why', 'Say why.');
+    const { rows: [p] } = await query(
+      // The old reason is cleared, so a hold that still applies (no tax details, no Stripe account) is written again by the loop.
+      `update host_payouts set state = 'scheduled', release_at = least(release_at, now()), released_by = 'owner', hold_reason = null, updated_at = now()
+        where id = $1 and state = 'held' returning id`, [req.params.id],
+    );
+    if (!p) throw refuse(404, 'not_found', 'That payout isn’t held.');
+    await logChange({ subjectKind: 'payout', subjectId: p.id, field: 'release', before: { state: 'held' }, after: { state: 'scheduled', releasedBy: 'owner' }, why, by: by(), byLabel: 'staff', approvalId: UUID.test(String(req.body?.approvalId ?? '')) ? req.body.approvalId : null });
+    res.json({ released: true });
+  } catch (err) { next(err); }
+});
+
 /** A refund Stripe refused, sent again with the same key once a person has looked (Codex, 2 Oct 2026). */
 router.post('/money/refunds/:id/retry', requires('manage_hosting'), async (req, res, next) => {
   try {
@@ -574,6 +617,15 @@ router.post('/money/refunds/:id/retry', requires('manage_hosting'), async (req, 
     res.json({ retried: true });
   } catch (err) { next(err); }
 });
+
+/** `{ avgBelow, minRated }` from the rating_escalation setting, or null when there is no average to measure against. */
+export function ratingThresholds(t) {
+  if (!t || typeof t !== 'object') return null;
+  const avgBelow = typeof t.avgBelowAtRisk === 'number' ? t.avgBelowAtRisk : typeof t.avgBelow === 'number' ? t.avgBelow : null;
+  if (avgBelow == null) return null;
+  const min = typeof t.minRated === 'number' ? t.minRated : typeof t.minReviews === 'number' ? t.minReviews : 1;
+  return { avgBelow, minRated: Math.max(1, min) };
+}
 
 // ---------------------------------------------------------------------------
 // Safety — BO8k
@@ -591,28 +643,30 @@ router.get('/safety', requires('view_hosting'), async (_req, res, next) => {
     );
     const t = s.rating_escalation;
     const ratings = [];
-    if (t && typeof t.avgBelow === 'number') {
+    const th = ratingThresholds(t);
+    if (th) {
       const { rows } = await query(
         `select h.id, h.name, round(avg(r.stars)::numeric, 2)::float as avg, count(*)::int as n
            from host_reviews r join hosts h on h.id = r.host_id where r.side = 'guest' and not coalesce(r.hidden, false)
-          group by h.id, h.name having avg(r.stars) < $1 and count(*) >= $2`, [t.avgBelow, t.minReviews ?? 1],
+          group by h.id, h.name having avg(r.stars) < $1 and count(*) >= $2`, [th.avgBelow, th.minRated],
       );
       ratings.push(...rows);
     }
     const { rows: complaints } = await query(
       `select k.*, h.name as host, o.title, hh.name as household from hosting_complaints k left join hosts h on h.id = k.host_id
          left join host_offers o on o.id = k.offer_id left join households hh on hh.id = k.household_id
-        where k.state = 'open' order by k.created_at`,
+        where k.state = 'open' or k.created_at > now() - interval '90 days' order by (k.state = 'open') desc, k.created_at`,
     );
     const { rows: incidents } = await query(
       `select i.*, h.name as host, o.title from session_incidents i left join hosts h on h.id = i.host_id left join host_offers o on o.id = i.offer_id order by i.created_at desc limit 200`,
     );
     res.json({
       checked: checked.map((h) => ({ hostId: h.id, host: h.name, state: h.checked_state, on: ymd(h.checked_on), insuranceExpires: ymd(h.insurance_expires), dropOffEvents: h.drop_off_events })),
-      ratings: t ? ratings.map((r) => ({ hostId: r.id, host: r.name, avg: r.avg, reviews: r.n })) : null,
-      ratingsReason: t ? null : 'Rating escalation thresholds are not set yet',
-      complaints: complaints.filter((k) => k.kind !== 'host_no_show').map((k) => ({ id: k.id, kind: k.kind, host: k.host, event: k.title, household: k.household, reason: k.reason, at: k.created_at, autoPayLimit: s.claim_auto_pay_limit ?? null })),
-      noShows: complaints.filter((k) => k.kind === 'host_no_show').map((k) => ({ id: k.id, host: k.host, event: k.title, household: k.household, at: k.created_at })),
+      ratings: th ? ratings.map((r) => ({ hostId: r.id, host: r.name, avg: r.avg, reviews: r.n })) : null,
+      ratingsReason: th ? null : t ? 'The rating thresholds are set without an average to measure against' : 'Rating escalation thresholds are not set yet',
+      complaints: complaints.filter((k) => k.kind !== 'host_no_show').map((k) => ({ id: k.id, kind: k.kind, host: k.host, event: k.title, household: k.household, booking: k.booking_id ? k.booking_id.slice(0, 8) : null, reason: k.reason, amountPence: k.amount_pence, state: k.state, at: k.created_at, autoPayLimit: s.claim_auto_pay_limit ?? null })),
+      noShows: complaints.filter((k) => k.kind === 'host_no_show').map((k) => ({ id: k.id, host: k.host, event: k.title, household: k.household, state: k.state, at: k.created_at })),
+      incidentsCapped: incidents.length === 200,
       incidents: incidents.map((i) => ({ id: i.id, host: i.host, event: i.title, children: i.children ?? [], reporter: i.reporter, body: i.body, at: i.created_at })),
     });
   } catch (err) { next(err); }
@@ -642,14 +696,20 @@ router.get('/health', requires('view_hosting'), async (_req, res, next) => {
               (select count(*) from host_offers where state = 'in_review' and lane is not null and $1::int is not null and submitted_at < now() - make_interval(hours => $1::int))::int as overdue,
               (select count(*) from host_payouts where state = 'paid' and updated_at > now() - interval '30 days')::int as paid30,
               (select count(*) from host_payouts where state = 'paid' and updated_at > now() - interval '30 days' and updated_at <= release_at + interval '1 day')::int as on_time30,
-              (select count(*) from hosting_payments where stripe_match = 'mismatch')::int as mismatches,
-              (select count(*) from hosting_complaints where state = 'open')::int as complaints`,
+              (select mismatched from stripe_reconciliations order by ran_at desc limit 1)::int as mismatches,
+              (select count(*) from hosting_complaints where state = 'open')::int as complaints,
+              (select count(*) from host_payouts where state in ('held', 'failed'))::int as payouts_waiting,
+              (select count(*) from hosting_payments where kind in ('refund', 'release') and state = 'failed')::int as refunds_waiting,
+              (select count(*) from session_incidents where created_at > now() - interval '7 days')::int as incidents7`,
       [windowH],
     );
     res.json({
       inReview: r.in_review, overdue: windowH == null ? null : r.overdue,
       payoutsOnTimePct: r.paid30 >= 5 ? Math.round((r.on_time30 / r.paid30) * 100) : null, payoutsOnTimeReason: r.paid30 >= 5 ? null : 'Fewer than five payouts in 30 days',
       stripeMismatches: r.mismatches, openComplaints: r.complaints,
+      payoutsWaiting: r.payouts_waiting, refundsWaiting: r.refunds_waiting,
+      // What waits on a person in each sub-tab: the lime count beside Review, Safety and Money (BO8 §2).
+      tabs: { review: r.in_review, safety: r.complaints + r.incidents7, money: r.payouts_waiting + r.refunds_waiting + (r.mismatches ?? 0) },
     });
   } catch (err) { next(err); }
 });

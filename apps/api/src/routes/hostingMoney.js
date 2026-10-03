@@ -18,6 +18,7 @@ import * as notifications from '../repositories/notifications.js';
 import { settingWords, SWITCHABLE, TO_SET } from '../domain/hostingSettings.js';
 import { requires, requireOwnerSignedIn } from '../access.js';
 import { currentAccount, runOutsideRequest } from '../context.js';
+import { query } from '../db.js';
 import { currentHousehold } from './household.js';
 import { moneyTick } from '../sources/hostingMoney.js';
 
@@ -42,7 +43,17 @@ export const settingPayload = (r) => ({
 
 adminRouter.get('/settings', requires('view_hosting'), async (_req, res, next) => {
   try {
-    res.json({ settings: (await settings.list()).map(settingPayload) });
+    // Changes filed for the owner and not yet decided: shown against their setting as "Waiting approval" (BO8l).
+    const { rows: pending } = await query(
+      `select id, request, payload, created_at from approvals
+        where state = 'pending' and request like 'PUT /api/admin/hosting/settings/%' order by created_at`,
+    );
+    const waiting = new Map();
+    for (const a of pending) {
+      const key = decodeURIComponent(a.request.slice('PUT /api/admin/hosting/settings/'.length).split('?')[0]);
+      waiting.set(key, { approvalId: a.id, value: a.payload?.value, isOn: a.payload?.isOn, why: a.payload?.why ?? null, at: a.created_at });
+    }
+    res.json({ settings: (await settings.list()).map((r) => ({ ...settingPayload(r), pending: waiting.get(r.key) ?? null })), waitingApproval: pending.length });
   } catch (err) { next(err); }
 });
 

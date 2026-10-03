@@ -219,6 +219,25 @@ test('a complaint, missing tax or an unfinished Stripe account holds a payout, a
   assert.equal((await held(d)).state, 'scheduled');
 });
 
+test('the owner releases a held payout over a complaint, never over missing tax details', async () => {
+  settings.forget();
+  const transfers = [];
+  const transfer = async (t) => { transfers.push(t); return { id: `tr_o${transfers.length}` }; };
+  const status = () => ({ ready: true, mode: 'test' });
+  const a = await aPaidSession({ endedHoursAgo: 2 });
+  await query(`insert into hosting_complaints (session_id, booking_id, host_id, reason) values ($1, $2, $3, 'Late start')`, [a.sessions[0].id, a.booking.id, a.host.id]);
+  const b = await aPaidSession({ endedHoursAgo: 100, tax: null });
+  await money.schedulePayouts();
+  await money.releasePayouts({ transfer, status });
+  const row = async (x) => (await query('select id, state, released_by from host_payouts where session_id = $1', [x.sessions[0].id])).rows[0];
+  assert.equal(transfers.filter((t) => [a, b].some((x) => x.host.id === t.hostId)).length, 0, 'not due, and a complaint is open');
+  // The owner's Release (hostingAdmin): scheduled now, released_by owner — before the 72 hours and over the complaint.
+  for (const x of [a, b]) await query(`update host_payouts set state = 'scheduled', release_at = now(), released_by = 'owner', hold_reason = null where id = $1`, [(await row(x)).id]);
+  await money.releasePayouts({ transfer, status });
+  assert.deepEqual([(await row(a)).state, (await row(a)).released_by], ['paid', 'owner']);
+  assert.equal((await row(b)).state, 'held', 'no tax details, no transfer, whoever says so');
+});
+
 test('a course booking pays per session, split evenly, refunds taken off in proportion', async () => {
   settings.forget();
   const { sessions, booking } = await aPaidSession({ endedHoursAgo: 100, sessionsInBooking: 3 });

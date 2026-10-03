@@ -81,8 +81,8 @@ export function SafetyTab({ canManage }: { canManage: boolean }) {
   // ---- Checked
   const checkedCols: Col<Checked>[] = [
     { key: 'host', label: 'Host', sort: 'host', grow: true, tip: tip('Host', 'Hosts with an event for under-18s that is live, approved or in review.'), cell: (r) => <Word>{r.host}</Word> },
-    { key: 'state', label: 'Checked', sort: 'state', width: 130, tip: tip('Checked', 'DBS and references. Missing or failed is red; submitted and not yet passed is amber.'),
-      cell: (r) => <Said colour={r.state === 'none' || r.state === 'failed' ? red() : r.state === 'submitted' ? amber() : undefined}>{CHECKED_WORDS[r.state] ?? r.state}</Said> },
+    { key: 'state', label: 'Checked', sort: 'state', width: 130, tip: tip('Checked', 'DBS and references. Missing or submitted and not yet passed is amber; failed is red.'),
+      cell: (r) => <Said colour={r.state === 'failed' ? red() : r.state === 'none' || r.state === 'submitted' ? amber() : undefined}>{CHECKED_WORDS[r.state] ?? r.state}</Said> },
     { key: 'on', label: 'Checked on', sort: 'on', width: 120, tip: tip('Checked on', 'When Checked was passed.'), cell: (r) => (r.on ? <Word>{when(r.on)}</Word> : <Blank />) },
     { key: 'insurance', label: 'Insurance ends', sort: 'insurance', width: 150, tip: tip('Insurance ends', 'Amber within 30 days; red once it has ended.'),
       cell: (r) => {

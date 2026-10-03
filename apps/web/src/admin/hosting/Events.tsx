@@ -27,17 +27,17 @@ import { tip, optionsOf, labelOf, useSortState, Said, SearchBox, Fact, Block, Ba
 
 type EventRow = {
   id: string; title: string; host: string; kind: string | null; lane: string; state: string; visibility: 'Public' | 'Private';
-  booked: number; min: number | null; max: number | null; decidesBy: string | null; next: string | null; priceMode: string | null;
+  booked: number; min: number | null; max: number | null; decidesBy: string | null; next: string | null; priceMode: string | null; waitingOn?: string[] | null;
 };
 type EventsPayload = { rows: EventRow[]; draftsByStep: Record<string, { step: string; n: number }[]>; capped: boolean };
 
 type Session = { id: string; n: number | null; date: string | null; time: string | null; booked: number; state: string; decided: 'on' | 'called_off' | null; decidesAt: string | null; confirmedBy: number; payout: string | null; late: boolean | null };
-type Refund = { household: string; heads: number | null; pence: number; cause: string | null; state: string; stripe: 'pending' | 'matched' | 'mismatch' | 'not_checked' | null; at: string };
+type Refund = { booking: string; bookingId: string; household: string; heads: number | null; pence: number; cause: string | null; state: string; stripe: 'pending' | 'matched' | 'mismatch' | 'not_checked' | null; at: string };
 type EventDetail = {
   event: {
     id: string; title: string; host: string | null; hostId: string; kind: string | null; state: string; visibility: string;
     min: number | null; max: number | null; priceMode: string | null; pricePence: number | null; totalPence: number | null;
-    refundPolicy: string | null; heldPence: number; bookings: number;
+    refundPolicy: string | null; heldPence: number; bookings: number; waitingOn?: string[] | null;
   };
   numbers: { priceNowEach: number; heldFromEach: number; dueBackPence: number } | null;
   hostIsPaid: { hours: number; earlyOnConfirm: boolean } | null;
@@ -50,7 +50,7 @@ type EventDetail = {
 // ---------------------------------------------------------------------------
 
 const STATUS = [
-  { key: 'all', label: 'All' }, { key: 'in_review', label: 'In review' }, { key: 'approved', label: 'Approved · waiting on Checked' },
+  { key: 'all', label: 'All' }, { key: 'in_review', label: 'In review' }, { key: 'approved', label: 'Approved · waiting' },
   { key: 'live', label: 'Live' }, { key: 'paused', label: 'Paused' }, { key: 'called_off', label: 'Called off' }, { key: 'ended', label: 'Ended' },
 ];
 const VISIBILITY = [{ key: 'all', label: 'All' }, { key: 'public', label: 'Public' }, { key: 'private', label: 'Private' }];
@@ -100,7 +100,7 @@ function EventList({ onOpen }: { onOpen: (id: string) => void }) {
       case 'title': return r.title;
       case 'host': return r.host;
       case 'kind': return r.kind ? KIND_WORDS[r.kind] ?? r.kind : null;
-      case 'state': return stateWord(r.state);
+      case 'state': return stateWord(r.state, r.waitingOn);
       case 'booked': return r.booked;
       case 'min': return r.min;
       case 'decides': return r.decidesBy;
@@ -116,15 +116,15 @@ function EventList({ onOpen }: { onOpen: (id: string) => void }) {
   const columns: Col<EventRow>[] = [
     { key: 'title', label: 'Event', sort: 'title', grow: true, tip: tip('Event', 'As titled by the host. Opens the event.'), cell: (r) => <Text style={[s.word, s.strong]} numberOfLines={1}>{r.title}</Text> },
     { key: 'host', label: 'Host', sort: 'host', width: 150, tip: tip('Host', 'Who runs it.'), cell: (r) => <Text style={s.word} numberOfLines={1}>{r.host}</Text> },
-    { key: 'kind', label: 'Kind', sort: 'kind', width: 96, tip: tip('Kind', 'One-off, weekly, course or on request. Private events have no kind.'),
+    { key: 'kind', label: 'Kind', sort: 'kind', width: 96, tip: tip('Kind', 'One-off, weekly, course or on request, public or private.'),
       cell: (r) => (r.kind ? <Word>{KIND_WORDS[r.kind] ?? r.kind}</Word> : <Blank />) },
-    { key: 'state', label: 'Status', sort: 'state', width: 210, tip: tip('Status', 'In review, approved and waiting on Checked, live, paused, called off or ended.'),
-      cell: (r) => <Said tone={stateTone(r.state)}>{stateWord(r.state)}</Said> },
+    { key: 'state', label: 'Status', sort: 'state', width: 270, tip: tip('Status', 'In review, approved and waiting on whatever is still missing, live, paused, called off or ended.'),
+      cell: (r) => <Said tone={stateTone(r.state)}>{stateWord(r.state, r.waitingOn)}</Said> },
     { key: 'booked', label: 'Booked', sort: 'booked', width: 86, align: 'right', tip: tip('Booked', 'Guests booked so far, of the maximum.'),
       cell: (r) => (r.booked ? <Text style={s.num}>{r.max ? `${r.booked} of ${r.max}` : String(r.booked)}</Text> : <Blank />) },
     { key: 'min', label: 'Min', sort: 'min', width: 50, align: 'right', tip: tip('Min', 'Below this by decides-by and it is called off.'),
       cell: (r) => <Said tone={r.min != null && r.booked < r.min && r.decidesBy ? 'attention' : 'plain'}>{r.min == null ? '—' : String(r.min)}</Said> },
-    { key: 'decides', label: 'Decides by', sort: 'decides', width: 90, align: 'right', tip: tip('Decides by', 'When we decide whether it goes ahead: the next session not yet decided.'),
+    { key: 'decides', label: 'Decides by', sort: 'decides', width: 120, align: 'right', tip: tip('Decides by', 'When we decide whether it goes ahead: the next session not yet decided.'),
       cell: (r) => (r.decidesBy ? <Text style={s.num}>{when(r.decidesBy)}</Text> : <Blank />) },
     { key: 'next', label: 'Next', sort: 'next', width: 70, align: 'right', tip: tip('Next', 'The next date it runs.'),
       cell: (r) => (r.next ? <Text style={s.num}>{when(r.next)}</Text> : <Blank />) },
@@ -136,7 +136,7 @@ function EventList({ onOpen }: { onOpen: (id: string) => void }) {
             stats={[
               { label: 'Live', value: data ? n(all.filter((r) => r.state === 'live').length) : '—', tip: tip('Live', 'Of the events listed, those bookable now.') },
               { label: 'In review', value: data ? n(all.filter((r) => r.state === 'in_review').length) : '—', tip: tip('In review', 'Of the events listed, those waiting for a person.') },
-              { label: 'Waiting on Checked', value: data ? n(all.filter((r) => r.state === 'approved').length) : '—', tip: tip('Waiting on Checked', 'Approved, and live only once the host’s Checked is done.') },
+              { label: 'Approved, waiting', value: data ? n(all.filter((r) => r.state === 'approved').length) : '—', tip: tip('Approved, waiting', 'Approved, and live by itself once what is still missing — Checked, Verified, Payouts — is done.') },
               { label: 'Called off', value: data ? n(all.filter((r) => r.state === 'called_off').length) : '—', tip: tip('Called off', 'Of the events listed, those called off.') },
               { label: 'Drafts', value: drafts == null ? '—' : String(drafts), tip: tip('Drafts', 'Started and not published. Counted only, never who.') },
             ]} />
@@ -153,7 +153,7 @@ function EventList({ onOpen }: { onOpen: (id: string) => void }) {
                   phoneRow={(r) => ({
                     name: r.title, note: r.host,
                     chips: [
-                      { key: 'state', word: stateWord(r.state), lead: true, tip: columns[3].tip },
+                      { key: 'state', word: stateWord(r.state, r.waitingOn), lead: true, tip: columns[3].tip },
                       ...(r.kind ? [{ key: 'kind', word: KIND_WORDS[r.kind] ?? r.kind, tip: columns[2].tip }] : []),
                       ...(r.booked ? [{ key: 'booked', word: r.max ? `${r.booked} of ${r.max}` : `${r.booked} booked`, tip: columns[4].tip }] : []),
                       ...(r.decidesBy ? [{ key: 'decides', word: `decides ${when(r.decidesBy)}`, tip: columns[6].tip }] : []),
@@ -208,7 +208,7 @@ function EventPage({ id, onBack }: { id: string; onBack: () => void }) {
   const [rsort, setRsort] = React.useState<string | null>(null);
   const [rdesc, setRdesc] = React.useState(false);
   const sessions = useSorted(data?.sessions, ssort, sdesc, (x, k) => (k === 'n' ? x.n : k === 'date' ? `${x.date ?? ''} ${x.time ?? ''}` : k === 'booked' ? x.booked : k === 'decided' ? x.decided : k === 'confirmed' ? x.confirmedBy : k === 'payout' ? x.payout : k === 'state' ? x.state : null));
-  const refunds = useSorted(data?.refunds, rsort, rdesc, (r, k) => (k === 'household' ? r.household : k === 'heads' ? r.heads : k === 'amount' ? r.pence : k === 'cause' ? r.cause : k === 'at' ? r.at : k === 'stripe' ? r.stripe : null));
+  const refunds = useSorted(data?.refunds, rsort, rdesc, (r, k) => (k === 'booking' ? r.booking : k === 'household' ? r.household : k === 'heads' ? r.heads : k === 'amount' ? r.pence : k === 'cause' ? r.cause : k === 'at' ? r.at : k === 'stripe' ? r.stripe : null));
 
   if (error) return <View style={{ gap: 14 }}><Back label="Events" onPress={onBack} /><Failed>{error}</Failed></View>;
   if (!data) return <View style={{ gap: 14 }}><Back label="Events" onPress={onBack} /><Waiting /></View>;
@@ -239,7 +239,7 @@ function EventPage({ id, onBack }: { id: string; onBack: () => void }) {
       { label: 'Min', value: e.min == null ? '—' : String(e.min), tip: tip('Min', focus && e.min != null && focus.booked >= e.min ? 'Reached, so it is going ahead.' : 'Below this by decides-by and it is called off.') },
       { label: 'Max', value: e.max == null ? '—' : String(e.max), tip: tip('Max', 'The cap.') },
       { label: 'Decides by', value: when(open?.decidesAt?.slice(0, 10)), tip: tip('Decides by', 'When the next session still to decide is decided.') },
-      { label: 'Status', value: stateWord(e.state), tip: tip('Status', 'In review, approved and waiting on Checked, live, paused, called off or ended.') },
+      { label: 'Status', value: stateWord(e.state, e.waitingOn), tip: tip('Status', 'In review, approved and waiting on whatever is still missing, live, paused, called off or ended.') },
     ];
 
   const sessionCols: Col<Session>[] = [
@@ -259,6 +259,7 @@ function EventPage({ id, onBack }: { id: string; onBack: () => void }) {
   ];
 
   const refundCols: Col<Refund>[] = [
+    { key: 'booking', label: 'Booking', sort: 'booking', width: 100, tip: tip('Booking', 'The booking’s reference: the first eight characters of its id, as in the ledger.'), cell: (r) => <Text style={s.word} numberOfLines={1}>{r.booking}</Text> },
     { key: 'household', label: 'Household', sort: 'household', grow: true, tip: tip('Household', 'Who booked.'), cell: (r) => <Text style={s.word} numberOfLines={1}>{r.household}</Text> },
     { key: 'heads', label: 'Guests', sort: 'heads', width: 70, align: 'right', tip: tip('Guests', 'People on the booking.'), cell: (r) => <Num n={r.heads} /> },
     { key: 'amount', label: 'Amount', sort: 'amount', width: 96, align: 'right', tip: tip('Amount', 'Refunded.'), cell: (r) => <Text style={s.num}>{gbp(r.pence)}</Text> },

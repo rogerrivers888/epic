@@ -2797,6 +2797,9 @@ export const api = {
   hostingAdmin: <T = any,>(path: string, q: Record<string, string | number | null | undefined> = {}) => request<T>(`/api/admin/hosting${path}${qs(Object.fromEntries(Object.entries(q).filter(([, v]) => v != null && v !== '')))}`),
   hostingAdminPost: <T = any,>(path: string, body: unknown = {}) => post<T>(`/api/admin/hosting${path}`, body),
   hostingAdminPut: <T = any,>(path: string, body: unknown = {}) => put<T>(`/api/admin/hosting${path}`, body),
+  /** File a request for the owner to approve (G11): the exact call, its fixed payload, and the plain-English brief. */
+  fileApproval: (body: { request: string; description: string; payload?: unknown; chat: string; why: string; change: string; affected: { count: number; unit: string }; costPence: number }) =>
+    post<{ approval: { id: string } }>('/api/admin/approvals', body),
   /** The DAC7 file: produced only by the owner, personally (the server refuses anyone else), and saved as a CSV. */
   hostingDac7: async (year: number): Promise<void> => {
     const token = sessionToken();

@@ -103,7 +103,8 @@ export function changePct(now, before) {
  */
 export function standingOf({ thresholds, avg, ratedEvents, lateChanges90d = 0, openComplaints = 0 }) {
   if (!thresholds || typeof thresholds !== 'object') return { words: null, reason: 'Standing thresholds are not set yet' };
-  const t = thresholds;
+  // One set of names, read the same way as Safety's (hostingAdmin.ratingThresholds); the older ones are still understood.
+  const t = { ...thresholds, avgBelowAtRisk: thresholds.avgBelowAtRisk ?? thresholds.avgBelow, minRated: thresholds.minRated ?? thresholds.minReviews };
   if (openComplaints && t.complaintsUnderReview != null && openComplaints >= t.complaintsUnderReview) return { words: 'Under review', level: 'review' };
   if (avg != null && ratedEvents >= (t.minRated ?? 0) && t.avgBelowAtRisk != null && avg < t.avgBelowAtRisk) return { words: 'At risk', level: 'risk' };
   if (t.lateChangesAtRisk != null && lateChanges90d >= t.lateChangesAtRisk) return { words: 'At risk', level: 'risk' };

@@ -58,8 +58,10 @@ const UNIT = {
   months: (v) => int(v, 1, 600),
   on_request: (v) => isObj(v) && int(v.noticeHours, 0, 8760) && int(v.perWeek, 1, 100) && Object.keys(v).length === 2,
   switch: (v) => typeof v === 'boolean',
-  thresholds: (v) => isObj(v) && Object.keys(v).length > 0 && Object.keys(v).length <= 12
-    && Object.values(v).every((x) => typeof x === 'number' && Number.isFinite(x)),
+  // The names Safety and Standing both read (hostingAdmin.ratingThresholds, hostDesk.standingOf); an average is required.
+  thresholds: (v) => isObj(v) && typeof v.avgBelowAtRisk === 'number' && v.avgBelowAtRisk >= 0 && v.avgBelowAtRisk <= 5
+    && Object.keys(v).every((k) => ['avgBelowAtRisk', 'minRated', 'lateChangesAtRisk', 'complaintsUnderReview'].includes(k))
+    && Object.values(v).every((x) => typeof x === 'number' && Number.isFinite(x) && x >= 0),
 };
 
 /**
@@ -111,7 +113,7 @@ export function settingWords(row) {
   switch (row.unit) {
     case 'pence': return money(v);
     case 'percent': return `${v}%`;
-    case 'ladder': return v.map((s, i) => (i === 0 ? `${s.pct}% start` : `${s.pct}% after ${s.ratedEvents} rated averaging ${s.avgAtLeast}+`)).join(' · ');
+    case 'ladder': return v.map((s, i) => (i === 0 ? `${s.pct}% start` : `${s.pct}% at ${s.ratedEvents} rated, ${s.avgAtLeast}+`)).join(' · ');
     case 'intro': return `${v.days} days or ${v.bookings} bookings`;
     case 'tip': return `${v.pct}%, minimum ${money(v.minPence)}`;
     case 'refunds': {

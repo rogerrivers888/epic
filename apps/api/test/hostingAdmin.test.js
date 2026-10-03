@@ -163,3 +163,55 @@ test('hosts, events, money, safety and reports answer, and a judgement with noth
     assert.match(csv.body, /^Host,Tax reference/);
   } finally { await srv.close(); await owner.close(); }
 });
+
+test('approve is never blocked: anything missing is what it waits on, and it goes live once that is done', async () => {
+  const { o, h } = await inReview({ adults: true });
+  await query(`update hosts set identity_state = 'none' where id = $1`, [h.id]);
+  const srv = await server(STAFF);
+  try {
+    const r = await srv.send('POST', `/api/admin/hosting/review/${o.id}/approve`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.outcome, 'approved');
+    assert.deepEqual(r.body.waitingOn, ['Verified']);
+    const ev = (await srv.get('/api/admin/hosting/events?status=approved')).body.rows.find((x) => x.id === o.id);
+    assert.deepEqual(ev.waitingOn, ['Verified']);
+    assert.equal(ev.kind, 'oneoff');
+    await query(`update hosts set identity_state = 'verified' where id = $1`, [h.id]);
+    assert.ok(await admin.releaseApproved() >= 1);
+    assert.equal((await query('select state from host_offers where id = $1', [o.id])).rows[0].state, 'live');
+  } finally { await srv.close(); }
+});
+
+test('a held payout: released by the owner only, over a complaint; staff are told to file it', async () => {
+  const { h, o } = await inReview({ adults: true });
+  const { rows: [p] } = await query(`insert into host_payouts (host_id, offer_id, amount_pence, release_at, state, hold_reason) values ($1, $2, 1600, now() - interval '1 day', 'held', 'complaint') returning id`, [h.id, o.id]);
+  const staff = await server(STAFF);
+  const owner = await server(OWNER);
+  try {
+    assert.equal((await staff.send('POST', `/api/admin/hosting/money/payouts/${p.id}/release`, { why: 'Sorted with the guest' })).body.error, 'needs_personal_sign_in');
+    assert.equal((await owner.send('POST', `/api/admin/hosting/money/payouts/${p.id}/release`, {})).status, 400, 'a reason');
+    assert.equal((await owner.send('POST', `/api/admin/hosting/money/payouts/${p.id}/release`, { why: 'Sorted with the guest' })).body.released, true);
+    const { rows: [row] } = await query('select state, released_by from host_payouts where id = $1', [p.id]);
+    assert.deepEqual([row.state, row.released_by], ['scheduled', 'owner']);
+    assert.equal((await owner.send('POST', `/api/admin/hosting/money/payouts/${p.id}/release`, { why: 'again' })).status, 404, 'only a held one');
+    assert.equal((await staff.get('/api/admin/hosting/hosts/not-a-uuid/videos')).status, 404, 'a bad id is a 404, not a cast error');
+  } finally { await staff.close(); await owner.close(); }
+});
+
+test('rating thresholds: one set of names for Safety and Standing, older names still read, nothing set is can’t-speak', async () => {
+  assert.equal(admin.ratingThresholds(null), null);
+  assert.equal(admin.ratingThresholds({ minRated: 3 }), null, 'no average, nothing to measure');
+  assert.deepEqual(admin.ratingThresholds({ avgBelowAtRisk: 4, minRated: 3 }), { avgBelow: 4, minRated: 3 });
+  assert.deepEqual(admin.ratingThresholds({ avgBelow: 4.2, minReviews: 2 }), { avgBelow: 4.2, minRated: 2 });
+  const { checkSetting } = await import('../src/domain/hostingSettings.js');
+  const row = { key: 'rating_escalation', unit: 'thresholds' };
+  assert.equal(checkSetting(row, { value: { avgBelowAtRisk: 4, minRated: 5 } }).ok, true);
+  assert.equal(checkSetting(row, { value: { avgBelow: 4 } }).ok, false, 'only the names both screens read');
+  assert.equal(checkSetting(row, { value: { avgBelowAtRisk: 9 } }).ok, false);
+  const srv = await server(STAFF);
+  try {
+    const health = (await srv.get('/api/admin/hosting/health')).body;
+    assert.equal(typeof health.tabs.review, 'number');
+    assert.equal(typeof health.tabs.money, 'number');
+  } finally { await srv.close(); }
+});

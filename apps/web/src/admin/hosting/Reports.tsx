@@ -246,8 +246,17 @@ function Dac7View() {
       await api.hostingDac7(Number(year));
       setSaid({ text: `epic-dac7-${year}.csv`, refused: false });
     } catch (e) {
-      // A 403 needs_personal_sign_in carries the server's own words: it goes to Approvals.
-      setSaid({ text: e instanceof ApiError ? e.message : 'That didn’t produce the file.', refused: true });
+      if (e instanceof ApiError && e.code === 'needs_personal_sign_in') {
+        // Anyone but the owner, personally: filed to Approvals, where producing it is the owner’s press and is logged.
+        try {
+          await api.fileApproval({
+            request: 'POST /api/admin/hosting/reports/dac7', description: `Produce the DAC7 file for ${year}`, payload: { year: Number(year) },
+            chat: 'Back office · Hosting', why: `The DAC7 return for ${year}.`, change: `A CSV of every host’s consideration, fees and tips for ${year}, with full tax details, is produced and logged.`,
+            affected: { count: data?.rows.length ?? 0, unit: 'hosts' }, costPence: 0,
+          });
+          setSaid({ text: 'Sent to Approvals', refused: false });
+        } catch (f) { setSaid({ text: f instanceof ApiError ? f.message : 'That didn’t file.', refused: true }); }
+      } else setSaid({ text: e instanceof ApiError ? e.message : 'That didn’t produce the file.', refused: true });
     } finally { setBusy(false); }
   };
 
@@ -282,8 +291,8 @@ function Dac7View() {
           <Dropdown label="YEAR" value={year} width={140} options={years.map((y) => ({ key: y, label: y, on: y === year }))} onPick={setYear} />
         </FilterRow>
         <View style={{ flex: 1 }} />
-        <Explain tip={tip('Produce DAC7 file', 'Needs the owner signed in personally; anyone else is told to file it for approval. The file holds tax numbers and addresses in full, and producing it is logged in Changes.')}>
-          <Act label={busy ? 'Producing…' : 'Produce DAC7 file'} icon="locked" onPress={produce} disabled={busy || !data} />
+        <Explain tip={tip('Produce CSV for HMRC', 'Needs the owner signed in personally; anyone else’s press goes to Approvals. The file holds tax numbers and addresses in full, and producing it is logged in Changes.')}>
+          <Act label={busy ? 'Producing…' : 'Produce CSV for HMRC'} icon="locked" onPress={produce} disabled={busy || !data} />
         </Explain>
       </View>
       {said ? <Text style={[type.small, { color: said.refused ? red() : colors.inkMuted }]}>{said.text}</Text> : null}

@@ -8,9 +8,10 @@
 
 import React from 'react';
 import { View } from 'react-native';
-import { useQueryState, asOneOf } from '../../router';
+import { api } from '../../api';
+import { useQueryState, asOneOf, useRouter } from '../../router';
 import { Hosting as OlderOffers } from '../screens/Hosting';
-import { HostingTabs } from './kit';
+import { HostingTabs, useLoad } from './kit';
 import { ReviewTab } from './Review';
 import { HostsTab } from './Hosts';
 import { EventsTab } from './Events';
@@ -24,10 +25,20 @@ export const HOSTING_TABS = ['review', 'hosts', 'events', 'money', 'safety', 'se
 export type HostingTabKey = typeof HOSTING_TABS[number];
 
 export function HostingTab({ canManage }: { canManage: boolean }) {
-  const [tab, setTab] = useQueryState<HostingTabKey>('tab', 'review', asOneOf(HOSTING_TABS, 'review'));
+  const [tab] = useQueryState<HostingTabKey>('tab', 'review', asOneOf(HOSTING_TABS, 'review'));
+  const { query, setQuery } = useRouter();
+  // What waits on a person behind each sub-tab, as a lime count (handoff §2). A failed read draws no count, never a nought.
+  const { data: health } = useLoad(() => api.hostingAdmin<{ tabs?: Partial<Record<HostingTabKey, number>> }>('/health'), [tab]);
+  // A sub-tab is a fresh page: whatever the last one had open — an event, a host, a sort, a filter — is not carried across,
+  // because Review and Events both read ?event= and would otherwise open each other's detail.
+  const pick = (t: HostingTabKey) => {
+    const patch: Record<string, string | null> = {};
+    query.forEach((_v, k) => { patch[k] = null; });
+    setQuery({ ...patch, tab: t === 'review' ? null : t }, { replace: false });
+  };
   return (
     <View style={{ gap: 0 }}>
-      <HostingTabs value={tab} onPick={(t) => setTab(t, { replace: false })} />
+      <HostingTabs value={tab} onPick={pick} counts={health?.tabs ?? null} />
       {tab === 'review' ? <ReviewTab canManage={canManage} /> : null}
       {tab === 'hosts' ? <HostsTab canManage={canManage} /> : null}
       {tab === 'events' ? <EventsTab /> : null}
